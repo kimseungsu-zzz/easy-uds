@@ -1,0 +1,25 @@
+# CMake
+build/
+*.exe
+*.pdb
+CMakeCache.txt
+CMakeLists.gn
+CMakePresets.json
+
+# IDE
+*.suo
+*.user
+*.vcxproj.
+
+# Compiled files
+*.o
+*.obj
+
+# Logs
+*.log
+
+# Test output
+tests/output/
+
+# Windows socket
+/tmp/*

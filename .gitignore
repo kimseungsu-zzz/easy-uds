@@ -1,25 +1,31 @@
-# CMake
+# CMake build trees and generated files
 build/
-*.exe
-*.pdb
+build-*/
+cmake-build-*/
 CMakeCache.txt
-CMakeLists.gn
-CMakePresets.json
+CMakeFiles/
+CTestTestfile.cmake
+Testing/
+cmake_install.cmake
+install_manifest.txt
+compile_commands.json
 
-# IDE
-*.suo
-*.user
-*.vcxproj.
-
-# Compiled files
+# Compiled artifacts
+*.a
+*.so
+*.dylib
+*.dll
+*.exe
 *.o
 *.obj
+*.pdb
 
-# Logs
+# IDE / editor metadata
+.vscode/
+.idea/
+*.suo
+*.user
+
+# Logs and test output
 *.log
-
-# Test output
 tests/output/
-
-# Windows socket
-/tmp/*

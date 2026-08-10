@@ -739,7 +739,7 @@ struct HandlerEntry {
 };
 
 struct PendingSerializedRequest {
-    int fd = -1;
+    FileDescriptor fd;
     Deadline deadline = Deadline::max();
     Request request;
     Server::Handler handler;
@@ -776,7 +776,13 @@ struct ServerState {
     std::mutex serialized_mutex;
     std::condition_variable serialized_cv;
     std::deque<PendingSerializedRequest> pending_serialized_requests;
-    bool serialized_stopping = false;
+    std::atomic<bool> serialized_stopping{false};
+
+    // Serialized executor thread. Lazily started on the first enqueued
+    // serialized request and drained by run()/join_serialized_worker(), so a
+    // server that never handles a serialized route spawns no unused thread.
+    std::mutex serialized_thread_mutex;
+    std::thread serialized_thread;
 
     std::mutex socket_path_mutex;
     dev_t socket_device{};
@@ -876,22 +882,35 @@ enum class ClientDisposition {
     serialized_handoff,
 };
 
-bool enqueue_serialized_request(const std::shared_ptr<detail::ServerState>& state, int fd, Deadline deadline,
-                                Request request, Server::Handler handler) {
-    {
-        std::lock_guard<std::mutex> lock(state->serialized_mutex);
-        if (state->serialized_stopping || !state->running.load()) {
-            return false;
-        }
-        state->pending_serialized_requests.push_back(
-            {fd, deadline, std::move(request), std::move(handler)});
+bool ensure_serialized_worker(const std::shared_ptr<detail::ServerState>& state);
+
+bool enqueue_serialized_request(const std::shared_ptr<detail::ServerState>& state, FileDescriptor client,
+                                Deadline deadline, Request request, Server::Handler handler) {
+    // Lazily start the serialized executor. Conditional on running so a stopped
+    // server never spawns a thread; the serialized_mutex re-check below still
+    // wins if stop() lands between the two steps.
+    if (!ensure_serialized_worker(state)) {
+        // `client`'s destructor closes the connection here, before the queue
+        // ever observes the descriptor.
+        return false;
     }
+    std::unique_lock<std::mutex> lock(state->serialized_mutex);
+    if (state->serialized_stopping.load() || !state->running.load()) {
+        return false;
+    }
+    // Ownership of the connection moves into the queue while holding
+    // serialized_mutex, the same lock stop() uses to drain queued descriptors.
+    // A handed-off fd therefore always has exactly one owner at a time.
+    state->pending_serialized_requests.push_back(
+        {std::move(client), deadline, std::move(request), std::move(handler)});
+    lock.unlock();
     state->serialized_cv.notify_one();
     return true;
 }
 
-ClientDisposition handle_client(const std::shared_ptr<detail::ServerState>& state, int fd,
+ClientDisposition handle_client(const std::shared_ptr<detail::ServerState>& state, FileDescriptor& client,
                                 Deadline deadline) noexcept {
+    const int fd = client.get();
     try {
         const auto initial = read_header(fd, state->options.io_timeout, deadline);
         if (initial.type == WireType::request) {
@@ -907,7 +926,7 @@ ClientDisposition handle_client(const std::shared_ptr<detail::ServerState>& stat
             }
 
             if (serialized) {
-                if (enqueue_serialized_request(state, fd, deadline, request, std::move(handler))) {
+                if (enqueue_serialized_request(state, std::move(client), deadline, request, std::move(handler))) {
                     return ClientDisposition::serialized_handoff;
                 }
                 return ClientDisposition::complete;
@@ -998,7 +1017,7 @@ void serialized_worker_loop(const std::shared_ptr<detail::ServerState>& state) n
             state->pending_serialized_requests.pop_front();
         }
 
-        FileDescriptor client(job.fd);
+        const int fd = job.fd.get();
         try {
             // A robot command that has already exceeded its server-side
             // absolute request deadline must never execute later just because
@@ -1011,12 +1030,12 @@ void serialized_worker_loop(const std::shared_ptr<detail::ServerState>& state) n
             const Response response =
                 invoke_request_handler(job.handler, job.request, state->options.max_message_size);
             try {
-                write_response(client.get(), response, state->options.max_message_size,
+                write_response(fd, response, state->options.max_message_size,
                                state->options.io_timeout, job.deadline);
             } catch (const std::invalid_argument&) {
-                write_internal_server_error(client.get(), state, job.deadline);
+                write_internal_server_error(fd, state, job.deadline);
             } catch (const std::length_error&) {
-                write_internal_server_error(client.get(), state, job.deadline);
+                write_internal_server_error(fd, state, job.deadline);
             }
         } catch (...) {
             // Expired, disconnected, or shutdown queued requests are dropped.
@@ -1025,11 +1044,42 @@ void serialized_worker_loop(const std::shared_ptr<detail::ServerState>& state) n
 
         // Keep the descriptor in active_fds for the entire handoff so the
         // global max_connections accounting and stop() shutdown remain valid.
-        // Erase it before close() to avoid descriptor-number reuse races.
+        // Erase it before the job's FileDescriptor closes it (at scope exit)
+        // to avoid descriptor-number reuse races.
         {
             std::lock_guard<std::mutex> lock(state->work_mutex);
-            state->active_fds.erase(job.fd);
+            state->active_fds.erase(fd);
         }
+    }
+}
+
+// Starts the serialized executor thread on first use. Returns false when the
+// server is no longer running, in which case the caller must drop the
+// connection without queueing it. The serialized_worker_loop is defined above,
+// so this creates the thread with a complete function type.
+bool ensure_serialized_worker(const std::shared_ptr<detail::ServerState>& state) {
+    std::lock_guard<std::mutex> lock(state->serialized_thread_mutex);
+    if (state->serialized_thread.joinable()) {
+        return true;
+    }
+    if (!state->running.load() || state->serialized_stopping.load()) {
+        return false;
+    }
+    state->serialized_thread = std::thread(serialized_worker_loop, state);
+    return true;
+}
+
+// Moves the lazily-created serialized executor out of ServerState and joins it.
+// Called by run() only after stop_state() and after every regular worker has
+// been joined, so no worker can still be creating the thread at this point.
+void join_serialized_worker(const std::shared_ptr<detail::ServerState>& state) noexcept {
+    std::thread worker;
+    {
+        std::lock_guard<std::mutex> lock(state->serialized_thread_mutex);
+        worker = std::move(state->serialized_thread);
+    }
+    if (worker.joinable()) {
+        worker.join();
     }
 }
 
@@ -1054,10 +1104,11 @@ void worker_loop(const std::shared_ptr<detail::ServerState>& state) noexcept {
         }
 
         FileDescriptor client(connection.fd);
-        const ClientDisposition disposition = handle_client(state, client.get(), connection.deadline);
+        const ClientDisposition disposition = handle_client(state, client, connection.deadline);
 
         if (disposition == ClientDisposition::serialized_handoff) {
-            (void)client.release();
+            // Ownership was moved into the serialized queue under
+            // serialized_mutex; `client` is now empty and has nothing to close.
             continue;
         }
 
@@ -1096,28 +1147,30 @@ void signal_workers_to_stop(const std::shared_ptr<detail::ServerState>& state) n
 }
 
 void signal_serialized_worker_to_stop(const std::shared_ptr<detail::ServerState>& state) noexcept {
-    std::vector<int> queued;
+    std::vector<detail::PendingSerializedRequest> queued;
     {
         std::lock_guard<std::mutex> lock(state->serialized_mutex);
         state->serialized_stopping = true;
         queued.reserve(state->pending_serialized_requests.size());
-        for (const auto& request : state->pending_serialized_requests) {
-            queued.push_back(request.fd);
+        for (auto& request : state->pending_serialized_requests) {
+            queued.push_back(std::move(request));
         }
         state->pending_serialized_requests.clear();
     }
 
     if (!queued.empty()) {
         std::lock_guard<std::mutex> lock(state->work_mutex);
-        for (const int fd : queued) {
-            state->active_fds.erase(fd);
+        for (const auto& request : queued) {
+            state->active_fds.erase(request.fd.get());
         }
     }
 
-    for (const int fd : queued) {
-        (void)::shutdown(fd, SHUT_RDWR);
-        (void)::close(fd);
+    for (const auto& request : queued) {
+        (void)::shutdown(request.fd.get(), SHUT_RDWR);
     }
+    // `queued`'s FileDescriptors close the connections at scope exit. A fd is
+    // only ever closed by the owner that holds it under serialized_mutex, so
+    // stop() can never close an fd that a handing-off worker still wraps.
     state->serialized_cv.notify_all();
 }
 
@@ -1350,10 +1403,8 @@ void Server::run() {
 
     std::vector<std::thread> workers;
     workers.reserve(state->options.worker_threads);
-    std::thread serialized_worker;
 
     try {
-        serialized_worker = std::thread(serialized_worker_loop, state);
         for (std::size_t index = 0; index < state->options.worker_threads; ++index) {
             workers.emplace_back(worker_loop, state);
         }
@@ -1364,9 +1415,7 @@ void Server::run() {
                 worker.join();
             }
         }
-        if (serialized_worker.joinable()) {
-            serialized_worker.join();
-        }
+        join_serialized_worker(state);
         throw;
     }
 
@@ -1482,9 +1531,7 @@ void Server::run() {
             worker.join();
         }
     }
-    if (serialized_worker.joinable()) {
-        serialized_worker.join();
-    }
+    join_serialized_worker(state);
 
     if (accept_error) {
         std::rethrow_exception(accept_error);

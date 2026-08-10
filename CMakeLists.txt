@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.20)
 
-project(easy_uds VERSION 0.4.1 LANGUAGES CXX)
+project(easy_uds VERSION 0.4.2 LANGUAGES CXX)
 
 if(NOT UNIX)
     message(FATAL_ERROR "easy-uds currently requires POSIX Unix-domain socket APIs")

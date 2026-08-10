@@ -2,12 +2,14 @@
 
 All notable changes to this project are documented here.
 
-## Unreleased
+## 0.4.2
 
 - Added `Server::on_serialized()` for exclusive RPC handlers that must not execute concurrently. All serialized routes share one FIFO executor, making the API suitable for robot drivers and other single-owner hardware resources accessed by multiple processes.
 - Serialized requests are handed off from the regular worker pool to a dedicated executor, so commands waiting behind a long-running hardware operation do not consume normal RPC workers; regular `on()` routes such as status/health checks remain available.
 - Server `request_timeout` now also bounds serialized-queue waiting time. A serialized request whose absolute deadline expires before execution is discarded without invoking its handler, preventing stale robot commands from running later.
 - `Server::stop()` discards serialized requests that are still queued. A serialized handler that has already started follows the existing handler rule and cannot be forcibly cancelled by portable C++.
+- Fixed a concurrent-shutdown descriptor race in the serialized handoff: the queue now owns each queued connection descriptor, and the handing-off worker transfers ownership while holding the serialized-queue lock. `stop()` can no longer close a descriptor that a handing-off worker still wraps, which previously could close or write to an unrelated reused descriptor.
+- The serialized executor thread is now created lazily on the first serialized request instead of unconditionally at `run()`. Servers that never handle a serialized route run exactly `worker_threads` threads rather than `worker_threads + 1`; the FIFO executor still starts before the first serialized request arrives, including serialized routes registered after `run()` begins.
 - Added regression tests for cross-route serialization, FIFO waiting, regular-RPC availability during queued hardware commands, queue-deadline expiry, and shutdown cleanup.
 - No wire-protocol changes were required; existing clients use the same regular request/response frames.
 

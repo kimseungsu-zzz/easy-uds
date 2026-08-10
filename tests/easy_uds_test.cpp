@@ -9,6 +9,7 @@
 #include <exception>
 #include <fstream>
 #include <iostream>
+#include <mutex>
 #include <stdexcept>
 #include <string>
 #include <system_error>
@@ -875,6 +876,305 @@ void test_stream_limit_preserves_rpc_worker() {
            "regular RPCs should keep making progress while three streams occupy workers");
 }
 
+void test_serialized_handlers_queue_without_blocking_regular_rpc() {
+    using namespace easy_uds;
+
+    const std::string path = socket_path("serialized-rpc");
+    ServerOptions server_options;
+    server_options.worker_threads = 4;
+    server_options.max_connections = 16;
+    server_options.io_timeout = 2s;
+    server_options.request_timeout = 3s;
+    server_options.stale_socket_grace_period = 0ms;
+
+    std::atomic<int> active_serialized{0};
+    std::atomic<int> max_active_serialized{0};
+    std::atomic<bool> first_entered{false};
+    std::atomic<bool> release_first{false};
+    std::atomic<bool> second_done{false};
+    std::mutex order_mutex;
+    std::vector<std::string> execution_order;
+
+    auto exclusive_robot_command = [&](const Request& request) {
+        const int active = active_serialized.fetch_add(1, std::memory_order_acq_rel) + 1;
+        int observed = max_active_serialized.load(std::memory_order_relaxed);
+        while (observed < active &&
+               !max_active_serialized.compare_exchange_weak(observed, active, std::memory_order_relaxed)) {
+        }
+
+        {
+            std::lock_guard<std::mutex> lock(order_mutex);
+            execution_order.push_back(request.body);
+        }
+
+        if (request.body == "first") {
+            first_entered.store(true, std::memory_order_release);
+            while (!release_first.load(std::memory_order_acquire)) {
+                std::this_thread::yield();
+            }
+        }
+
+        active_serialized.fetch_sub(1, std::memory_order_acq_rel);
+        return Response{200, request.body};
+    };
+
+    Server server(path, server_options);
+    server.on_serialized("drive", exclusive_robot_command);
+    server.on_serialized("arm", exclusive_robot_command);
+    server.on("status", [](const Request&) { return Response{200, "ready"}; });
+
+    expect_throws<std::runtime_error>(
+        [&] { server.on("drive", [](const Request&) { return Response{}; }); },
+        "regular and serialized RPC routes should share the duplicate-route namespace");
+    expect_throws<std::runtime_error>([&] { server.on_serialized("arm", exclusive_robot_command); },
+                                      "duplicate serialized route should be rejected");
+    expect_throws<std::invalid_argument>([&] { server.on_serialized("", exclusive_robot_command); },
+                                         "empty serialized route should be rejected");
+
+    std::exception_ptr server_error;
+    std::thread server_thread([&] {
+        try {
+            server.run();
+        } catch (...) {
+            server_error = std::current_exception();
+        }
+    });
+    wait_until_running(server);
+
+    ClientOptions client_options;
+    client_options.connect_timeout = 500ms;
+    client_options.io_timeout = 2s;
+    client_options.request_timeout = 3s;
+    Client client(path, client_options);
+
+    Response first_response;
+    Response second_response;
+    std::exception_ptr first_error;
+    std::exception_ptr second_error;
+
+    std::thread first([&] {
+        try {
+            first_response = client.request("drive", "first");
+        } catch (...) {
+            first_error = std::current_exception();
+        }
+    });
+
+    const auto first_deadline = std::chrono::steady_clock::now() + 1s;
+    while (!first_entered.load(std::memory_order_acquire)) {
+        if (std::chrono::steady_clock::now() >= first_deadline) {
+            release_first.store(true, std::memory_order_release);
+            first.join();
+            server.stop();
+            server_thread.join();
+            cleanup_socket_artifacts(path);
+            throw std::runtime_error("test failed: first serialized handler did not start");
+        }
+        std::this_thread::yield();
+    }
+
+    std::thread second([&] {
+        try {
+            second_response = client.request("arm", "second");
+            second_done.store(true, std::memory_order_release);
+        } catch (...) {
+            second_error = std::current_exception();
+            second_done.store(true, std::memory_order_release);
+        }
+    });
+
+    std::this_thread::sleep_for(50ms);
+    expect(!second_done.load(std::memory_order_acquire),
+           "second serialized command should wait while the first command is executing");
+
+    const auto status_started = std::chrono::steady_clock::now();
+    const Response status = client.request("status");
+    const auto status_elapsed = std::chrono::steady_clock::now() - status_started;
+    expect(status.status_code == 200 && status.body == "ready",
+           "regular RPC should remain available while a serialized command is blocked");
+    expect(status_elapsed < 500ms, "regular RPC should not wait behind the serialized command queue");
+
+    release_first.store(true, std::memory_order_release);
+    first.join();
+    second.join();
+
+    server.stop();
+    server_thread.join();
+    cleanup_socket_artifacts(path);
+
+    if (first_error) {
+        std::rethrow_exception(first_error);
+    }
+    if (second_error) {
+        std::rethrow_exception(second_error);
+    }
+    if (server_error) {
+        std::rethrow_exception(server_error);
+    }
+
+    expect(first_response.status_code == 200 && first_response.body == "first",
+           "first serialized response should complete normally");
+    expect(second_response.status_code == 200 && second_response.body == "second",
+           "second serialized response should complete after waiting");
+    expect(max_active_serialized.load(std::memory_order_relaxed) == 1,
+           "serialized routes must never execute concurrently");
+    expect(execution_order.size() == 2 && execution_order[0] == "first" && execution_order[1] == "second",
+           "serialized routes should execute in FIFO handoff order");
+}
+
+void test_serialized_queue_skips_expired_commands() {
+    using namespace easy_uds;
+
+    const std::string path = socket_path("serialized-timeout");
+    ServerOptions server_options;
+    server_options.worker_threads = 3;
+    server_options.max_connections = 8;
+    server_options.io_timeout = 1s;
+    server_options.request_timeout = 150ms;
+    server_options.stale_socket_grace_period = 0ms;
+
+    std::atomic<bool> first_entered{false};
+    std::atomic<bool> release_first{false};
+    std::atomic<bool> stale_second_executed{false};
+
+    Server server(path, server_options);
+    server.on_serialized("move", [&](const Request& request) {
+        if (request.body == "first") {
+            first_entered.store(true, std::memory_order_release);
+            while (!release_first.load(std::memory_order_acquire)) {
+                std::this_thread::yield();
+            }
+        } else if (request.body == "second") {
+            stale_second_executed.store(true, std::memory_order_release);
+        }
+        return Response{200, request.body};
+    });
+
+    std::thread server_thread([&] { server.run(); });
+    wait_until_running(server);
+
+    ClientOptions client_options;
+    client_options.connect_timeout = 500ms;
+    client_options.io_timeout = 1s;
+    client_options.request_timeout = 1s;
+    Client client(path, client_options);
+
+    std::thread first([&] {
+        try {
+            (void)client.request("move", "first");
+        } catch (...) {
+        }
+    });
+
+    const auto first_deadline = std::chrono::steady_clock::now() + 1s;
+    while (!first_entered.load(std::memory_order_acquire)) {
+        if (std::chrono::steady_clock::now() >= first_deadline) {
+            release_first.store(true, std::memory_order_release);
+            first.join();
+            server.stop();
+            server_thread.join();
+            cleanup_socket_artifacts(path);
+            throw std::runtime_error("test failed: timeout test first serialized handler did not start");
+        }
+        std::this_thread::yield();
+    }
+
+    std::thread second([&] {
+        try {
+            (void)client.request("move", "second");
+        } catch (...) {
+        }
+    });
+
+    std::this_thread::sleep_for(250ms);
+    release_first.store(true, std::memory_order_release);
+    first.join();
+    second.join();
+
+    server.stop();
+    server_thread.join();
+    cleanup_socket_artifacts(path);
+
+    expect(!stale_second_executed.load(std::memory_order_acquire),
+           "serialized command that expires in the queue must never execute later");
+}
+
+void test_stop_discards_queued_serialized_commands() {
+    using namespace easy_uds;
+
+    const std::string path = socket_path("serialized-stop");
+    ServerOptions server_options;
+    server_options.worker_threads = 3;
+    server_options.max_connections = 8;
+    server_options.io_timeout = 2s;
+    server_options.request_timeout = 5s;
+    server_options.stale_socket_grace_period = 0ms;
+
+    std::atomic<bool> first_entered{false};
+    std::atomic<bool> release_first{false};
+    std::atomic<bool> second_executed{false};
+
+    Server server(path, server_options);
+    server.on_serialized("command", [&](const Request& request) {
+        if (request.body == "first") {
+            first_entered.store(true, std::memory_order_release);
+            while (!release_first.load(std::memory_order_acquire)) {
+                std::this_thread::yield();
+            }
+        } else if (request.body == "second") {
+            second_executed.store(true, std::memory_order_release);
+        }
+        return Response{200, request.body};
+    });
+
+    std::thread server_thread([&] { server.run(); });
+    wait_until_running(server);
+
+    ClientOptions client_options;
+    client_options.connect_timeout = 500ms;
+    client_options.io_timeout = 2s;
+    client_options.request_timeout = 5s;
+    Client client(path, client_options);
+
+    std::thread first([&] {
+        try {
+            (void)client.request("command", "first");
+        } catch (...) {
+        }
+    });
+
+    const auto first_deadline = std::chrono::steady_clock::now() + 1s;
+    while (!first_entered.load(std::memory_order_acquire)) {
+        if (std::chrono::steady_clock::now() >= first_deadline) {
+            release_first.store(true, std::memory_order_release);
+            first.join();
+            server.stop();
+            server_thread.join();
+            cleanup_socket_artifacts(path);
+            throw std::runtime_error("test failed: stop test first serialized handler did not start");
+        }
+        std::this_thread::yield();
+    }
+
+    std::thread second([&] {
+        try {
+            (void)client.request("command", "second");
+        } catch (...) {
+        }
+    });
+
+    std::this_thread::sleep_for(50ms);
+    server.stop();
+    release_first.store(true, std::memory_order_release);
+    first.join();
+    second.join();
+    server_thread.join();
+    cleanup_socket_artifacts(path);
+
+    expect(!second_executed.load(std::memory_order_acquire),
+           "stop() must discard serialized commands that are still waiting in the queue");
+}
+
 } // namespace
 
 int main() {
@@ -891,6 +1191,9 @@ int main() {
         test_client_absolute_request_deadline();
         test_chunked_large_streams();
         test_stream_limit_preserves_rpc_worker();
+        test_serialized_handlers_queue_without_blocking_regular_rpc();
+        test_serialized_queue_skips_expired_commands();
+        test_stop_discards_queued_serialized_commands();
     } catch (const std::exception& error) {
         std::cerr << error.what() << '\n';
         return 1;

@@ -2,6 +2,15 @@
 
 All notable changes to this project are documented here.
 
+## Unreleased
+
+- Added `Server::on_serialized()` for exclusive RPC handlers that must not execute concurrently. All serialized routes share one FIFO executor, making the API suitable for robot drivers and other single-owner hardware resources accessed by multiple processes.
+- Serialized requests are handed off from the regular worker pool to a dedicated executor, so commands waiting behind a long-running hardware operation do not consume normal RPC workers; regular `on()` routes such as status/health checks remain available.
+- Server `request_timeout` now also bounds serialized-queue waiting time. A serialized request whose absolute deadline expires before execution is discarded without invoking its handler, preventing stale robot commands from running later.
+- `Server::stop()` discards serialized requests that are still queued. A serialized handler that has already started follows the existing handler rule and cannot be forcibly cancelled by portable C++.
+- Added regression tests for cross-route serialization, FIFO waiting, regular-RPC availability during queued hardware commands, queue-deadline expiry, and shutdown cleanup.
+- No wire-protocol changes were required; existing clients use the same regular request/response frames.
+
 ## 0.4.1
 
 - Added `Server::set_max_concurrent_streams()`. The automatic default reserves one worker for regular RPC traffic when multiple workers are configured, preventing long-lived streams from exhausting the entire worker pool without changing the `ServerOptions` ABI.

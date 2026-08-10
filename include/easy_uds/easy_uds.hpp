@@ -126,6 +126,15 @@ class Server {
     // Registers or rejects a duplicate route. May be called while run() is active.
     void on(std::string route, Handler handler);
 
+    // Registers a regular request/response route whose handler is executed on
+    // one dedicated FIFO executor shared by every serialized route. This is
+    // useful for hardware or other exclusive resources that must not receive
+    // overlapping commands from multiple clients. Waiting serialized requests
+    // do not occupy the normal worker pool. Requests whose server-side absolute
+    // request_timeout expires before execution are discarded without invoking
+    // the handler.
+    void on_serialized(std::string route, Handler handler);
+
     // Registers a streaming route. The handler pulls the request incrementally
     // and returns a pull-based response, so neither body must be held in memory.
     // A stream reader is valid only for the duration of its callback.

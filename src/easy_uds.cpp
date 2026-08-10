@@ -733,6 +733,18 @@ struct PendingConnection {
     Deadline deadline = Deadline::max();
 };
 
+struct HandlerEntry {
+    Server::Handler handler;
+    bool serialized = false;
+};
+
+struct PendingSerializedRequest {
+    int fd = -1;
+    Deadline deadline = Deadline::max();
+    Request request;
+    Server::Handler handler;
+};
+
 struct ServerState {
     std::string socket_path;
     ServerOptions options;
@@ -752,7 +764,7 @@ struct ServerState {
     bool run_active = false;
 
     std::mutex handlers_mutex;
-    std::unordered_map<std::string, Server::Handler> handlers;
+    std::unordered_map<std::string, HandlerEntry> handlers;
     std::unordered_map<std::string, Server::StreamHandler> stream_handlers;
 
     std::mutex work_mutex;
@@ -760,6 +772,11 @@ struct ServerState {
     std::deque<PendingConnection> pending_connections;
     std::unordered_set<int> active_fds;
     bool workers_stopping = false;
+
+    std::mutex serialized_mutex;
+    std::condition_variable serialized_cv;
+    std::deque<PendingSerializedRequest> pending_serialized_requests;
+    bool serialized_stopping = false;
 
     std::mutex socket_path_mutex;
     dev_t socket_device{};
@@ -789,21 +806,26 @@ std::string bounded_error_body(std::string_view message, std::size_t max_message
     return message.size() <= max_message_size ? std::string(message) : std::string{};
 }
 
-Response dispatch_request(const std::shared_ptr<detail::ServerState>& state, const Request& request) {
-    Server::Handler handler;
+bool find_request_handler(const std::shared_ptr<detail::ServerState>& state, const std::string& route,
+                          Server::Handler& handler, bool& serialized) {
     {
         std::lock_guard<std::mutex> lock(state->handlers_mutex);
-        const auto it = state->handlers.find(request.route);
+        const auto it = state->handlers.find(route);
         if (it == state->handlers.end()) {
-            return {404, bounded_error_body("Not Found", state->options.max_message_size)};
+            return false;
         }
-        handler = it->second;
+        handler = it->second.handler;
+        serialized = it->second.serialized;
     }
+    return true;
+}
 
+Response invoke_request_handler(const Server::Handler& handler, const Request& request,
+                                std::size_t max_message_size) {
     try {
         return handler(request);
     } catch (...) {
-        return {500, bounded_error_body("Internal Server Error", state->options.max_message_size)};
+        return {500, bounded_error_body("Internal Server Error", max_message_size)};
     }
 }
 
@@ -849,13 +871,49 @@ void write_internal_server_error(int fd, const std::shared_ptr<detail::ServerSta
                    state->options.max_message_size, state->options.io_timeout, deadline);
 }
 
-void handle_client(const std::shared_ptr<detail::ServerState>& state, int fd, Deadline deadline) noexcept {
+enum class ClientDisposition {
+    complete,
+    serialized_handoff,
+};
+
+bool enqueue_serialized_request(const std::shared_ptr<detail::ServerState>& state, int fd, Deadline deadline,
+                                Request request, Server::Handler handler) {
+    {
+        std::lock_guard<std::mutex> lock(state->serialized_mutex);
+        if (state->serialized_stopping || !state->running.load()) {
+            return false;
+        }
+        state->pending_serialized_requests.push_back(
+            {fd, deadline, std::move(request), std::move(handler)});
+    }
+    state->serialized_cv.notify_one();
+    return true;
+}
+
+ClientDisposition handle_client(const std::shared_ptr<detail::ServerState>& state, int fd,
+                                Deadline deadline) noexcept {
     try {
         const auto initial = read_header(fd, state->options.io_timeout, deadline);
         if (initial.type == WireType::request) {
             const Request request =
                 read_request(fd, initial, state->options.max_message_size, state->options.io_timeout, deadline);
-            const Response response = dispatch_request(state, request);
+
+            Server::Handler handler;
+            bool serialized = false;
+            if (!find_request_handler(state, request.route, handler, serialized)) {
+                write_response(fd, {404, bounded_error_body("Not Found", state->options.max_message_size)},
+                               state->options.max_message_size, state->options.io_timeout, deadline);
+                return ClientDisposition::complete;
+            }
+
+            if (serialized) {
+                if (enqueue_serialized_request(state, fd, deadline, request, std::move(handler))) {
+                    return ClientDisposition::serialized_handoff;
+                }
+                return ClientDisposition::complete;
+            }
+
+            const Response response = invoke_request_handler(handler, request, state->options.max_message_size);
             try {
                 write_response(fd, response, state->options.max_message_size, state->options.io_timeout, deadline);
             } catch (const std::invalid_argument&) {
@@ -863,7 +921,7 @@ void handle_client(const std::shared_ptr<detail::ServerState>& state, int fd, De
             } catch (const std::length_error&) {
                 write_internal_server_error(fd, state, deadline);
             }
-            return;
+            return ClientDisposition::complete;
         }
 
         if (initial.type != WireType::stream_request || initial.arg1 == 0 || initial.arg2 != 0 ||
@@ -871,7 +929,7 @@ void handle_client(const std::shared_ptr<detail::ServerState>& state, int fd, De
             throw std::runtime_error("invalid stream request header");
         }
         if (!try_acquire_stream_slot(state)) {
-            return;
+            return ClientDisposition::complete;
         }
         ActiveStreamGuard stream_guard(state);
 
@@ -917,6 +975,62 @@ void handle_client(const std::shared_ptr<detail::ServerState>& state, int fd, De
         // Invalid, timed-out, disconnected, or shutdown peers are isolated to
         // their worker. Public server state is unaffected.
     }
+    return ClientDisposition::complete;
+}
+
+void serialized_worker_loop(const std::shared_ptr<detail::ServerState>& state) noexcept {
+    while (true) {
+        detail::PendingSerializedRequest job;
+        {
+            std::unique_lock<std::mutex> lock(state->serialized_mutex);
+            state->serialized_cv.wait(lock, [&state] {
+                return state->serialized_stopping || !state->pending_serialized_requests.empty();
+            });
+
+            if (state->pending_serialized_requests.empty()) {
+                if (state->serialized_stopping) {
+                    return;
+                }
+                continue;
+            }
+
+            job = std::move(state->pending_serialized_requests.front());
+            state->pending_serialized_requests.pop_front();
+        }
+
+        FileDescriptor client(job.fd);
+        try {
+            // A robot command that has already exceeded its server-side
+            // absolute request deadline must never execute later just because
+            // it spent time waiting behind another command.
+            check_absolute_deadline(job.deadline, "serialized request timed out before execution");
+            if (!state->running.load()) {
+                throw_system_error("server stopped before serialized request execution", ECANCELED);
+            }
+
+            const Response response =
+                invoke_request_handler(job.handler, job.request, state->options.max_message_size);
+            try {
+                write_response(client.get(), response, state->options.max_message_size,
+                               state->options.io_timeout, job.deadline);
+            } catch (const std::invalid_argument&) {
+                write_internal_server_error(client.get(), state, job.deadline);
+            } catch (const std::length_error&) {
+                write_internal_server_error(client.get(), state, job.deadline);
+            }
+        } catch (...) {
+            // Expired, disconnected, or shutdown queued requests are dropped.
+            // Most importantly, the handler is not invoked after queue expiry.
+        }
+
+        // Keep the descriptor in active_fds for the entire handoff so the
+        // global max_connections accounting and stop() shutdown remain valid.
+        // Erase it before close() to avoid descriptor-number reuse races.
+        {
+            std::lock_guard<std::mutex> lock(state->work_mutex);
+            state->active_fds.erase(job.fd);
+        }
+    }
 }
 
 void worker_loop(const std::shared_ptr<detail::ServerState>& state) noexcept {
@@ -940,7 +1054,12 @@ void worker_loop(const std::shared_ptr<detail::ServerState>& state) noexcept {
         }
 
         FileDescriptor client(connection.fd);
-        handle_client(state, client.get(), connection.deadline);
+        const ClientDisposition disposition = handle_client(state, client.get(), connection.deadline);
+
+        if (disposition == ClientDisposition::serialized_handoff) {
+            (void)client.release();
+            continue;
+        }
 
         // Remove the descriptor from the shared set before close(). stop() uses
         // the same mutex, so it cannot act on a descriptor number after close()
@@ -974,6 +1093,32 @@ void signal_workers_to_stop(const std::shared_ptr<detail::ServerState>& state) n
         (void)::close(fd);
     }
     state->work_cv.notify_all();
+}
+
+void signal_serialized_worker_to_stop(const std::shared_ptr<detail::ServerState>& state) noexcept {
+    std::vector<int> queued;
+    {
+        std::lock_guard<std::mutex> lock(state->serialized_mutex);
+        state->serialized_stopping = true;
+        queued.reserve(state->pending_serialized_requests.size());
+        for (const auto& request : state->pending_serialized_requests) {
+            queued.push_back(request.fd);
+        }
+        state->pending_serialized_requests.clear();
+    }
+
+    if (!queued.empty()) {
+        std::lock_guard<std::mutex> lock(state->work_mutex);
+        for (const int fd : queued) {
+            state->active_fds.erase(fd);
+        }
+    }
+
+    for (const int fd : queued) {
+        (void)::shutdown(fd, SHUT_RDWR);
+        (void)::close(fd);
+    }
+    state->serialized_cv.notify_all();
 }
 
 void wake_accept_loop_locked(const std::shared_ptr<detail::ServerState>& state) noexcept {
@@ -1015,6 +1160,7 @@ void stop_state(const std::shared_ptr<detail::ServerState>& state) noexcept {
     }
 
     signal_workers_to_stop(state);
+    signal_serialized_worker_to_stop(state);
 }
 
 void drain_wakeup_fd(int fd) noexcept {
@@ -1129,7 +1275,24 @@ void Server::on(std::string route, Handler handler) {
     }
 
     std::lock_guard<std::mutex> lock(state_->handlers_mutex);
-    if (!state_->handlers.emplace(std::move(route), std::move(handler)).second) {
+    if (!state_->handlers.emplace(std::move(route), detail::HandlerEntry{std::move(handler), false}).second) {
+        throw std::runtime_error("route already exists");
+    }
+}
+
+void Server::on_serialized(std::string route, Handler handler) {
+    if (route.empty()) {
+        throw std::invalid_argument("route must not be empty");
+    }
+    if (route.size() > state_->options.max_message_size) {
+        throw std::length_error("route exceeds server max_message_size");
+    }
+    if (!handler) {
+        throw std::invalid_argument("handler must not be empty");
+    }
+
+    std::lock_guard<std::mutex> lock(state_->handlers_mutex);
+    if (!state_->handlers.emplace(std::move(route), detail::HandlerEntry{std::move(handler), true}).second) {
         throw std::runtime_error("route already exists");
     }
 }
@@ -1187,8 +1350,10 @@ void Server::run() {
 
     std::vector<std::thread> workers;
     workers.reserve(state->options.worker_threads);
+    std::thread serialized_worker;
 
     try {
+        serialized_worker = std::thread(serialized_worker_loop, state);
         for (std::size_t index = 0; index < state->options.worker_threads; ++index) {
             workers.emplace_back(worker_loop, state);
         }
@@ -1198,6 +1363,9 @@ void Server::run() {
             if (worker.joinable()) {
                 worker.join();
             }
+        }
+        if (serialized_worker.joinable()) {
+            serialized_worker.join();
         }
         throw;
     }
@@ -1313,6 +1481,9 @@ void Server::run() {
         if (worker.joinable()) {
             worker.join();
         }
+    }
+    if (serialized_worker.joinable()) {
+        serialized_worker.join();
     }
 
     if (accept_error) {

@@ -1,5 +1,7 @@
 # easy-uds
 
+[한국어 README](README.ko.md)
+
 `easy-uds` is a small C++17 request/response and chunk-streaming library for local IPC over Unix Domain Sockets (`AF_UNIX`). It keeps the public API intentionally small while providing bounded concurrency, deadlines, binary-safe framing, deterministic shutdown, and CMake package support.
 
 > **Protocol note:** v0.2.0 introduced protocol version 1. v0.4.x retains the original v1 request/response frames and adds new v1 stream frame types. Older peers remain compatible with `request()`, but do not understand `request_stream()`.
@@ -8,6 +10,7 @@
 
 - C++17 with no third-party runtime dependencies
 - Named request handlers with arbitrary binary request/response bodies
+- FIFO serialized request handlers for exclusive hardware/resources, without occupying the normal worker pool while waiting
 - Incremental, constant-memory upload/download streams with configurable chunk sizes and total limits
 - Natural flow control through Unix-socket backpressure
 - Versioned, binary-safe protocol framing
@@ -70,6 +73,35 @@ int main() {
 ```
 
 A `Client` instance can safely be used for concurrent `request()` calls because each request owns its own socket and does not mutate client state.
+
+### Exclusive hardware or robot commands
+
+Use `Server::on_serialized()` for commands that must never overlap. Every serialized route shares one FIFO executor, so commands from multiple processes wait their turn while normal `on()` routes remain available on the regular worker pool.
+
+```cpp
+easy_uds::Server server("/tmp/robot-driver.sock");
+
+server.on_serialized("drive", [](const easy_uds::Request& request) {
+    // Only one serialized handler can run at a time, even if another process
+    // calls a different serialized route such as "arm" concurrently.
+    robot_drive(request.body);
+    return easy_uds::Response{200, "ok"};
+});
+
+server.on_serialized("arm", [](const easy_uds::Request& request) {
+    robot_arm(request.body);
+    return easy_uds::Response{200, "ok"};
+});
+
+server.on("status", [](const easy_uds::Request&) {
+    // Regular RPCs do not wait behind the serialized command queue.
+    return easy_uds::Response{200, read_robot_status()};
+});
+
+server.run();
+```
+
+The FIFO order is the order in which complete serialized requests are handed off by the regular workers. Queue time counts toward the server's existing `request_timeout`. If that deadline expires before a queued command begins execution, the command is discarded and its handler is **not** called. `stop()` also discards commands that are still waiting in the serialized queue. A serialized handler that has already started has the same cooperative-cancellation limitation as a regular handler and cannot be forcibly interrupted by portable C++.
 
 ### Large or continuous bodies
 
@@ -140,7 +172,7 @@ When the connection limit is reached, newly accepted connections are closed inst
 
 Each stream occupies one worker until its response body is complete. The automatic stream limit is `worker_threads - 1`, or `1` for a single-worker server. This prevents long-lived streams from starving regular RPC traffic. An excess stream is closed before its body is read, so the client receives a `std::system_error`; retry it with a fresh/rewound `StreamReader`. `set_max_concurrent_streams()` accepts values from `1` through `worker_threads`; `0` is invalid (not automatic or unlimited). Call `server.set_max_concurrent_streams(options.worker_threads)` before `run()` to allow every worker to run a stream, or use separate server instances when short RPCs and many long-lived streams have different capacity requirements.
 
-`request_timeout` includes time spent waiting in the worker queue and socket I/O time. User handler execution cannot be forcibly cancelled by portable C++; if a handler runs past the deadline, response I/O fails immediately after that handler returns.
+`request_timeout` includes time spent waiting in the worker queue, time spent waiting in the serialized-command queue, and socket I/O time. A serialized request that expires before its handler starts is discarded without executing it. User handler execution cannot be forcibly cancelled by portable C++; if a handler runs past the deadline, response I/O fails immediately after that handler returns.
 
 ### Client options
 
@@ -184,7 +216,7 @@ During shutdown:
 
 The listener is not closed by another thread while `run()` may still be polling it, eliminating descriptor-number reuse races in the accept loop.
 
-User handlers run concurrently on worker threads. If handlers share mutable state, that state must provide its own synchronization.
+Handlers registered with `on()` run concurrently on worker threads. If they share mutable state, that state must provide its own synchronization. Handlers registered with `on_serialized()` instead share one dedicated FIFO executor across all serialized routes; queued serialized requests therefore do not occupy regular workers, allowing routes such as health/status RPCs to remain responsive while a hardware command is in progress.
 
 ## Wire protocol
 
@@ -318,6 +350,7 @@ For pre-1.0 shared builds, the ELF `SOVERSION` tracks the major and minor releas
 
 - `Server(std::string socket_path, ServerOptions options = {})`
 - `on(std::string route, Handler handler)`
+- `on_serialized(std::string route, Handler handler)`
 - `on_stream(std::string route, StreamHandler handler)`
 - `set_max_concurrent_streams(std::size_t limit)`
 - `run()`

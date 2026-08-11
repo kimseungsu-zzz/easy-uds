@@ -105,7 +105,7 @@ server.on("status", [](const easy_uds::Request&) {
 server.run();
 ```
 
-The FIFO order is the order in which complete serialized requests are handed off by the regular workers. Queue time counts toward the server's existing `request_timeout`. If that deadline expires before a queued command begins execution, the command is answered with `408` and its handler is **not** called. `stop()` also discards commands that are still waiting in the serialized queue. A serialized handler that has already started has the same cooperative-cancellation limitation as a regular handler and cannot be forcibly interrupted by portable C++.
+The FIFO order is the order in which complete serialized requests are enqueued by the server. Queue time counts toward the server's existing `request_timeout`. If that deadline expires before a queued command begins execution, the command is answered with `408` and its handler is **not** called. `stop()` also discards commands that are still waiting in the serialized queue. A serialized handler that has already started has the same cooperative-cancellation limitation as a regular handler and cannot be forcibly interrupted by portable C++.
 
 `Server::enqueue_maintenance()` runs a task on the same FIFO executor, strictly ordered with serialized handlers, so server-side state that serialized handlers touch (for example the driver instance map) can be cleaned up safely from any thread when a client disappears:
 
@@ -189,7 +189,7 @@ options.max_concurrent_streams = 3;
 | `max_message_size` | `1 MiB` | Maximum request route+body size and maximum response body size |
 | `stream_chunk_size` | `64 KiB` | Reusable buffer and outgoing frame size for streamed bodies |
 | `max_stream_size` | `1 GiB` | Maximum bytes per streamed request body and response body; `0` is unbounded |
-| `max_concurrent_streams` | `0` (auto) | Maximum simultaneous streams; auto reserves one worker (`worker_threads - 1`) for regular RPC. Explicit values must be between `1` and `worker_threads` |
+| `max_concurrent_streams` | `0` (auto) | Maximum simultaneous streams; auto uses `worker_threads - 1`, or `1` when only one worker exists. Explicit values must be between `1` and `worker_threads` |
 | `io_timeout` | `5000 ms` | Maximum idle time between successful socket-I/O progress events; `0` disables it |
 | `request_timeout` | `30000 ms` | Absolute deadline per regular request; a request that expires before a worker runs it is answered `408`. `0` disables it |
 | `stream_timeout` | `0` | Absolute streaming-exchange deadline after the stream header; `0` disables it |
@@ -234,18 +234,18 @@ Applications should place sockets in a directory whose permissions match their t
 
 ## Concurrency and shutdown
 
-`Server::run()` starts a fixed worker pool and blocks in a `poll()`-based accept loop. It is intended to run once per `Server` object. `Server::stop()` is idempotent and may be called concurrently from other threads.
+`Server::run()` starts the epoll reactor and fixed worker pool, then blocks until shutdown. The serialized executor starts lazily when first needed. `run()` is intended to be called once per `Server` object. `Server::stop()` is idempotent and may be called concurrently from other threads.
 
 During shutdown:
 
-1. `running` is cleared and a non-blocking wakeup pipe interrupts the accept-loop `poll()`;
+1. `running` is cleared and a non-blocking wakeup pipe interrupts `epoll_wait()`;
 2. the owned socket pathname is removed only if its device/inode still match;
-3. queued clients are closed;
-4. active client sockets are `shutdown()` so blocked/polled I/O exits;
-5. `run()` joins the worker pool;
-6. the run thread closes the listener/wakeup descriptors and releases the instance lock.
+3. every accepted client socket is `shutdown()` so blocked I/O exits;
+4. the regular and serialized executors are signaled to stop, discarding work that has not started;
+5. the reactor and executor threads exit and are joined;
+6. connection, listener, wakeup, epoll, and instance-lock descriptors are closed.
 
-The listener is not closed by another thread while `run()` may still be polling it, eliminating descriptor-number reuse races in the accept loop.
+The listener is not closed by another thread while the reactor may still be polling it, eliminating descriptor-number reuse races in the accept loop.
 
 Handlers registered with `on()` run concurrently on worker threads. If they share mutable state, that state must provide its own synchronization. Handlers registered with `on_serialized()` instead share one dedicated FIFO executor across all serialized routes; queued serialized requests therefore do not occupy regular workers, allowing routes such as health/status RPCs to remain responsive while a hardware command is in progress.
 

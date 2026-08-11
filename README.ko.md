@@ -128,11 +128,11 @@ Process C: status ─────────> 일반 worker pool에서 별도�
 
 모든 `on_serialized()` route는 하나의 FIFO executor를 공유합니다. 따라서 `drive`, `arm`, `motor/set`처럼 route가 서로 달라도 직렬 route끼리는 동시에 실행되지 않습니다.
 
-FIFO 순서는 server의 일반 worker가 완전한 request를 읽고 serialized executor에 넘긴 순서입니다. 연결된 순서 자체가 아니라 **완전히 수신되어 queue에 들어온 순서**라는 점에 주의하십시오.
+FIFO 순서는 server가 완전한 request를 serialized executor에 넣은 순서입니다. 연결된 순서 자체가 아니라 **완전히 수신되어 queue에 들어온 순서**라는 점에 주의하십시오.
 
 ### 오래 기다린 명령의 안전 처리
 
-serialized queue에서 기다리는 시간도 기존 server `request_timeout`에 포함됩니다. 명령이 실행되기 전에 absolute deadline을 넘으면 handler를 호출하지 않고 해당 명령을 폐기합니다.
+serialized queue에서 기다리는 시간도 기존 server `request_timeout`에 포함됩니다. 명령이 실행되기 전에 absolute deadline을 넘으면 handler를 호출하지 않고 `408`로 응답합니다.
 
 이 동작은 오래된 로봇 명령이 뒤늦게 실행되는 상황을 막기 위한 것입니다.
 
@@ -253,8 +253,8 @@ options.max_concurrent_streams = 3;
 
 | 옵션 | 기본값 | 의미 |
 | --- | ---: | --- |
-| `worker_threads` | `4` | 일반 client connection을 읽고 처리하는 worker 수 |
-| `max_connections` | `64` | active + queued client connection 최대 수 |
+| `worker_threads` | `4` | 일반·stream handler를 실행하는 worker 수(serialized executor는 별도) |
+| `max_connections` | `64` | 동시에 accept되어 열려 있는 client connection 최대 수 |
 | `max_message_size` | `1 MiB` | request route+body 및 response body 최대 크기 |
 | `stream_chunk_size` | `64 KiB` | stream용 재사용 buffer/frame 크기 |
 | `max_stream_size` | `1 GiB` | 한 request/response stream의 최대 총 byte 수. `0`은 제한 없음 |
@@ -262,13 +262,13 @@ options.max_concurrent_streams = 3;
 | `request_timeout` | `30 s` | 일반 RPC의 첫 header byte부터 response 완료까지 absolute deadline. serialized queue 대기도 포함 |
 | `stream_timeout` | `0` | stream 전체 absolute deadline. `0`은 비활성 |
 | `session_idle_grace` | `1 ms` | 마지막 요청을 마친 워커가 이 시간 동안 후속 요청 하나를 직접 기다려 리액터 디스패치 홉을 줄입니다. 핸들러 실행 전에는 연결을 리액터에 반환해 멀티플렉싱을 유지합니다. `0`은 고속 경로 비활성 |
-| `max_concurrent_streams` | `0` (자동) | 동시 stream 수 상한. 자동 모드는 일반 RPC용 worker 1개 예약(`worker_threads - 1`). 명시값은 `1`~`worker_threads` |
+| `max_concurrent_streams` | `0` (자동) | 동시 stream 수 상한. 자동값은 `worker_threads - 1`이며 worker가 하나뿐이면 `1`. 명시값은 `1`~`worker_threads` |
 | `include_handler_error_messages` | `true` | `500` body에 handler 예외 메시지 포함. 내부 정보 노출을 피하려면 `false` |
 | `stale_socket_grace_period` | `250 ms` | refused socket을 stale로 판단하기 전 대기 시간 |
 | `listen_backlog` | `64` | `listen()` backlog |
 | `socket_permissions` | `0600` | Unix socket pathname 권한 |
 
-`request_timeout`은 worker queue, serialized queue, socket I/O 시간을 모두 포함합니다. serialized 명령이 실행 전에 timeout되면 handler가 실행되지 않습니다.
+`request_timeout`은 worker queue, serialized queue, socket I/O 시간을 모두 포함합니다. serialized 명령이 실행 전에 timeout되면 handler를 실행하지 않고 `408`로 응답합니다.
 
 ## Client 설정
 
@@ -311,23 +311,22 @@ socket timeout은 `std::system_error`로 전달되며 timeout의 error code는 `
 
 ## 동시성과 종료
 
-`Server::run()`은 고정 worker pool과 별도의 serialized executor thread를 시작한 뒤 `poll()` 기반 accept loop에서 block됩니다. 하나의 `Server` 객체에서 `run()`은 한 번만 호출할 수 있습니다.
+`Server::run()`은 epoll reactor와 고정 worker pool을 시작한 뒤 종료될 때까지 block됩니다. serialized executor thread는 처음 필요할 때 지연 시작됩니다. 하나의 `Server` 객체에서 `run()`은 한 번만 호출할 수 있습니다.
 
 일반 `on()` handler는 여러 worker thread에서 동시에 실행될 수 있습니다. 공유 mutable state가 있다면 애플리케이션이 직접 동기화해야 합니다.
 
-`on_serialized()` handler는 모든 serialized route가 하나의 executor를 공유하므로 한 번에 정확히 하나만 실행됩니다. 일반 worker는 serialized request의 header/body를 읽어 queue로 넘긴 뒤 즉시 다른 connection을 처리할 수 있습니다.
+`on_serialized()` handler는 모든 serialized route가 하나의 executor를 공유하므로 한 번에 정확히 하나만 실행됩니다. reactor가 serialized request의 header/body를 읽어 전용 queue로 넘기므로 일반 worker pool을 점유하지 않습니다.
 
 종료 시에는 다음 순서로 정리됩니다.
 
-1. `running` 해제 및 wakeup pipe로 accept `poll()` 중단
+1. `running` 해제 및 wakeup pipe로 `epoll_wait()` 중단
 2. 소유 중인 socket pathname을 inode 확인 후 제거
-3. 일반 worker queue의 connection 종료
-4. active connection을 `shutdown()`하여 blocked I/O 중단
-5. 아직 실행되지 않은 serialized command queue 폐기
-6. worker pool과 serialized executor join
-7. listener/wakeup descriptor 및 instance lock 해제
+3. accept된 모든 client socket을 `shutdown()`하여 blocked I/O 중단
+4. 일반·serialized executor에 종료를 알리고 아직 실행되지 않은 작업 폐기
+5. reactor, worker pool, serialized executor 종료 및 join
+6. connection/listener/wakeup/epoll descriptor와 instance lock 해제
 
-다른 thread에서 `run()`이 listener를 poll하는 동안 `stop()` thread가 listener FD를 직접 close하지 않으므로 descriptor-number reuse race를 피합니다.
+reactor가 listener를 poll하는 동안 `stop()` thread가 listener FD를 직접 close하지 않으므로 descriptor-number reuse race를 피합니다.
 
 ## Wire protocol
 
@@ -343,7 +342,7 @@ socket timeout은 `std::system_error`로 전달되며 timeout의 error code는 `
 - handler에서 예외 발생: `500`, response body에 예외의 `what()` 메시지 포함(`max_message_size`로 제한, `std::exception`이 아닌 throw는 고정 `Internal Server Error`)
 - handler가 음수 status 또는 너무 큰 body 반환: `500`, response body에 거부 사유 포함
 - malformed/timed-out/disconnected peer: 해당 connection만 종료, server는 계속 실행
-- serialized queue에서 server `request_timeout` 초과: handler를 실행하지 않고 connection 종료
+- serialized queue에서 server `request_timeout` 초과: handler를 실행하지 않고 `408` 응답
 - connection/request deadline 초과: 관찰하는 쪽에서 `ETIMEDOUT`을 가진 `std::system_error`
 - 잘못된 로컬 argument/configuration: `std::invalid_argument` 또는 `std::length_error`
 - socket/OS 오류: `std::system_error`

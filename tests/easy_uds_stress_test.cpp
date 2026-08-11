@@ -82,20 +82,21 @@ void run_concurrent_load() {
     std::vector<std::thread> one_shot;
     for (int w = 0; w < 8; ++w) {
         one_shot.emplace_back([&, w] {
+            int iteration = -1;
             try {
-                for (int i = 0; i < 500; ++i) {
-                    const std::string body = "s" + std::to_string(w) + "-" + std::to_string(i);
+                for (iteration = 0; iteration < 500; ++iteration) {
+                    const std::string body = "s" + std::to_string(w) + "-" + std::to_string(iteration);
                     const Response response = client.request("echo", body);
                     if (response.status != 200 || response.body != body) {
                         record_failure("one-shot response mismatch at worker " + std::to_string(w) +
-                                       ", iteration " + std::to_string(i));
+                                       ", iteration " + std::to_string(iteration));
                         return;
                     }
                 }
                 successes.fetch_add(1);
             } catch (const std::exception& error) {
-                record_failure(std::string{"one-shot error at worker "} + std::to_string(w) + ": " +
-                               error.what());
+                record_failure(std::string{"one-shot error at worker "} + std::to_string(w) + ", iteration " +
+                               std::to_string(iteration) + ": " + error.what());
             } catch (...) {
                 record_failure("one-shot non-standard exception");
             }

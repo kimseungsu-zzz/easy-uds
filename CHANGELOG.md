@@ -36,6 +36,7 @@ Breaking rewrite that reshapes the protocol, server internals, and public API be
 ### Server: worker-lease continuation fast path
 
 - After serving a fixed request, the worker keeps reading the leased connection directly (no reactor round trip per request) until the peer pauses longer than `ServerOptions::session_idle_grace` (default `1 ms`); it then returns the connection to the reactor so no worker lingers idle. `0` disables the fast path (pure reactor dispatch). Pipelined requests on one connection are served serially by the leasing worker.
+- One-shot requests (reserved request id `0`) return directly to the reactor after their response; only persistent-session requests use the idle-grace continuation path.
 - Client sessions spin on an atomic completion flag (bounded, then a condition-variable fallback) to avoid a futex round trip per response.
 - Completed session requests are removed from the in-flight table, request timeouts make the session permanently unusable, and request-id wrap avoids ids that are still active.
 - Worker leases preserve partially received follow-up headers across the idle grace, stream leases unregister from epoll before hand-off, and successful streams can be followed by another request on the same wire connection. Epoll registrations carry generation tokens so stale events for a closed fd cannot affect a newer connection that reused the same descriptor number.

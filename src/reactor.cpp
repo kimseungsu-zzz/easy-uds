@@ -695,9 +695,14 @@ void worker_loop(const std::shared_ptr<ServerState>& state) {
             job.connection->closing = true;
         }
 
-        // The request was served on a leased connection: keep reading
-        // follow-up requests inline, then re-arm the reactor when idle.
-        continue_connection(state, job.connection, std::move(job.buffered), job.buffered_offset);
+        // Request id zero is reserved for the one-shot client path. It has no
+        // follow-up request to accelerate, so return it immediately instead of
+        // holding a worker in the session-only idle-grace continuation path.
+        if (job.request.request_id == 0 && job.buffered_offset == job.buffered.size()) {
+            rearm_connection(state, job.connection);
+        } else {
+            continue_connection(state, job.connection, std::move(job.buffered), job.buffered_offset);
+        }
     }
 }
 

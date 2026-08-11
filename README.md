@@ -193,6 +193,7 @@ options.max_concurrent_streams = 3;
 | `io_timeout` | `5000 ms` | Maximum idle time between successful socket-I/O progress events; `0` disables it |
 | `request_timeout` | `30000 ms` | Absolute deadline per request; a request that expires before a worker runs it is answered `408`. `0` disables it |
 | `stream_timeout` | `0` | Absolute streaming-exchange deadline after the stream header; `0` disables it |
+| `session_idle_grace` | `1 ms` | A worker that just served a fixed request keeps reading the connection directly (no reactor hop per request) while the peer keeps sending within this grace; after an idle gap it returns the connection to the reactor. `0` disables the fast path |
 | `include_handler_error_messages` | `true` | Include handler exception messages in `500` bodies; disable to hide internal details from clients |
 | `stale_socket_grace_period` | `250 ms` | Time to keep probing a connection-refused existing socket before treating it as stale |
 | `listen_backlog` | `64` | Backlog passed to `listen()` |
@@ -200,7 +201,7 @@ options.max_concurrent_streams = 3;
 
 When the connection limit is reached, newly accepted connections are closed instead of creating more workers or growing an unbounded queue.
 
-Each stream occupies one worker until its response body is complete. The automatic stream limit is `worker_threads - 1`, or `1` for a single-worker server. This prevents long-lived streams from starving regular RPC traffic. An excess stream is closed before its body is read, so the client receives a `std::system_error`; retry it with a fresh/rewound `StreamReader`. `set_max_concurrent_streams()` accepts values from `1` through `worker_threads`; `0` is invalid (not automatic or unlimited). Call `server.set_max_concurrent_streams(options.worker_threads)` before `run()` to allow every worker to run a stream, or use separate server instances when short RPCs and many long-lived streams have different capacity requirements.
+Each stream occupies one worker until its response body is complete. The automatic stream limit is `worker_threads - 1`, or `1` for a single-worker server. This prevents long-lived streams from starving regular RPC traffic. An excess stream is closed before its body is read, so the client receives a `std::system_error`; retry it with a fresh/rewound `StreamReader`. Set `ServerOptions::max_concurrent_streams = worker_threads` to allow every worker to run a stream, or use separate server instances when short RPCs and many long-lived streams have different capacity requirements.
 
 `request_timeout` includes time spent waiting in the worker queue, time spent waiting in the serialized-command queue, and socket I/O time. A serialized request that expires before its handler starts is discarded without executing it. User handler execution cannot be forcibly cancelled by portable C++; if a handler runs past the deadline, response I/O fails immediately after that handler returns.
 
@@ -342,12 +343,12 @@ The streaming benchmark generates bytes on demand and discards them at the recei
 Reference numbers (WSL2 on an i7-1260P, g++ 15, `-O3`):
 
 ```text
-one-shot request()    p50 ~56 µs               ~15k req/s @ c1
-session request()     p50 ~64 µs (1 in-flight) ~60k req/s @ c8
-stream (64 KiB chunks)  upload ~5.5 GiB/s, download ~9.3 GiB/s
+one-shot request()    p50 ~56–68 µs            ~13k req/s @ c1
+session request()     p50 ~38 µs (1 in-flight) ~67k req/s @ c8
+stream (64 KiB chunks)  upload ~5.7 GiB/s, download ~9.5 GiB/s
 ```
 
-The reactor server makes one-shot latency independent of connection teardown. The multiplexed session pays thread-hop overhead for concurrent requests; it wins on throughput and on relaxed concurrency scenarios, while lockstep one-shot calls on a session were faster in 0.5.x (`~33 µs`) at the cost of risking worker starvation — see `CHANGELOG.md`.
+The reactor makes one-shot latency independent of connection teardown. Sessions recover the near-floor latency with a worker-lease continuation fast path (the serving worker keeps reading the connection until the peer pauses longer than `session_idle_grace`, then returns it to the reactor), plus a client-side spin-wait — so a high-frequency poller on a session reaches the same p50 as 0.5.x lockstep while the reactor still absorbs idle connections.
 
 ## Run the examples
 

@@ -29,9 +29,14 @@ Breaking rewrite that reshapes the protocol, server internals, and public API be
 
 ### Performance (measured on WSL2, i7-1260P, g++ -O3)
 
-- One-shot `request()` p50: 74 µs (0.5.1) → **56 µs** (reactor removes the previous worker-teardown regression).
-- Session `request()` p50: **64 µs** for a single in-flight request — the multiplexing + reactor thread hops cost more than 0.5.x lockstep sessions (33 µs); under 8-way concurrency the session path reaches ~60k req/s (vs ~48k one-shot). See README for the environment and the trade-off discussion.
-- Stream throughput unchanged (5.5 GiB/s upload, 9.3 GiB/s download).
+- One-shot `request()` p50: 74 µs (0.5.1) → **56–68 µs** (reactor removes the previous worker-teardown regression).
+- Session `request()` p50 (one in-flight): **38 µs** — the reactor initially cost thread hops (64 µs), recovered by a worker-leased continuation fast path plus a client spin-wait, landing at the WSL raw round-trip floor (~34 µs; lockstep 0.5.x was 33 µs).
+- Session throughput at 8-way concurrency: **~67k req/s** (vs ~48k one-shot). Streams unchanged (~5.7 GiB/s upload, ~9.5 GiB/s download).
+
+### Server: worker-lease continuation fast path
+
+- After serving a fixed request, the worker keeps reading the leased connection directly (no reactor round trip per request) until the peer pauses longer than `ServerOptions::session_idle_grace` (default `1 ms`); it then returns the connection to the reactor so no worker lingers idle. `0` disables the fast path (pure reactor dispatch). Pipelined requests on one connection are served serially by the leasing worker.
+- Client sessions spin on an atomic completion flag (bounded, then a condition-variable fallback) to avoid a futex round trip per response.
 
 ## 0.5.1
 

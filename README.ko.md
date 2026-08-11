@@ -215,7 +215,7 @@ while (true) {
 }
 ```
 
-`Session`은 동시 `request()` 호출을 **멀티플렉싱**합니다(request id로 상관관계를 매기고 응답은 무순서로 도착). I/O 오류 또는 peer close 이후에는 영구적으로 사용할 수 없습니다(재연결하려면 새 세션). serialized route에 대한 요청은 그 응답 후 세션 연결이 종료됩니다. `request_stream()`은 전용 연결을 사용하며 세션당 하나만 실행됩니다.
+`Session`은 동시 `request()` 호출을 **멀티플렉싱**합니다(request id로 상관관계를 매기고 응답은 무순서로 도착). 서버는 유휴 grace 동안 연결을 처리한 워커가 직접 이어 읽는 고속 경로를 쓰므로 고주파 폴링의 단일 요청 왕복 지연이 WSL 원시 바닥(~38 µs p50)에 근접합니다. I/O 오류 또는 peer close 이후에는 영구적으로 사용할 수 없습니다(재연결하려면 새 세션). serialized route에 대한 요청은 그 응답 후 세션 연결이 종료됩니다. `request_stream()`은 전용 연결을 사용하며 세션당 하나만 실행됩니다.
 
 `Server::enqueue_maintenance()`는 serialized handler와 같은 FIFO 실행기에서, 그리고 그들과 엄격한 순서로 실행되는 작업을 등록합니다. serialized handler가 접근하는 서버 측 상태(예: 드라이버 인스턴스 맵)를 외부 스레드(스위퍼 등)에서 안전하게 정리할 때 사용합니다:
 
@@ -261,6 +261,7 @@ options.max_concurrent_streams = 3;
 | `io_timeout` | `5 s` | 성공적인 socket I/O 진행 사이의 최대 idle 시간 |
 | `request_timeout` | `30 s` | 일반 RPC의 accept부터 response 완료까지 absolute deadline. serialized queue 대기도 포함 |
 | `stream_timeout` | `0` | stream 전체 absolute deadline. `0`은 비활성 |
+| `session_idle_grace` | `1 ms` | 고정 요청을 처리한 워커가 이 시간 안에 다음 요청이 오면 연결을 직접 계속 읽어 처리(요청당 리액터 홉 없음). 유휴 간격이 지나면 리액터로 반환. `0`은 고속 경로 비활성 |
 | `max_concurrent_streams` | `0` (자동) | 동시 stream 수 상한. 자동 모드는 일반 RPC용 worker 1개 예약(`worker_threads - 1`). 명시값은 `1`~`worker_threads` |
 | `include_handler_error_messages` | `true` | `500` body에 handler 예외 메시지 포함. 내부 정보 노출을 피하려면 `false` |
 | `stale_socket_grace_period` | `250 ms` | refused socket을 stale로 판단하기 전 대기 시간 |

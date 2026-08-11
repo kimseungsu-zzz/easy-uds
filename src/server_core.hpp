@@ -9,6 +9,7 @@
 #include <atomic>
 #include <condition_variable>
 #include <deque>
+#include <exception>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -32,13 +33,16 @@ struct StreamHandlerEntry {
 // either the reactor parses frames on it (connection in the epoll set) or a
 // stream worker owns it as an exclusive lease.
 struct Connection {
-    Connection(int fd, easy_uds::PeerCredentials peer) : fd(fd), peer(peer) {}
+    Connection(int fd, easy_uds::PeerCredentials peer)
+        : fd(fd), peer(peer), last_io_progress(Clock::now().time_since_epoch().count()) {}
 
     int fd = -1;
     easy_uds::PeerCredentials peer;
     std::atomic<bool> stream_active{false};  // a stream worker owns the fd (exclusive lease)
     std::atomic<bool> worker_owned{false};   // a fixed-request worker is leasing the fd
     std::atomic<bool> closing{false};
+    std::atomic<std::size_t> pending_serialized{0};
+    std::atomic<Clock::duration::rep> last_io_progress;
 
     // Responses are written as complete frames under this lock so multiplexed
     // responses never interleave inside a frame.
@@ -61,7 +65,7 @@ struct ReactorConnection {
     std::uint32_t request_id = 0;
     std::uint32_t arg1 = 0;
     std::uint32_t arg2 = 0;
-    Deadline deadline = Deadline::max();
+    Deadline deadline = Deadline::max();     // absolute deadline once a request starts
     std::string pending;              // bytes read ahead of the parser
     std::size_t pending_offset = 0;   // consumed prefix of pending
 };
@@ -125,6 +129,7 @@ struct ServerState {
     std::thread serialized_thread;
 
     std::thread reactor_thread;
+    std::exception_ptr reactor_error;
     std::vector<std::thread> workers;
 
     // Connections by fd, keyed in the map until closed. Guarded by

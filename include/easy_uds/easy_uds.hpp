@@ -34,9 +34,8 @@ inline constexpr std::size_t default_stream_chunk_size = 64U * 1024U;
 inline constexpr std::size_t default_max_stream_size = 1024U * 1024U * 1024U;
 
 // ---- Request / response ---------------------------------------------------
-// Peer identity of the connecting client, captured with SO_PEERCRED on Linux
-// (getpeereid on BSD). `present` is false when the platform or socket cannot
-// provide credentials.
+// Peer identity of the connecting client, captured with SO_PEERCRED on Linux.
+// `present` is false when the socket cannot provide credentials.
 struct PeerCredentials {
     pid_t pid = -1;
     uid_t uid = static_cast<uid_t>(-1);
@@ -98,8 +97,8 @@ struct ServerOptions {
     // Zero disables the inactivity timeout.
     std::chrono::milliseconds io_timeout{5000};
 
-    // Absolute deadline for a request, measured from the moment its header is
-    // read until its response is written. Zero disables it. Handler execution
+    // Absolute deadline for a request, measured from its first header byte
+    // until its response is written. Zero disables it. Handler execution
     // is not forcibly interrupted; if it runs past the deadline, response I/O
     // fails immediately when the handler returns.
     std::chrono::milliseconds request_timeout{30000};

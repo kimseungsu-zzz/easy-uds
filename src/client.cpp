@@ -255,6 +255,22 @@ void session_reader_loop(detail::SessionState* state) {
     }
 }
 
+void shutdown_session_state(std::unique_ptr<SessionState>& state) noexcept {
+    if (!state) {
+        return;
+    }
+    state->reader_stop.store(true, std::memory_order_relaxed);
+    // shutdown() wakes the reader thread's blocked recv; join before the
+    // SessionState (and therefore the std::thread) is destroyed.
+    if (state->fd.get() >= 0) {
+        (void)::shutdown(state->fd.get(), SHUT_RDWR);
+    }
+    if (state->reader_thread.joinable()) {
+        state->reader_thread.join();
+    }
+    state.reset();
+}
+
 } // namespace detail
 
 Session::Session(std::string socket_path, ClientOptions options)
@@ -267,21 +283,17 @@ Session::Session(std::string socket_path, ClientOptions options)
 }
 
 Session::~Session() {
-    if (!state_) {
-        return;
-    }
-    state_->reader_stop.store(true, std::memory_order_relaxed);
-    // shutdown() wakes the reader thread's blocked recv; join before close.
-    if (state_->fd.get() >= 0) {
-        (void)::shutdown(state_->fd.get(), SHUT_RDWR);
-    }
-    if (state_->reader_thread.joinable()) {
-        state_->reader_thread.join();
-    }
+    detail::shutdown_session_state(state_);
 }
 
 Session::Session(Session&& other) noexcept = default;
-Session& Session::operator=(Session&& other) noexcept = default;
+Session& Session::operator=(Session&& other) noexcept {
+    if (this != &other) {
+        detail::shutdown_session_state(state_);
+        state_ = std::move(other.state_);
+    }
+    return *this;
+}
 
 Response Session::request(std::string_view route, std::string_view body) {
     if (!state_) {

@@ -20,6 +20,7 @@
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/un.h>
+#include <poll.h>
 #include <unistd.h>
 
 namespace {
@@ -100,6 +101,22 @@ void recv_exact(int fd, void* data, std::size_t size) {
         }
         throw std::system_error(result == 0 ? ECONNRESET : errno, std::generic_category(),
                                 "raw receive failed");
+    }
+}
+
+void expect_peer_closed(int fd, std::chrono::milliseconds timeout, const std::string& message) {
+    pollfd descriptor{fd, POLLIN | POLLHUP | POLLERR, 0};
+    int result = 0;
+    do {
+        result = ::poll(&descriptor, 1, static_cast<int>(timeout.count()));
+    } while (result < 0 && errno == EINTR);
+    if (result <= 0) {
+        throw std::runtime_error("test failed: " + message);
+    }
+    unsigned char byte = 0;
+    const ssize_t received = ::recv(fd, &byte, sizeof(byte), 0);
+    if (received != 0) {
+        throw std::runtime_error("test failed: " + message);
     }
 }
 
@@ -644,6 +661,69 @@ void test_session_move() {
     expect(moved.request("ping").body == "pong", "moved session keeps the connection");
     expect_throws<std::logic_error>([&] { (void)session.request("ping"); },
                                     "moved-from session must reject requests");
+
+    Session destination = client.session();
+    expect(destination.request("ping").body == "pong", "move destination is active before assignment");
+    destination = std::move(moved);
+    expect(destination.request("ping").body == "pong", "move-assigned session keeps the source connection");
+    expect_throws<std::logic_error>([&] { (void)moved.request("ping"); },
+                                    "move-assigned source must reject requests");
+
+    server.stop();
+    server_thread.join();
+    cleanup_socket_artifacts(path);
+}
+
+void test_reactor_request_timeouts() {
+    using namespace easy_uds;
+
+    const std::string path = socket_path("reactor-timeouts");
+    ServerOptions options;
+    options.worker_threads = 2;
+    options.io_timeout = 200ms;
+    options.request_timeout = 500ms;
+    options.session_idle_grace = 100ms;
+    Server server(path, options);
+    server.on("ping", [](const Request&) { return Response{200, "pong"}; });
+    server.on_serialized("slow", [](const Request&) {
+        std::this_thread::sleep_for(300ms);
+        return Response{200, "done"};
+    });
+
+    std::thread server_thread([&] { server.run(); });
+    wait_until_running(server);
+
+    const int idle_fd = connect_raw(path);
+    expect_peer_closed(idle_fd, 1s, "idle reactor connection should honor io_timeout");
+    ::close(idle_fd);
+
+    const int header_fd = connect_raw(path);
+    const unsigned char first_byte = 'E';
+    expect(send_no_signal(header_fd, &first_byte, 1) == 1, "partial header byte should be written");
+    expect_peer_closed(header_fd, 1s, "partial header should honor io_timeout");
+    ::close(header_fd);
+
+    const int payload_fd = connect_raw(path);
+    const auto incomplete = frame(1, 41, 8, 0, nullptr, 0);
+    expect(send_no_signal(payload_fd, incomplete.data(), incomplete.size()) ==
+               static_cast<ssize_t>(incomplete.size()), "incomplete request header should be written");
+    for (const char byte : std::string{"ping"}) {
+        std::this_thread::sleep_for(100ms);
+        expect(send_no_signal(payload_fd, &byte, 1) == 1, "payload progress byte should be written");
+    }
+    expect_peer_closed(payload_fd, 1s, "partial payload should honor request_timeout");
+    ::close(payload_fd);
+
+    // A serialized handler owns a complete request while it runs. Its socket
+    // must not be mistaken for an idle, incomplete reactor request.
+    ClientOptions client_options;
+    client_options.io_timeout = 500ms;
+    client_options.request_timeout = 500ms;
+    Session serialized_session = Client(path, client_options).session();
+    expect(serialized_session.request("ping").body == "pong", "session fast path should be established");
+    const Response response = serialized_session.request("slow");
+    expect(response.status == 200 && response.body == "done",
+           "serialized handler should survive a shorter reactor io_timeout");
 
     server.stop();
     server_thread.join();
@@ -1303,6 +1383,7 @@ int main() {
         RUN(test_session_broken_after_shutdown);
         RUN(test_session_broken_after_timeout);
         RUN(test_session_move);
+        RUN(test_reactor_request_timeouts);
         RUN(test_streams);
         RUN(test_stream_limit_reserves_worker);
         RUN(test_serialized_handlers);

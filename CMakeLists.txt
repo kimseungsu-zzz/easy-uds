@@ -2,8 +2,8 @@ cmake_minimum_required(VERSION 3.20)
 
 project(easy_uds VERSION 0.6.0 LANGUAGES CXX)
 
-if(NOT UNIX)
-    message(FATAL_ERROR "easy-uds currently requires POSIX Unix-domain socket APIs")
+if(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    message(FATAL_ERROR "easy-uds 0.6 currently requires Linux (epoll and SO_PEERCRED)")
 endif()
 
 include(CMakePackageConfigHelpers)

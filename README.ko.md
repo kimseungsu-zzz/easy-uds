@@ -32,7 +32,7 @@
 
 ## 플랫폼
 
-POSIX Unix Domain Socket API를 사용하며 Linux에서 테스트됩니다. Windows는 지원하지 않습니다. Linux 전용 abstract socket이 아니라 파일시스템 pathname socket을 사용합니다.
+0.6 구현은 Linux(`epoll`, `SO_PEERCRED`)를 요구합니다. Windows, macOS, BSD는 현재 지원하지 않습니다. Linux 전용 abstract socket이 아니라 파일시스템 pathname socket을 사용합니다.
 
 ## 빠른 시작
 
@@ -259,7 +259,7 @@ options.max_concurrent_streams = 3;
 | `stream_chunk_size` | `64 KiB` | stream용 재사용 buffer/frame 크기 |
 | `max_stream_size` | `1 GiB` | 한 request/response stream의 최대 총 byte 수. `0`은 제한 없음 |
 | `io_timeout` | `5 s` | 성공적인 socket I/O 진행 사이의 최대 idle 시간 |
-| `request_timeout` | `30 s` | 일반 RPC의 accept부터 response 완료까지 absolute deadline. serialized queue 대기도 포함 |
+| `request_timeout` | `30 s` | 일반 RPC의 첫 header byte부터 response 완료까지 absolute deadline. serialized queue 대기도 포함 |
 | `stream_timeout` | `0` | stream 전체 absolute deadline. `0`은 비활성 |
 | `session_idle_grace` | `1 ms` | 고정 요청을 처리한 워커가 이 시간 안에 다음 요청이 오면 연결을 직접 계속 읽어 처리(요청당 리액터 홉 없음). 유휴 간격이 지나면 리액터로 반환. `0`은 고속 경로 비활성 |
 | `max_concurrent_streams` | `0` (자동) | 동시 stream 수 상한. 자동 모드는 일반 RPC용 worker 1개 예약(`worker_threads - 1`). 명시값은 `1`~`worker_threads` |

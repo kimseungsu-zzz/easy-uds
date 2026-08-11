@@ -449,7 +449,13 @@ void Server::run() {
         for (std::size_t index = 0; index < state->options.worker_threads; ++index) {
             state->workers.emplace_back(detail::worker_loop, state);
         }
-        state->reactor_thread = std::thread(detail::run_reactor, state);
+        state->reactor_thread = std::thread([state] {
+            try {
+                detail::run_reactor(state);
+            } catch (...) {
+                state->reactor_error = std::current_exception();
+            }
+        });
     } catch (...) {
         stop_state(state);
         for (auto& worker : state->workers) {
@@ -481,6 +487,10 @@ void Server::run() {
             (void)::close(fd);
         }
         state->connections.clear();
+    }
+
+    if (state->reactor_error) {
+        std::rethrow_exception(state->reactor_error);
     }
 }
 

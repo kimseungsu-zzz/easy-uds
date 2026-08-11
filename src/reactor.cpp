@@ -27,6 +27,34 @@ constexpr int kMaxAcceptBatch = 64;
 constexpr std::uint64_t kListenerToken = std::numeric_limits<std::uint64_t>::max();
 constexpr std::uint64_t kWakeToken = kListenerToken - 1;
 
+void mark_io_progress(const std::shared_ptr<Connection>& connection) noexcept {
+    connection->last_io_progress.store(Clock::now().time_since_epoch().count(), std::memory_order_relaxed);
+}
+
+Deadline inactivity_deadline(const std::shared_ptr<Connection>& connection,
+                             std::chrono::milliseconds timeout) noexcept {
+    if (timeout.count() == 0) {
+        return Deadline::max();
+    }
+    const auto ticks = connection->last_io_progress.load(std::memory_order_relaxed);
+    const Deadline progress{Clock::duration{ticks}};
+    const auto max_remaining = Deadline::max() - progress;
+    const auto max_ms = std::chrono::duration_cast<std::chrono::milliseconds>(max_remaining);
+    if (timeout >= max_ms) {
+        return Deadline::max() - Clock::duration{1};
+    }
+    return progress + timeout;
+}
+
+void wake_reactor(const std::shared_ptr<ServerState>& state) noexcept {
+    if (state->wake_write_fd < 0) {
+        return;
+    }
+    const unsigned char byte = 1;
+    const ssize_t ignored = ::write(state->wake_write_fd, &byte, sizeof(byte));
+    (void)ignored;
+}
+
 std::uint32_t allocate_connection_generation(const std::shared_ptr<ServerState>& state) noexcept {
     std::uint32_t generation = state->next_connection_generation.fetch_add(1, std::memory_order_relaxed);
     if (generation == 0) {
@@ -290,6 +318,7 @@ void write_fixed_response(const std::shared_ptr<ServerState>& state,
                              static_cast<std::uint32_t>(response.status),
                              static_cast<std::uint32_t>(response.body.size()), response.body.data(),
                              response.body.size(), io_timeout, deadline);
+    mark_io_progress(connection);
 }
 
 void enqueue_worker_job(const std::shared_ptr<ServerState>& state, std::shared_ptr<Connection> connection,
@@ -344,6 +373,7 @@ void dispatch_request(const std::shared_ptr<ServerState>& state, const std::shar
             std::lock_guard<std::mutex> lock(rc->conn->write_mutex);
             write_frame_with_payload(rc->conn->fd, WireType::response, rc->request_id, 404, 9, "Not Found", 9,
                                      state->options.io_timeout, rc->deadline);
+            mark_io_progress(rc->conn);
         } catch (...) {
             rc->conn->closing = true;
         }
@@ -366,6 +396,7 @@ void dispatch_request(const std::shared_ptr<ServerState>& state, const std::shar
                 return;
             }
             state->pending_serialized.push_back(std::move(job));
+            rc->conn->pending_serialized.fetch_add(1, std::memory_order_relaxed);
         }
         state->serialized_cv.notify_one();
         return;
@@ -516,6 +547,7 @@ void rearm_connection(const std::shared_ptr<ServerState>& state, const std::shar
     fresh->generation = allocate_connection_generation(state);
     fresh->pending = std::move(buffered);
     fresh->pending_offset = buffered_offset;
+    mark_io_progress(conn);
     bool rearm_failed = false;
     {
         std::lock_guard<std::mutex> lock(state->connections_mutex);
@@ -554,6 +586,7 @@ void serve_fixed_request(const std::shared_ptr<ServerState>& state, const std::s
             std::lock_guard<std::mutex> lock(conn->write_mutex);
             write_frame_with_payload(conn->fd, WireType::response, request.request_id, 404, 9, "Not Found", 9,
                                      state->options.io_timeout, deadline);
+            mark_io_progress(conn);
         } catch (...) {
             conn->closing = true;
         }
@@ -575,6 +608,7 @@ void serve_fixed_request(const std::shared_ptr<ServerState>& state, const std::s
                 return;
             }
             state->pending_serialized.push_back(std::move(job));
+            conn->pending_serialized.fetch_add(1, std::memory_order_relaxed);
         }
         state->serialized_cv.notify_one();
         return;
@@ -735,6 +769,15 @@ void serialized_worker_loop(const std::shared_ptr<ServerState>& state) {
             continue;
         }
 
+        struct CompletionGuard {
+            std::shared_ptr<ServerState> state;
+            std::shared_ptr<Connection> connection;
+            ~CompletionGuard() {
+                connection->pending_serialized.fetch_sub(1, std::memory_order_release);
+                wake_reactor(state);
+            }
+        } completion{state, job.connection};
+
         try {
             if (Clock::now() >= job.deadline) {
                 write_error_response(state, job.connection, job.request.request_id,
@@ -790,6 +833,7 @@ void consume(const std::shared_ptr<ServerState>& state, const std::shared_ptr<Re
     while (true) {
         const ssize_t n = ::recv(fd, scratch.data(), scratch.size(), 0);
         if (n > 0) {
+            mark_io_progress(rc->conn);
             // Compact the consumed prefix occasionally so pending stays bounded
             // by one in-flight frame.
             if (rc->pending_offset != 0 && rc->pending_offset == rc->pending.size()) {
@@ -816,6 +860,11 @@ void consume(const std::shared_ptr<ServerState>& state, const std::shared_ptr<Re
     while (true) {
         const std::size_t available = rc->pending.size() - rc->pending_offset;
         if (rc->phase == ParsePhase::header) {
+            if (available != 0 && rc->deadline == Deadline::max()) {
+                // Start the absolute request deadline at the first header byte,
+                // not after a peer has eventually supplied all 20 bytes.
+                rc->deadline = deadline_from_now(state->options.request_timeout);
+            }
             const std::size_t need = protocol::header_size - rc->header_received;
             if (available < need) {
                 return;
@@ -837,7 +886,6 @@ void consume(const std::shared_ptr<ServerState>& state, const std::shared_ptr<Re
                 rc->route_buffer.reserve(decoded.arg1);
                 rc->body_buffer.reserve(decoded.arg2);
                 rc->phase = ParsePhase::request_payload;
-                rc->deadline = deadline_from_now(state->options.request_timeout);
                 continue;
             }
             if (decoded.type == WireType::stream_request) {
@@ -850,7 +898,6 @@ void consume(const std::shared_ptr<ServerState>& state, const std::shared_ptr<Re
                 rc->route_buffer.clear();
                 rc->route_buffer.reserve(decoded.arg1);
                 rc->phase = ParsePhase::stream_route;
-                rc->deadline = deadline_from_now(state->options.request_timeout);
                 continue;
             }
             throw std::runtime_error("unexpected protocol message type");
@@ -869,6 +916,7 @@ void consume(const std::shared_ptr<ServerState>& state, const std::shared_ptr<Re
             if (rc->payload_received == rc->payload_total) {
                 dispatch_request(state, rc);
                 rc->phase = ParsePhase::header;
+                rc->deadline = Deadline::max();
                 continue;
             }
             return;
@@ -885,6 +933,43 @@ void consume(const std::shared_ptr<ServerState>& state, const std::shared_ptr<Re
     }
 }
 
+// Close expired reactor-owned connections and return the next deadline that
+// should wake epoll_wait. Worker/stream leases enforce their own I/O limits.
+Deadline expire_reactor_connections(const std::shared_ptr<ServerState>& state) {
+    const Deadline now = Clock::now();
+    Deadline next = Deadline::max();
+    std::vector<int> expired;
+    {
+        std::lock_guard<std::mutex> lock(state->connections_mutex);
+        expired.reserve(state->connections.size());
+        for (const auto& [fd, rc] : state->connections) {
+            const auto& connection = rc->conn;
+            if (connection->stream_active.load(std::memory_order_acquire) ||
+                connection->worker_owned.load(std::memory_order_acquire) ||
+                connection->closing.load(std::memory_order_acquire)) {
+                continue;
+            }
+
+            Deadline connection_deadline = rc->deadline;
+            const bool partial_request = rc->phase != ParsePhase::header ||
+                                         rc->pending_offset != rc->pending.size();
+            if (partial_request || connection->pending_serialized.load(std::memory_order_acquire) == 0) {
+                connection_deadline = earlier_deadline(
+                    connection_deadline, inactivity_deadline(connection, state->options.io_timeout));
+            }
+            if (connection_deadline != Deadline::max() && now >= connection_deadline) {
+                expired.push_back(fd);
+            } else {
+                next = earlier_deadline(next, connection_deadline);
+            }
+        }
+    }
+    for (const int fd : expired) {
+        close_connection(state, fd);
+    }
+    return next;
+}
+
 void run_reactor(const std::shared_ptr<ServerState>& state) {
     const int listener = state->listener_fd;
     const int wake_read = state->wake_read_fd;
@@ -892,7 +977,9 @@ void run_reactor(const std::shared_ptr<ServerState>& state) {
 
     std::array<epoll_event, 128> events{};
     while (state->running.load()) {
-        const int count = ::epoll_wait(epoll_fd, events.data(), static_cast<int>(events.size()), -1);
+        const Deadline next_deadline = expire_reactor_connections(state);
+        const int count = ::epoll_wait(epoll_fd, events.data(), static_cast<int>(events.size()),
+                                       poll_timeout_ms(next_deadline));
         if (count < 0) {
             if (errno == EINTR) {
                 continue;
@@ -902,6 +989,9 @@ void run_reactor(const std::shared_ptr<ServerState>& state) {
             }
             throw_system_error("epoll_wait failed");
         }
+        if (count == 0) {
+            continue;
+        }
 
         for (int index = 0; index < count; ++index) {
             const std::uint64_t token = events[index].data.u64;
@@ -909,7 +999,7 @@ void run_reactor(const std::shared_ptr<ServerState>& state) {
 
             if (token == kListenerToken) {
                 if ((mask & (EPOLLERR | EPOLLHUP)) != 0) {
-                    break;  // listening socket failed; treat as fatal
+                    throw std::runtime_error("listening socket failed");
                 }
                 // Drain a bounded batch of accepted connections.
                 std::size_t accepted = 0;

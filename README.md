@@ -11,7 +11,7 @@
 - C++17 with no third-party runtime dependencies
 - Named request handlers with arbitrary binary request/response bodies
 - Multiplexed persistent sessions: concurrent `request()` calls on one connection, correlated by request id and answered in any order
-- Peer credentials (`pid`/`uid`/`gid`) via `SO_PEERCRED` on Linux / `getpeereid` on BSD
+- Peer credentials (`pid`/`uid`/`gid`) via Linux `SO_PEERCRED`
 - Exact and longest-prefix route registration (`on()` / `on_prefix()`)
 - FIFO serialized request handlers for exclusive hardware/resources, without occupying the normal worker pool while waiting
 - Incremental, constant-memory upload/download streams with configurable chunk sizes and total limits
@@ -34,7 +34,7 @@
 
 ## Platform
 
-The implementation uses POSIX Unix-domain socket APIs and is tested on Linux. Windows is not supported. The source uses pathname sockets rather than Linux-only abstract sockets.
+The 0.6 implementation requires Linux (`epoll` and `SO_PEERCRED`). Windows, macOS, and BSD are not currently supported. The source uses pathname sockets rather than Linux-only abstract sockets.
 
 ## Quick start
 
@@ -277,6 +277,7 @@ Requirements:
 
 - CMake 3.20+
 - A C++17 compiler
+- Linux
 - POSIX threads
 
 Using the developer preset:

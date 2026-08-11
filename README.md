@@ -10,23 +10,27 @@
 
 - C++17 with no third-party runtime dependencies
 - Named request handlers with arbitrary binary request/response bodies
+- Multiplexed persistent sessions: concurrent `request()` calls on one connection, correlated by request id and answered in any order
+- Peer credentials (`pid`/`uid`/`gid`) via `SO_PEERCRED` on Linux / `getpeereid` on BSD
+- Exact and longest-prefix route registration (`on()` / `on_prefix()`)
 - FIFO serialized request handlers for exclusive hardware/resources, without occupying the normal worker pool while waiting
 - Incremental, constant-memory upload/download streams with configurable chunk sizes and total limits
+- `Server::enqueue_maintenance()` for safe server-side state cleanup from external threads
 - Natural flow control through Unix-socket backpressure
-- Versioned, binary-safe protocol framing
-- Fixed worker pool instead of one detached thread per connection
-- Configurable connection limit, inactivity timeout, absolute request deadline, connect timeout, backlog, and message size
+- Versioned, binary-safe protocol framing (protocol v2 with request-id multiplexing)
+- epoll reactor server: idle connections never occupy a worker
+- Configurable connection limit, inactivity timeout, absolute request deadline (`408` on expiry), connect timeout, backlog, and message size
 - Optimistic non-blocking socket I/O that calls `poll()` only on backpressure
 - Gathered header+payload writes through `sendmsg()` to reduce per-chunk system calls
 - Owner-only socket permissions (`0600`) by default, configurable when group access is needed
 - Per-socket instance lock to serialize startup/stale cleanup between easy-uds servers
 - Grace period before removing a connection-refused socket pathname as stale
-- Thread-safe `stop()` using a wakeup pipe; the stopping thread never closes the listener while `run()` may still poll it
-- Handler exceptions converted to `500 / Internal Server Error`
+- Thread-safe `stop()` using a wakeup pipe
+- Handler exceptions converted to `500` with the exception message in the body (opt-out via `include_handler_error_messages`)
 - `std::system_error` for socket failures, preserving the underlying `errno`
 - Static or shared library builds through `BUILD_SHARED_LIBS`
 - CMake install/export package and downstream `find_package()` support
-- Unit, shutdown-race stress, ASan/UBSan/TSan, protocol fuzz, static/shared, and install-consumer CI coverage
+- Unit, shutdown-race stress, ASan/UBSan/TSan, protocol/session fuzz, static/shared, and install-consumer CI coverage
 
 ## Platform
 
@@ -68,7 +72,7 @@ int main() {
     easy_uds::Client client("/tmp/easy-uds.sock");
 
     const auto response = client.request("echo", "hello");
-    std::cout << response.status_code << ' ' << response.body << '\n';
+    std::cout << response.status << ' ' << response.body << '\n';
 }
 ```
 
@@ -101,7 +105,7 @@ server.on("status", [](const easy_uds::Request&) {
 server.run();
 ```
 
-The FIFO order is the order in which complete serialized requests are handed off by the regular workers. Queue time counts toward the server's existing `request_timeout`. If that deadline expires before a queued command begins execution, the command is discarded and its handler is **not** called. `stop()` also discards commands that are still waiting in the serialized queue. A serialized handler that has already started has the same cooperative-cancellation limitation as a regular handler and cannot be forcibly interrupted by portable C++.
+The FIFO order is the order in which complete serialized requests are handed off by the regular workers. Queue time counts toward the server's existing `request_timeout`. If that deadline expires before a queued command begins execution, the command is answered with `408` and its handler is **not** called. `stop()` also discards commands that are still waiting in the serialized queue. A serialized handler that has already started has the same cooperative-cancellation limitation as a regular handler and cannot be forcibly interrupted by portable C++.
 
 `Server::enqueue_maintenance()` runs a task on the same FIFO executor, strictly ordered with serialized handlers, so server-side state that serialized handlers touch (for example the driver instance map) can be cleaned up safely from any thread when a client disappears:
 
@@ -118,7 +122,7 @@ Tasks run exactly once, in FIFO order with serialized commands, and a throwing t
 
 ```cpp
 // Server: process an upload without retaining its complete body.
-server.on_stream("upload", [](const easy_uds::StreamReader& body) {
+server.on_stream("upload", [](const easy_uds::StreamReader& body, const easy_uds::Request&) {
     std::ofstream output("received.bin", std::ios::binary);
     std::array<char, 64 * 1024> buffer{};
     while (const std::size_t size = body(buffer.data(), buffer.size())) {
@@ -153,7 +157,7 @@ while (true) {
 }
 ```
 
-A `Session` serializes concurrent calls internally and is permanently broken after any I/O error or peer close — open a fresh session to reconnect. A request to a serialized route ends the session connection after its response. The server reserves at least one worker for regular one-shot RPC: when `max_persistent_sessions` is reached, an excess session connection is closed after its last response and the client's next request fails explicitly.
+A `Session` multiplexes concurrent `request()` calls: each is correlated by a request id and answered in any order, so polling threads can share one connection without serializing. It is permanently broken after any I/O error or peer close — open a fresh session to reconnect. A request to a serialized route is served through the exclusive executor and ends the session connection after its response. `request_stream()` on a session runs on its own dedicated connection and is exclusive per session.
 
 ## Configuration
 
@@ -175,20 +179,20 @@ options.socket_permissions = 0600;
 
 easy_uds::Server server("/tmp/easy-uds.sock", options);
 // Optional override; auto mode reserves one RPC worker.
-server.set_max_concurrent_streams(3);
+options.max_concurrent_streams = 3;
 ```
 
 | Option | Default | Meaning |
 | --- | ---: | --- |
-| `worker_threads` | `4` | Number of worker threads processing accepted clients |
-| `max_connections` | `64` | Maximum active + queued client connections |
+| `worker_threads` | `4` | Worker threads executing handlers |
+| `max_connections` | `64` | Maximum concurrently open client connections |
 | `max_message_size` | `1 MiB` | Maximum request route+body size and maximum response body size |
 | `stream_chunk_size` | `64 KiB` | Reusable buffer and outgoing frame size for streamed bodies |
 | `max_stream_size` | `1 GiB` | Maximum bytes per streamed request body and response body; `0` is unbounded |
+| `max_concurrent_streams` | `0` (auto) | Maximum simultaneous streams; auto reserves one worker (`worker_threads - 1`) for regular RPC. Explicit values must be between `1` and `worker_threads` |
 | `io_timeout` | `5000 ms` | Maximum idle time between successful socket-I/O progress events; `0` disables it |
-| `request_timeout` | `30000 ms` | Absolute deadline from accept until response I/O completes; `0` disables it |
+| `request_timeout` | `30000 ms` | Absolute deadline per request; a request that expires before a worker runs it is answered `408`. `0` disables it |
 | `stream_timeout` | `0` | Absolute streaming-exchange deadline after the stream header; `0` disables it |
-| `max_persistent_sessions` | `0` (auto) | Maximum connections waiting for their next request on a persistent session; auto reserves one worker (`worker_threads - 1`) for regular RPC. Explicit values must be between `1` and `worker_threads` |
 | `include_handler_error_messages` | `true` | Include handler exception messages in `500` bodies; disable to hide internal details from clients |
 | `stale_socket_grace_period` | `250 ms` | Time to keep probing a connection-refused existing socket before treating it as stale |
 | `listen_backlog` | `64` | Backlog passed to `listen()` |
@@ -257,12 +261,14 @@ Each connection carries exactly one request and one response. Either body may us
 - Unknown route: `404 / Not Found`
 - Handler throws: `500` with the exception's `what()` as the response body (bounded by `max_message_size`; a non-`std::exception` throw yields the generic `Internal Server Error` body). Set `include_handler_error_messages = false` to always use the generic body
 - Handler returns a negative status or oversized body: `500` with the rejection reason as the response body (likewise gated by `include_handler_error_messages`)
+- A request that waits past its server-side `request_timeout` before a worker executes it: `408` (handler not invoked)
 - Malformed/timed-out/disconnected peer: that connection is closed; the server continues running
 - Connection/request deadline exceeded: `std::system_error` with `ETIMEDOUT` on the side observing the timeout
 - Invalid local arguments/configuration: `std::invalid_argument` or `std::length_error`
 - Socket/OS failures: `std::system_error`
 - Invalid server lifecycle operation, such as a second `run()`: `std::logic_error`
 - A second easy-uds `Server` claiming the same path while the first owns it: `std::system_error` with `EADDRINUSE`
+- Protocol version 1 peers are rejected (v2 server)
 
 ## Build and test
 
@@ -333,6 +339,16 @@ cmake --build build-bench --parallel
 
 The streaming benchmark generates bytes on demand and discards them at the receiver, so it measures the library and local socket path without disk-I/O effects. The RPC benchmarks measure client-side latency on the one-connection-per-request API and on the persistent `Client::session()` API respectively, reporting aggregate throughput plus average, p50, p95, and p99 request latency.
 
+Reference numbers (WSL2 on an i7-1260P, g++ 15, `-O3`):
+
+```text
+one-shot request()    p50 ~56 µs               ~15k req/s @ c1
+session request()     p50 ~64 µs (1 in-flight) ~60k req/s @ c8
+stream (64 KiB chunks)  upload ~5.5 GiB/s, download ~9.3 GiB/s
+```
+
+The reactor server makes one-shot latency independent of connection teardown. The multiplexed session pays thread-hop overhead for concurrent requests; it wins on throughput and on relaxed concurrency scenarios, while lockstep one-shot calls on a session were faster in 0.5.x (`~33 µs`) at the cost of risking worker starvation — see `CHANGELOG.md`.
+
 ## Run the examples
 
 Start the server:
@@ -378,10 +394,11 @@ For pre-1.0 shared builds, the ELF `SOVERSION` tracks the major and minor releas
 
 - `Server(std::string socket_path, ServerOptions options = {})`
 - `on(std::string route, Handler handler)`
+- `on_prefix(std::string prefix, Handler handler)`
 - `on_serialized(std::string route, Handler handler)`
 - `enqueue_maintenance(std::function<void()> task)`
 - `on_stream(std::string route, StreamHandler handler)`
-- `set_max_concurrent_streams(std::size_t limit)`
+- `on_stream_prefix(std::string prefix, StreamHandler handler)`
 - `run()`
 - `stop()`
 - `is_running()`
@@ -397,27 +414,36 @@ For pre-1.0 shared builds, the ELF `SOVERSION` tracks the major and minor releas
 
 ### `easy_uds::Session`
 
-- `request(std::string_view route, std::string_view body = {})` — reuses the persistent connection
-- `request_stream(std::string_view route, const StreamReader&, response_chunk)`
+- `request(std::string_view route, std::string_view body = {})` — multiplexed, concurrent-safe
+- `request_stream(std::string_view route, const StreamReader&, response_chunk)` — exclusive, dedicated connection
 
 ### Data types
 
 ```cpp
+using Status = std::int32_t;  // status_ok=200, status_request_timeout=408, status_not_found=404, ...
+
+struct PeerCredentials {
+    pid_t pid; uid_t uid; gid_t gid;
+    bool present;  // false when the platform cannot provide credentials
+};
+
 struct Request {
     std::string route;
     std::string body;
+    PeerCredentials peer;
+    std::uint32_t request_id;
 };
 
 struct Response {
-    int status_code = 200;
+    Status status = 200;
     std::string body;
 };
 
 using StreamReader = std::function<std::size_t(char*, std::size_t)>;
 
 struct StreamResponse {
-    int status_code = 200;
-    StreamReader body;
+    Status status = 200;
+…
 };
 ```
 

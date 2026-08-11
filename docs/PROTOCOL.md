@@ -1,29 +1,30 @@
 # easy-uds wire protocol
 
-This document describes protocol version 1. The original fixed-size messages are used by easy-uds v0.2.x and later; easy-uds v0.4.x adds the stream frame types described below. easy-uds v0.5.0 keeps protocol version 1 and adds persistent-connection reuse (no new frame types); the connection lifecycle section below describes it.
+This document describes **protocol version 2**, introduced in easy-uds 0.6.0. It is not wire-compatible with protocol version 1 (easy-uds 0.5.x and earlier); a v2 server rejects v1 connections.
 
 ## Transport
 
 - Unix Domain Socket
 - `AF_UNIX`
 - `SOCK_STREAM`
-- One request followed by one response per connection
+- Multiplexed request/response with per-connection correlation ids (responses may arrive out of order)
 - Multi-byte integers use network byte order (big-endian)
 
 ## Common header
 
-Every request and response begins with exactly 16 bytes:
+Every message begins with exactly 20 bytes:
 
 | Offset | Size | Field | Value |
 | ---: | ---: | --- | --- |
 | 0 | 4 | Magic | ASCII `EUDS` |
-| 4 | 1 | Version | `1` |
+| 4 | 1 | Version | `2` |
 | 5 | 1 | Message type | See message types below |
 | 6 | 2 | Reserved flags | `0` |
-| 8 | 4 | Argument 1 | Type-specific, unsigned 32-bit |
-| 12 | 4 | Argument 2 | Type-specific, unsigned 32-bit |
+| 8 | 4 | Request id | Unsigned 32-bit |
+| 12 | 4 | Argument 1 | Type-specific, unsigned 32-bit |
+| 16 | 4 | Argument 2 | Type-specific, unsigned 32-bit |
 
-Reserved bytes must be zero. A peer may close the connection when the magic, version, type, or flags are invalid.
+Reserved bytes must be zero. A peer may close the connection when the magic, version, type, or flags are invalid. A v1 header (version byte `1`) is rejected.
 
 | Type | Value |
 | --- | ---: |
@@ -36,10 +37,25 @@ Reserved bytes must be zero. A peer may close the connection when the magic, ver
 | Stream response chunk | `7` |
 | Stream response end | `8` |
 
-## Request
+## Request id and multiplexing
 
-For a request header:
+Every request sent on a connection carries a request id chosen by the client. The server echoes it in the response, so a client can have several requests in flight on one connection and correlate each response by id:
 
+```text
+client                                  server
+  |--- request id=1 --------------------->|
+  |--- request id=2 --------------------->|
+  |<--- response id=2 --------------------|
+  |<--- response id=1 --------------------|
+```
+
+Responses may arrive in any order. Stream frames carry the same id as their stream request, keeping concurrent streams distinct. There is no server-side ordering guarantee between concurrent requests.
+
+## Fixed request
+
+For a fixed request header:
+
+- Request id = client-chosen correlation id (nonzero on multiplexed sessions; the one-shot `request()` path uses `0`)
 - `Argument 1` = route length in bytes
 - `Argument 2` = body length in bytes
 
@@ -49,58 +65,48 @@ The header is immediately followed by:
 route bytes | body bytes
 ```
 
-The route must contain at least one byte. No text encoding is imposed by the wire format; route and body are length-delimited and may contain NUL (`0x00`) or newline bytes.
+The route must contain at least one byte. Route and body are length-delimited and may contain NUL (`0x00`) or newline bytes. The configured `max_message_size` limits `route_length + body_length`.
 
-The configured `max_message_size` limits `route_length + body_length`.
+## Fixed response
 
-## Response
+For a fixed response header:
 
-For a response header:
-
+- Request id = the id of the request being answered
 - `Argument 1` = non-negative status code
 - `Argument 2` = body length in bytes
 
-The header is immediately followed by the response body.
-
-The configured `max_message_size` limits the response body length.
+The header is immediately followed by the response body. The configured `max_message_size` limits the response body length.
 
 ## Chunked stream request
 
-A stream starts with a type `3` header:
+A stream starts with a type `3` header (request id = the stream's id):
 
 - `Argument 1` = route length in bytes (non-zero)
 - `Argument 2` = `0`
 
-The route bytes follow immediately. The body is then represented by zero or more type `4` frames. For every chunk header:
-
-- `Argument 1` = number of payload bytes following the header (non-zero)
-- `Argument 2` = `0`
-
-A type `5` header ends the request body; both arguments must be zero. The sum of chunk payload lengths is checked against the receiver's `max_stream_size` unless that option is zero.
+The route bytes follow immediately. The body is then represented by zero or more type `4` frames. For every chunk header, `Argument 1` is the number of payload bytes that follow (non-zero), `Argument 2` is `0`, and the request id matches the stream's id. A type `5` header (same id, both arguments zero) ends the request. The sum of chunk payload lengths is checked against the receiver's `max_stream_size` unless that option is zero.
 
 ```text
-stream request(route length) | route bytes
-stream request chunk(N)      | N body bytes
-stream request chunk(M)      | M body bytes
-stream request end(0, 0)
+stream request(id, route length) | route bytes
+stream request chunk(id, N)      | N body bytes
+stream request chunk(id, M)      | M body bytes
+stream request end(id, 0, 0)
 ```
 
 Chunk boundaries are transport details, not application record boundaries. A receiver may deliver a wire chunk in several smaller reads.
 
 ## Chunked stream response
 
-After the complete request stream, the server sends a type `6` header:
+After the complete request stream, the server sends a type `6` header (request id = the stream's id):
 
 - `Argument 1` = non-negative status code
 - `Argument 2` = `0`
 
-Zero or more type `7` chunk frames follow using the same length rules as request chunks. A type `8` header with both arguments zero ends the response.
-
-The protocol is half-duplex: a client sends the request end frame before waiting for the response start frame. This prevents either side from needing an unbounded staging buffer. `SOCK_STREAM` backpressure provides flow control when the consumer is slower than the producer.
+Zero or more type `7` chunk frames follow under the same id and length rules as request chunks. A type `8` header with the same id and zero arguments ends the response.
 
 ## Connection lifecycle
 
-A normal exchange is:
+A regular one-shot exchange:
 
 ```text
 client                        server
@@ -111,37 +117,16 @@ client                        server
   |--------- close --------------|
 ```
 
-A streaming exchange has the same connection lifecycle; only each body is split into explicitly framed pieces. It does not multiplex routes or interleave the response with an unfinished request.
-
-Since v0.5.0, a connection may be kept alive for additional requests (persistent sessions, `Client::session()`):
-
-```text
-client                        server
-  |                              |
-  |--------- connect ----------->|
-  |--------- request 1 --------> |
-  |<-------- response 1 ---------|
-  |--------- request 2 --------> |
-  |<-------- response 2 ---------|
-  |--------- close --------------|
-```
-
-The protocol is strictly lockstep: the server reads the next request header only after the previous response has been written, and a client must wait for each response before sending the next request. There is no request multiplexing or pipelining. Every frame type described above (fixed request/response, or a stream request/response sequence) may appear at any exchange boundary.
+A persistent session (`Client::session()`) keeps the connection open and multiplexes fixed requests as shown above. Streams are exclusive per connection: a client must not send another request (fixed or streamed) until the stream response has ended, and `request_stream()` uses its own dedicated connection on the session API. The server will parse only sequential frames from one connection; pipelined fixed requests are supported because the id correlates responses.
 
 A connection ends when:
 
 - the client closes it (the server observes EOF on the next header read);
 - either side exceeds a configured timeout (`io_timeout`, server/client `request_timeout`, `stream_timeout`);
-- a request is sent to a serialized route — that exchange is served through the exclusive executor and the connection is closed after its response;
-- the server-side persistent-session limit (`max_persistent_sessions`) is reached — the connection is closed after its last response, so the client's next request fails explicitly;
+- a request's server-side `request_timeout` expires before a worker executed it — the server answers `408` without invoking the handler;
+- a stream exceeds the server's `max_concurrent_streams` — the connection is closed, rejecting the stream;
 - the server stops.
-
-The current protocol does not multiplex requests, and no part of a response may be sent before the complete request (including its stream end frame) has been consumed.
 
 ## Compatibility
 
-Protocol versioning is explicit in byte 4 of the header. Implementations must not interpret an unknown version as version 1.
-
-v0.1.x used newline-delimited metadata and is not wire-compatible with protocol version 1.
-
-v0.3.x keeps protocol version 1 unchanged and is wire-compatible with v0.2.x. v0.4.x retains those fixed request/response types and adds types 3 through 8. Therefore regular `request()` calls remain compatible across v0.2+ peers, while `request_stream()` requires v0.4+ on both sides. Unknown message types must not be interpreted as fixed messages.
+Protocol versioning is explicit in byte 4 of the header. Implementations must not interpret an unknown version as version 2. v0.5.x (protocol version 1) used a 16-byte header without a request id and is not interoperable with v2 peers.

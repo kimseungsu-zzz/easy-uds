@@ -10,10 +10,10 @@ int main() {
         easy_uds::Client client("/tmp/easy-uds.sock");
 
         const auto ping = client.request("ping");
-        std::cout << "ping: " << ping.status_code << " " << ping.body << '\n';
+        std::cout << "ping: " << ping.status << " " << ping.body << '\n';
 
         const auto echo = client.request("echo", "Hello, easy-uds!");
-        std::cout << "echo: " << echo.status_code << " " << echo.body << '\n';
+        std::cout << "echo: " << echo.status << " " << echo.body << '\n';
 
         std::size_t remaining = 2U * 1024U * 1024U;
         easy_uds::StreamReader upload = [&remaining](char* buffer, std::size_t capacity) {

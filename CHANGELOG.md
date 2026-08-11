@@ -2,6 +2,37 @@
 
 All notable changes to this project are documented here.
 
+## 0.6.0
+
+Breaking rewrite that reshapes the protocol, server internals, and public API before 1.0.
+
+### Protocol version 2 (breaking, not wire-compatible with 0.5.x)
+
+- 20-byte big-endian header adds a `request id` field for multiplexing; version byte is now `2`. A v2 server rejects v1 connections.
+- Fixed requests on a connection may now be pipelined: the client picks an id, the server echoes it in the response, and responses may arrive out of order. `Client::session()` multiplexes concurrent `request()` calls.
+- Stream frames carry the stream's request id. Streams remain exclusive per connection (half-duplex), and `Session::request_stream()` uses its own dedicated connection.
+- A request that waits past the server-side `request_timeout` before a worker executes it is answered with `408` instead of being silently dropped.
+
+### Server: epoll reactor (breaking internals)
+
+- The listening/accepting and per-connection frame parsing moved onto an epoll reactor thread; a fixed worker pool executes handlers only. Long-lived connections no longer occupy a worker while idle, fixing the 0.5.x session-starvation risk and the one-shot latency regression at the source.
+- `ServerOptions::max_persistent_sessions` is removed (no longer needed); `max_concurrent_streams` moved into `ServerOptions` (auto mode still reserves a worker for regular RPC and `0` means automatic).
+- Exact routes keep `on()`, and new longest-prefix routing is available via `on_prefix()` / `on_stream_prefix()`.
+
+### Public API (breaking)
+
+- `Request` gains `peer` (`PeerCredentials` populated from `SO_PEERCRED` on Linux / `getpeereid` on BSD, or `present == false`) and `request_id`.
+- `Response.status` replaces `status_code`; a small named status set (`status_ok`, `status_not_found`, `status_request_timeout`, ...) is provided.
+- Stream handlers now receive `(const StreamReader&, const Request&)`.
+- `Session::request()` is genuinely concurrent (multiplexed); `request_stream()` is exclusive per session.
+- `include_handler_error_messages` retained with the same default.
+
+### Performance (measured on WSL2, i7-1260P, g++ -O3)
+
+- One-shot `request()` p50: 74 µs (0.5.1) → **56 µs** (reactor removes the previous worker-teardown regression).
+- Session `request()` p50: **64 µs** for a single in-flight request — the multiplexing + reactor thread hops cost more than 0.5.x lockstep sessions (33 µs); under 8-way concurrency the session path reaches ~60k req/s (vs ~48k one-shot). See README for the environment and the trade-off discussion.
+- Stream throughput unchanged (5.5 GiB/s upload, 9.3 GiB/s download).
+
 ## 0.5.1
 
 - Added `ServerOptions::max_persistent_sessions` so persistent sessions cannot starve regular RPC traffic. Every connection waiting for its next request occupies one worker, so the automatic default (`worker_threads - 1`, at least 1) reserves a worker for one-shot requests, mirroring the stream admission limit. A connection whose follow-up wait would exceed the limit is closed after its response, so the client's next request fails explicitly instead of blocking indefinitely.

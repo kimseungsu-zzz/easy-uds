@@ -70,7 +70,7 @@ int main() {
     easy_uds::Client client("/tmp/easy-uds.sock");
 
     const auto response = client.request("echo", "hello");
-    std::cout << response.status_code << ' ' << response.body << '\n';
+    std::cout << response.status << ' ' << response.body << '\n';
 }
 ```
 
@@ -215,7 +215,7 @@ while (true) {
 }
 ```
 
-`Session`은 내부에서 동시 호출을 직렬화하며, I/O 오류 또는 peer close 이후에는 영구적으로 사용할 수 없습니다(재연결하려면 새 세션). serialized route에 대한 요청은 그 응답 후 세션 연결이 종료됩니다.
+`Session`은 동시 `request()` 호출을 **멀티플렉싱**합니다(request id로 상관관계를 매기고 응답은 무순서로 도착). I/O 오류 또는 peer close 이후에는 영구적으로 사용할 수 없습니다(재연결하려면 새 세션). serialized route에 대한 요청은 그 응답 후 세션 연결이 종료됩니다. `request_stream()`은 전용 연결을 사용하며 세션당 하나만 실행됩니다.
 
 `Server::enqueue_maintenance()`는 serialized handler와 같은 FIFO 실행기에서, 그리고 그들과 엄격한 순서로 실행되는 작업을 등록합니다. serialized handler가 접근하는 서버 측 상태(예: 드라이버 인스턴스 맵)를 외부 스레드(스위퍼 등)에서 안전하게 정리할 때 사용합니다:
 
@@ -248,7 +248,7 @@ options.socket_permissions = 0600;
 easy_uds::Server server("/tmp/easy-uds.sock", options);
 
 // 선택 사항: 자동 모드는 가능하면 일반 RPC worker 하나를 예약합니다.
-server.set_max_concurrent_streams(3);
+options.max_concurrent_streams = 3;
 ```
 
 | 옵션 | 기본값 | 의미 |
@@ -261,7 +261,7 @@ server.set_max_concurrent_streams(3);
 | `io_timeout` | `5 s` | 성공적인 socket I/O 진행 사이의 최대 idle 시간 |
 | `request_timeout` | `30 s` | 일반 RPC의 accept부터 response 완료까지 absolute deadline. serialized queue 대기도 포함 |
 | `stream_timeout` | `0` | stream 전체 absolute deadline. `0`은 비활성 |
-| `max_persistent_sessions` | `0` (자동) | 다음 요청을 기다리는 persistent session 연결 수 상한. 자동 모드는 일반 RPC용 worker 1개를 예약(`worker_threads - 1`). 명시값은 `1`~`worker_threads` |
+| `max_concurrent_streams` | `0` (자동) | 동시 stream 수 상한. 자동 모드는 일반 RPC용 worker 1개 예약(`worker_threads - 1`). 명시값은 `1`~`worker_threads` |
 | `include_handler_error_messages` | `true` | `500` body에 handler 예외 메시지 포함. 내부 정보 노출을 피하려면 `false` |
 | `stale_socket_grace_period` | `250 ms` | refused socket을 stale로 판단하기 전 대기 시간 |
 | `listen_backlog` | `64` | `listen()` backlog |
@@ -456,10 +456,11 @@ pre-1.0 shared build에서는 minor release 사이 ABI 변경 가능성이 있�
 
 - `Server(std::string socket_path, ServerOptions options = {})`
 - `on(std::string route, Handler handler)`
+- `on_prefix(std::string prefix, Handler handler)`
 - `on_serialized(std::string route, Handler handler)`
 - `enqueue_maintenance(std::function<void()> task)`
 - `on_stream(std::string route, StreamHandler handler)`
-- `set_max_concurrent_streams(std::size_t limit)`
+- `on_stream_prefix(std::string prefix, StreamHandler handler)`
 - `run()`
 - `stop()`
 - `is_running()`
@@ -475,26 +476,35 @@ pre-1.0 shared build에서는 minor release 사이 ABI 변경 가능성이 있�
 
 ### `easy_uds::Session`
 
-- `request(std::string_view route, std::string_view body = {})` — 지속 연결 재사용
-- `request_stream(std::string_view route, const StreamReader&, response_chunk)`
+- `request(std::string_view route, std::string_view body = {})` — 멀티플렉싱, 동시 호출 가능
+- `request_stream(std::string_view route, const StreamReader&, response_chunk)` — 전용 연결, 세션당 하나
 
 ### 데이터 타입
 
 ```cpp
+using Status = std::int32_t;  // status_ok=200, status_request_timeout=408, status_not_found=404, ...
+
+struct PeerCredentials {
+    pid_t pid; uid_t uid; gid_t gid;
+    bool present;  // 플랫폼이 자격 증명을 제공하지 못하면 false
+};
+
 struct Request {
     std::string route;
     std::string body;
+    PeerCredentials peer;
+    std::uint32_t request_id;
 };
 
 struct Response {
-    int status_code = 200;
+    Status status = 200;
     std::string body;
 };
 
 using StreamReader = std::function<std::size_t(char*, std::size_t)>;
 
 struct StreamResponse {
-    int status_code = 200;
+    Status status = 200;
     StreamReader body;
 };
 ```

@@ -28,7 +28,7 @@ struct FuzzServer {
         : server(kSocketPath, make_options()) {
         server.on("ping", [](const easy_uds::Request&) { return easy_uds::Response{200, "pong"}; });
         server.on("echo", [](const easy_uds::Request& request) { return easy_uds::Response{200, request.body}; });
-        server.on_stream("stream", [](const easy_uds::StreamReader& body) {
+        server.on_stream("stream", [](const easy_uds::StreamReader& body, const easy_uds::Request&) {
             std::array<char, 256> buffer{};
             while (body(buffer.data(), buffer.size()) != 0) {
             }

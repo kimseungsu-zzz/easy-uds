@@ -1,4 +1,4 @@
-#include "protocol_internal.hpp"
+#include "protocol.hpp"
 
 #include <algorithm>
 #include <array>
@@ -38,8 +38,12 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t* data, std::size_t size
                 }
             }
 
-            const HeaderBytes round_trip = encode_header(type, decoded.arg1, decoded.arg2);
-            (void)decode_header(round_trip, type);
+            // Round-trip through the encoder, exercising request-id preservation.
+            const HeaderBytes round_trip = encode_header(type, decoded.request_id, decoded.arg1, decoded.arg2);
+            const DecodedHeader decoded_again = decode_header(round_trip, type);
+            if (decoded_again.request_id != decoded.request_id) {
+                return 1;
+            }
         } catch (...) {
         }
     }

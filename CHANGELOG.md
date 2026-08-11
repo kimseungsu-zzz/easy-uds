@@ -2,6 +2,15 @@
 
 All notable changes to this project are documented here.
 
+## 0.5.0
+
+- Added `Client::session()` returning a persistent `Session` connection whose `request()`/`request_stream()` calls reuse one socket, avoiding per-request connect/accept and teardown. On measured WSL2 hardware the tiny-RPC p50 latency dropped from ~62 µs (one-shot) to ~33 µs on a persistent session. A `Session` serializes concurrent calls, is permanently broken after any I/O error or peer close, and ends after a request to a serialized route.
+- Added `Server::enqueue_maintenance()`: runs a task on the same FIFO executor as `on_serialized` handlers, strictly ordered against them, so external threads can safely mutate server-side state (for example a per-driver instance map) that serialized handlers touch. Tasks are executed exactly once, throwing tasks are contained, and `std::logic_error` is raised when the server is not running.
+- Handler exceptions now propagate their `what()` message in the `500` response body (bounded by `max_message_size`), including streamed handlers and invalid handler responses, instead of a fixed `Internal Server Error`. This exposes the root cause (for example `rpc: titan instance not found`) to clients for debugging.
+- Server connections now serve multiple requests (a session loop), enabling persistent connections end to end. In exchange, the one-connection-per-request path pays a small worker-teardown cost; a follow-up event-loop redesign is planned to recover it.
+- Read-ahead buffering on the server/client read path coalesces frame-header and payload reads into a single `recv()`, reducing syscalls for small messages; large bodies still read directly and keep the previous syscall cost.
+- Added `easy_uds_session_benchmark` and regression tests for persistent sessions, `enqueue_maintenance`, and exception-message propagation.
+
 ## 0.4.2
 
 - Added `Server::on_serialized()` for exclusive RPC handlers that must not execute concurrently. All serialized routes share one FIFO executor, making the API suitable for robot drivers and other single-owner hardware resources accessed by multiple processes.

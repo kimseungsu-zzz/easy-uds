@@ -202,6 +202,29 @@ const int status = client.request_stream("upload", upload, [](std::string_view c
 
 stream은 half-duplex입니다. request stream이 모두 끝난 다음 response stream이 시작됩니다. `max_stream_size = 0`, `stream_timeout = 0`이면 장시간/무제한 stream을 허용할 수 있으며, `io_timeout`은 데이터 진행이 멈춘 peer를 계속 감지합니다.
 
+## 고주파 폴링을 위한 지속 연결 세션
+
+`Client::request()`는 호출마다 연결을 열고 닫습니다. 고주파 폴링(IMU, encoder, health check)에는 `Client::session()`으로 연 연결을 재사용해 요청당 connect/accept 및 teardown 비용을 없앨 수 있습니다:
+
+```cpp
+easy_uds::Client client("/tmp/robot-driver.sock");
+easy_uds::Session session = client.session();  // 하나의 연결을 계속 재사용
+while (true) {
+    const auto response = session.request("imu", "poll");
+    // ...처리...
+}
+```
+
+`Session`은 내부에서 동시 호출을 직렬화하며, I/O 오류 또는 peer close 이후에는 영구적으로 사용할 수 없습니다(재연결하려면 새 세션). serialized route에 대한 요청은 그 응답 후 세션 연결이 종료됩니다.
+
+`Server::enqueue_maintenance()`는 serialized handler와 같은 FIFO 실행기에서, 그리고 그들과 엄격한 순서로 실행되는 작업을 등록합니다. serialized handler가 접근하는 서버 측 상태(예: 드라이버 인스턴스 맵)를 외부 스레드(스위퍼 등)에서 안전하게 정리할 때 사용합니다:
+
+```cpp
+server.enqueue_maintenance([&] { drivers.erase(dead_driver_name); });
+```
+
+작업은 정확히 한 번, FIFO 순서로 실행되며, 예외를 던져도 실행기가 계속 동작합니다. server가 실행 중이 아니면 `std::logic_error`를 던집니다.
+
 ## Server 설정
 
 ```cpp
@@ -314,8 +337,8 @@ socket timeout은 `std::system_error`로 전달되며 timeout의 error code는 `
 ## 오류 동작
 
 - 존재하지 않는 route: `404 / Not Found`
-- handler에서 예외 발생: `500 / Internal Server Error`
-- handler가 음수 status 또는 너무 큰 body 반환: `500 / Internal Server Error`
+- handler에서 예외 발생: `500`, response body에 예외의 `what()` 메시지 포함(`max_message_size`로 제한, `std::exception`이 아닌 throw는 고정 `Internal Server Error`)
+- handler가 음수 status 또는 너무 큰 body 반환: `500`, response body에 거부 사유 포함
 - malformed/timed-out/disconnected peer: 해당 connection만 종료, server는 계속 실행
 - serialized queue에서 server `request_timeout` 초과: handler를 실행하지 않고 connection 종료
 - connection/request deadline 초과: 관찰하는 쪽에서 `ETIMEDOUT`을 가진 `std::system_error`
@@ -432,6 +455,7 @@ pre-1.0 shared build에서는 minor release 사이 ABI 변경 가능성이 있�
 - `Server(std::string socket_path, ServerOptions options = {})`
 - `on(std::string route, Handler handler)`
 - `on_serialized(std::string route, Handler handler)`
+- `enqueue_maintenance(std::function<void()> task)`
 - `on_stream(std::string route, StreamHandler handler)`
 - `set_max_concurrent_streams(std::size_t limit)`
 - `run()`
@@ -444,7 +468,13 @@ pre-1.0 shared build에서는 minor release 사이 ABI 변경 가능성이 있�
 - `Client(std::string socket_path, ClientOptions options = {})`
 - `request(std::string_view route, std::string_view body = {})`
 - `request_stream(std::string_view route, const StreamReader&, response_chunk)`
+- `session()`
 - `socket_path()`
+
+### `easy_uds::Session`
+
+- `request(std::string_view route, std::string_view body = {})` — 지속 연결 재사용
+- `request_stream(std::string_view route, const StreamReader&, response_chunk)`
 
 ### 데이터 타입
 

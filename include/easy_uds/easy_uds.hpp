@@ -108,6 +108,7 @@ struct ClientOptions {
 
 namespace detail {
 struct ServerState;
+struct SessionState;
 }
 
 class Server {
@@ -135,6 +136,15 @@ class Server {
     // the handler.
     void on_serialized(std::string route, Handler handler);
 
+    // Runs `task` on the same single FIFO executor as on_serialized handlers,
+    // strictly ordered against them, so it can safely mutate state (for example
+    // a per-driver instance map) that serialized handlers touch. Safe to call
+    // from any thread while the server is running. Each task is executed
+    // exactly once and cannot be forcibly cancelled by portable C++; an
+    // exception thrown by the task is caught and ignored so the executor keeps
+    // running. Throws std::logic_error when the server is not running.
+    void enqueue_maintenance(std::function<void()> task);
+
     // Registers a streaming route. The handler pulls the request incrementally
     // and returns a pull-based response, so neither body must be held in memory.
     // A stream reader is valid only for the duration of its callback.
@@ -161,6 +171,35 @@ class Server {
     std::shared_ptr<detail::ServerState> state_;
 };
 
+// A persistent connection opened by Client::session(). Every request reuses
+// the same socket, avoiding the per-request connect/accept and teardown of the
+// one-shot Client::request() path.
+//
+// Concurrent request()/request_stream() calls on one Session are serialized
+// internally; the connection carries exactly one in-flight request at a time.
+// After an I/O error, time-out, or peer close, the session is permanently
+// unusable and every later call throws std::logic_error -- open a fresh session
+// to reconnect. Requests to serialized routes are served through the same
+// exclusive executor, ending the session connection after their response.
+class Session {
+  public:
+    ~Session();
+    Session(const Session&) = delete;
+    Session& operator=(const Session&) = delete;
+    Session(Session&&) = delete;
+    Session& operator=(Session&&) = delete;
+
+    [[nodiscard]] Response request(std::string_view route, std::string_view body = {});
+
+    [[nodiscard]] int request_stream(std::string_view route, const StreamReader& request_body,
+                                     const std::function<void(std::string_view)>& response_chunk);
+
+  private:
+    friend class Client;
+    Session(std::string socket_path, ClientOptions options);
+    std::unique_ptr<detail::SessionState> state_;
+};
+
 class Client {
   public:
     explicit Client(std::string socket_path, ClientOptions options = {});
@@ -168,6 +207,9 @@ class Client {
     // Opens one connection, sends one request, receives one response, then closes.
     // Multiple threads may call request() concurrently on the same Client object.
     [[nodiscard]] Response request(std::string_view route, std::string_view body = {}) const;
+
+    // Opens a persistent connection using this client's socket path and options.
+    [[nodiscard]] Session session() const;
 
     // Streams one request and response over a single connection. `request_body`
     // is pulled into fixed-size buffers. `response_chunk` is called with views

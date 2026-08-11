@@ -374,31 +374,79 @@ void write_frame_with_payload(int fd, WireType type, std::uint32_t arg1, std::ui
     write_iovecs_exact(fd, parts.data(), parts.size(), inactivity_timeout, absolute_deadline);
 }
 
-void read_exact(int fd, void* data, std::size_t size, std::chrono::milliseconds inactivity_timeout,
-                Deadline absolute_deadline) {
-    auto* bytes = static_cast<unsigned char*>(data);
-    std::size_t received = 0;
+// Per-connection read-ahead buffer. Small logical reads (a frame header and the
+// payload that follows it) are served from one recv(), coalescing the
+// header+route+body and response-header+body sequences the protocol produces.
+// Demands of at least the buffer size fall through to a direct recv() so large
+// bodies keep the previous single-pass syscall cost.
+inline constexpr std::size_t read_ahead_capacity = 4096;
 
-    while (received < size) {
-        check_absolute_deadline(absolute_deadline, "receive timed out");
-        const ssize_t result = ::recv(fd, bytes + received, size - received, 0);
-        if (result > 0) {
-            received += static_cast<std::size_t>(result);
-            continue;
+class BufferedReader {
+  public:
+    explicit BufferedReader(int fd) noexcept : fd_(fd) {}
+
+    void read(void* data, std::size_t size, std::chrono::milliseconds inactivity_timeout,
+              Deadline absolute_deadline) {
+        auto* bytes = static_cast<char*>(data);
+        std::size_t received = 0;
+        while (received < size) {
+            if (size_ != 0) {
+                const std::size_t take = std::min(size - received, size_);
+                std::memcpy(bytes + received, buffer_.data() + start_, take);
+                start_ += take;
+                size_ -= take;
+                received += take;
+                continue;
+            }
+            if (size - received >= buffer_.size()) {
+                // read_direct delivers every remaining byte, so the read is done.
+                read_direct(bytes + received, size - received, inactivity_timeout, absolute_deadline);
+                return;
+            }
+            start_ = 0;
+            size_ = static_cast<std::size_t>(
+                receive(buffer_.data(), buffer_.size(), inactivity_timeout, absolute_deadline));
         }
-        if (result == 0) {
-            throw_system_error("peer closed connection", ECONNRESET);
-        }
-        if (errno == EINTR) {
-            continue;
-        }
-        if (errno == EAGAIN || errno == EWOULDBLOCK) {
-            wait_for_io(fd, POLLIN, inactivity_timeout, absolute_deadline, "receive timed out");
-            continue;
-        }
-        throw_system_error("receive failed");
     }
-}
+
+  private:
+    ssize_t receive(void* data, std::size_t capacity, std::chrono::milliseconds inactivity_timeout,
+                    Deadline absolute_deadline) {
+        while (true) {
+            check_absolute_deadline(absolute_deadline, "receive timed out");
+            const ssize_t result = ::recv(fd_, data, capacity, 0);
+            if (result > 0) {
+                return result;
+            }
+            if (result == 0) {
+                throw_system_error("peer closed connection", ECONNRESET);
+            }
+            if (errno == EINTR) {
+                continue;
+            }
+            if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                wait_for_io(fd_, POLLIN, inactivity_timeout, absolute_deadline, "receive timed out");
+                continue;
+            }
+            throw_system_error("receive failed");
+        }
+    }
+
+    void read_direct(char* data, std::size_t size, std::chrono::milliseconds inactivity_timeout,
+                     Deadline absolute_deadline) {
+        while (size != 0) {
+            const std::size_t received =
+                static_cast<std::size_t>(receive(data, size, inactivity_timeout, absolute_deadline));
+            data += received;
+            size -= received;
+        }
+    }
+
+    int fd_;
+    std::array<char, read_ahead_capacity> buffer_{};
+    std::size_t start_ = 0;
+    std::size_t size_ = 0;
+};
 
 void write_header(int fd, WireType type, std::uint32_t arg1, std::uint32_t arg2,
                   std::chrono::milliseconds inactivity_timeout, Deadline absolute_deadline) {
@@ -406,17 +454,17 @@ void write_header(int fd, WireType type, std::uint32_t arg1, std::uint32_t arg2,
     write_exact(fd, header.data(), header.size(), inactivity_timeout, absolute_deadline);
 }
 
-protocol::DecodedHeader read_header(int fd, WireType expected_type, std::chrono::milliseconds inactivity_timeout,
-                                    Deadline absolute_deadline) {
+protocol::DecodedHeader read_header(BufferedReader& reader, WireType expected_type,
+                                    std::chrono::milliseconds inactivity_timeout, Deadline absolute_deadline) {
     HeaderBytes header{};
-    read_exact(fd, header.data(), header.size(), inactivity_timeout, absolute_deadline);
+    reader.read(header.data(), header.size(), inactivity_timeout, absolute_deadline);
     return protocol::decode_header(header, expected_type);
 }
 
-protocol::DecodedHeader read_header(int fd, std::chrono::milliseconds inactivity_timeout,
+protocol::DecodedHeader read_header(BufferedReader& reader, std::chrono::milliseconds inactivity_timeout,
                                     Deadline absolute_deadline) {
     HeaderBytes header{};
-    read_exact(fd, header.data(), header.size(), inactivity_timeout, absolute_deadline);
+    reader.read(header.data(), header.size(), inactivity_timeout, absolute_deadline);
     return protocol::decode_header(header);
 }
 
@@ -434,7 +482,7 @@ void write_request(int fd, std::string_view route, std::string_view body, std::s
     write_iovecs_exact(fd, parts.data(), parts.size(), inactivity_timeout, absolute_deadline);
 }
 
-Request read_request(int fd, const protocol::DecodedHeader& header, std::size_t max_message_size,
+Request read_request(BufferedReader& reader, const protocol::DecodedHeader& header, std::size_t max_message_size,
                      std::chrono::milliseconds inactivity_timeout, Deadline absolute_deadline) {
     if (header.type != WireType::request) {
         throw std::runtime_error("unexpected protocol message type");
@@ -445,16 +493,16 @@ Request read_request(int fd, const protocol::DecodedHeader& header, std::size_t 
     request.route.resize(header.arg1);
     request.body.resize(header.arg2);
 
-    read_exact(fd, request.route.data(), request.route.size(), inactivity_timeout, absolute_deadline);
-    read_exact(fd, request.body.data(), request.body.size(), inactivity_timeout, absolute_deadline);
+    reader.read(request.route.data(), request.route.size(), inactivity_timeout, absolute_deadline);
+    reader.read(request.body.data(), request.body.size(), inactivity_timeout, absolute_deadline);
     return request;
 }
 
 class IncomingStream {
   public:
-    IncomingStream(int fd, WireType chunk_type, WireType end_type, std::size_t max_size,
+    IncomingStream(BufferedReader& reader, WireType chunk_type, WireType end_type, std::size_t max_size,
                    std::chrono::milliseconds inactivity_timeout, Deadline absolute_deadline)
-        : fd_(fd), chunk_type_(chunk_type), end_type_(end_type), max_size_(max_size),
+        : reader_(reader), chunk_type_(chunk_type), end_type_(end_type), max_size_(max_size),
           inactivity_timeout_(inactivity_timeout), absolute_deadline_(absolute_deadline) {}
 
     std::size_t read(char* buffer, std::size_t capacity) {
@@ -469,7 +517,7 @@ class IncomingStream {
         }
 
         if (frame_remaining_ == 0) {
-            const auto header = read_header(fd_, inactivity_timeout_, absolute_deadline_);
+            const auto header = read_header(reader_, inactivity_timeout_, absolute_deadline_);
             if (header.type == end_type_) {
                 if (header.arg1 != 0 || header.arg2 != 0) {
                     throw std::runtime_error("invalid stream end frame");
@@ -490,7 +538,7 @@ class IncomingStream {
         }
 
         const std::size_t size = std::min(capacity, frame_remaining_);
-        read_exact(fd_, buffer, size, inactivity_timeout_, absolute_deadline_);
+        reader_.read(buffer, size, inactivity_timeout_, absolute_deadline_);
         frame_remaining_ -= size;
         return size;
     }
@@ -504,7 +552,7 @@ class IncomingStream {
     void deactivate() noexcept { active_ = false; }
 
   private:
-    int fd_;
+    BufferedReader& reader_;
     WireType chunk_type_;
     WireType end_type_;
     std::size_t max_size_;
@@ -554,9 +602,9 @@ void write_response(int fd, const Response& response, std::size_t max_message_si
                              response.body.size(), inactivity_timeout, absolute_deadline);
 }
 
-Response read_response(int fd, std::size_t max_message_size, std::chrono::milliseconds inactivity_timeout,
-                       Deadline absolute_deadline) {
-    const auto header = read_header(fd, WireType::response, inactivity_timeout, absolute_deadline);
+Response read_response(BufferedReader& reader, std::size_t max_message_size,
+                       std::chrono::milliseconds inactivity_timeout, Deadline absolute_deadline) {
+    const auto header = read_header(reader, WireType::response, inactivity_timeout, absolute_deadline);
     if (header.arg1 > static_cast<std::uint32_t>(INT_MAX)) {
         throw std::runtime_error("response status_code is out of range");
     }
@@ -567,7 +615,7 @@ Response read_response(int fd, std::size_t max_message_size, std::chrono::millis
     Response response;
     response.status_code = static_cast<int>(header.arg1);
     response.body.resize(header.arg2);
-    read_exact(fd, response.body.data(), response.body.size(), inactivity_timeout, absolute_deadline);
+    reader.read(response.body.data(), response.body.size(), inactivity_timeout, absolute_deadline);
     return response;
 }
 
@@ -730,7 +778,6 @@ namespace detail {
 
 struct PendingConnection {
     int fd = -1;
-    Deadline deadline = Deadline::max();
 };
 
 struct HandlerEntry {
@@ -743,6 +790,16 @@ struct PendingSerializedRequest {
     Deadline deadline = Deadline::max();
     Request request;
     Server::Handler handler;
+    // When set, this is a maintenance job instead of a client request: the fd
+    // is empty and the task runs on the same executor as serialized routes.
+    std::function<void()> maintenance;
+};
+
+struct SessionState {
+    FileDescriptor fd;
+    ClientOptions options;
+    std::mutex mutex;
+    bool broken = false;
 };
 
 struct ServerState {
@@ -830,9 +887,28 @@ Response invoke_request_handler(const Server::Handler& handler, const Request& r
                                 std::size_t max_message_size) {
     try {
         return handler(request);
+    } catch (const std::exception& error) {
+        // Propagate the root cause (for example "rpc: titan instance not
+        // found") to the client instead of a fixed generic body.
+        return {500, bounded_error_body(error.what(), max_message_size)};
     } catch (...) {
         return {500, bounded_error_body("Internal Server Error", max_message_size)};
     }
+}
+
+// Produces a stream body that emits `message` (bounded by max_message_size)
+// exactly once. Used for streamed 500 responses.
+StreamReader bounded_error_body_reader(std::string_view message, std::size_t max_message_size) {
+    std::string body = message.size() <= max_message_size ? std::string(message) : std::string{};
+    return [body = std::move(body), offset = std::size_t{0}](char* output, std::size_t capacity) mutable {
+        if (offset >= body.size()) {
+            return std::size_t{0};
+        }
+        const std::size_t take = std::min(capacity, body.size() - offset);
+        std::memcpy(output, body.data() + offset, take);
+        offset += take;
+        return take;
+    };
 }
 
 Server::StreamHandler find_stream_handler(const std::shared_ptr<detail::ServerState>& state,
@@ -872,8 +948,9 @@ class ActiveStreamGuard {
     std::shared_ptr<detail::ServerState> state_;
 };
 
-void write_internal_server_error(int fd, const std::shared_ptr<detail::ServerState>& state, Deadline deadline) {
-    write_response(fd, {500, bounded_error_body("Internal Server Error", state->options.max_message_size)},
+void write_internal_server_error(int fd, const std::shared_ptr<detail::ServerState>& state, Deadline deadline,
+                                 std::string_view message = "Internal Server Error") {
+    write_response(fd, {500, bounded_error_body(message, state->options.max_message_size)},
                    state->options.max_message_size, state->options.io_timeout, deadline);
 }
 
@@ -902,97 +979,116 @@ bool enqueue_serialized_request(const std::shared_ptr<detail::ServerState>& stat
     // serialized_mutex, the same lock stop() uses to drain queued descriptors.
     // A handed-off fd therefore always has exactly one owner at a time.
     state->pending_serialized_requests.push_back(
-        {std::move(client), deadline, std::move(request), std::move(handler)});
+        {std::move(client), deadline, std::move(request), std::move(handler), {}});
     lock.unlock();
     state->serialized_cv.notify_one();
     return true;
 }
 
-ClientDisposition handle_client(const std::shared_ptr<detail::ServerState>& state, FileDescriptor& client,
-                                Deadline deadline) noexcept {
+ClientDisposition handle_client(const std::shared_ptr<detail::ServerState>& state,
+                                FileDescriptor& client) noexcept {
     const int fd = client.get();
-    try {
-        const auto initial = read_header(fd, state->options.io_timeout, deadline);
-        if (initial.type == WireType::request) {
-            const Request request =
-                read_request(fd, initial, state->options.max_message_size, state->options.io_timeout, deadline);
+    BufferedReader reader(fd);
+    while (true) {
+        if (!state->running.load()) {
+            break;
+        }
+        // Each request on a persistent session gets a fresh absolute deadline so
+        // a long-lived connection cannot consume accept-time budget forever.
+        const Deadline deadline = deadline_from_now(state->options.request_timeout);
+        try {
+            const auto initial = read_header(reader, state->options.io_timeout, deadline);
+            if (initial.type == WireType::request) {
+                const Request request = read_request(reader, initial, state->options.max_message_size,
+                                                     state->options.io_timeout, deadline);
 
-            Server::Handler handler;
-            bool serialized = false;
-            if (!find_request_handler(state, request.route, handler, serialized)) {
-                write_response(fd, {404, bounded_error_body("Not Found", state->options.max_message_size)},
-                               state->options.max_message_size, state->options.io_timeout, deadline);
-                return ClientDisposition::complete;
-            }
-
-            if (serialized) {
-                if (enqueue_serialized_request(state, std::move(client), deadline, request, std::move(handler))) {
-                    return ClientDisposition::serialized_handoff;
+                Server::Handler handler;
+                bool serialized = false;
+                if (!find_request_handler(state, request.route, handler, serialized)) {
+                    write_response(fd, {404, bounded_error_body("Not Found", state->options.max_message_size)},
+                                   state->options.max_message_size, state->options.io_timeout, deadline);
+                    continue;
                 }
-                return ClientDisposition::complete;
+
+                if (serialized) {
+                    if (enqueue_serialized_request(state, std::move(client), deadline, request,
+                                                   std::move(handler))) {
+                        return ClientDisposition::serialized_handoff;
+                    }
+                    continue;
+                }
+
+                const Response response =
+                    invoke_request_handler(handler, request, state->options.max_message_size);
+                try {
+                    write_response(fd, response, state->options.max_message_size, state->options.io_timeout,
+                                   deadline);
+                } catch (const std::invalid_argument& error) {
+                    write_internal_server_error(fd, state, deadline, error.what());
+                } catch (const std::length_error& error) {
+                    write_internal_server_error(fd, state, deadline, error.what());
+                }
+                continue;
             }
 
-            const Response response = invoke_request_handler(handler, request, state->options.max_message_size);
-            try {
-                write_response(fd, response, state->options.max_message_size, state->options.io_timeout, deadline);
-            } catch (const std::invalid_argument&) {
-                write_internal_server_error(fd, state, deadline);
-            } catch (const std::length_error&) {
-                write_internal_server_error(fd, state, deadline);
+            if (initial.type != WireType::stream_request || initial.arg1 == 0 || initial.arg2 != 0 ||
+                initial.arg1 > state->options.max_message_size) {
+                throw std::runtime_error("invalid stream request header");
             }
-            return ClientDisposition::complete;
-        }
+            if (!try_acquire_stream_slot(state)) {
+                break;
+            }
+            ActiveStreamGuard stream_guard(state);
 
-        if (initial.type != WireType::stream_request || initial.arg1 == 0 || initial.arg2 != 0 ||
-            initial.arg1 > state->options.max_message_size) {
-            throw std::runtime_error("invalid stream request header");
-        }
-        if (!try_acquire_stream_slot(state)) {
-            return ClientDisposition::complete;
-        }
-        ActiveStreamGuard stream_guard(state);
+            const Deadline stream_deadline = deadline_from_now(state->options.stream_timeout);
+            std::string route(initial.arg1, '\0');
+            reader.read(route.data(), route.size(), state->options.io_timeout, stream_deadline);
 
-        const Deadline stream_deadline = deadline_from_now(state->options.stream_timeout);
-        std::string route(initial.arg1, '\0');
-        read_exact(fd, route.data(), route.size(), state->options.io_timeout, stream_deadline);
+            IncomingStream incoming(reader, WireType::stream_request_chunk, WireType::stream_request_end,
+                                    state->options.max_stream_size, state->options.io_timeout, stream_deadline);
+            StreamReader reader_fn = [&incoming](char* buffer, std::size_t capacity) {
+                return incoming.read(buffer, capacity);
+            };
 
-        IncomingStream incoming(fd, WireType::stream_request_chunk, WireType::stream_request_end,
-                                state->options.max_stream_size, state->options.io_timeout, stream_deadline);
-        StreamReader reader = [&incoming](char* buffer, std::size_t capacity) {
-            return incoming.read(buffer, capacity);
-        };
+            StreamResponse response;
+            const auto handler = find_stream_handler(state, route);
+            if (!handler) {
+                response.status_code = 404;
+            } else {
+                try {
+                    response = handler(reader_fn);
+                } catch (const std::exception& error) {
+                    response = {500, bounded_error_body_reader(error.what(), state->options.max_message_size)};
+                } catch (...) {
+                    response = {500, {}};
+                }
+            }
 
-        StreamResponse response;
-        const auto handler = find_stream_handler(state, route);
-        if (!handler) {
-            response.status_code = 404;
-        } else {
-            try {
-                response = handler(reader);
-            } catch (...) {
+            // A handler may intentionally inspect only a prefix. Consume the rest
+            // before sending a response so the half-duplex exchange cannot deadlock.
+            incoming.drain(state->options.stream_chunk_size);
+            incoming.deactivate();
+
+            if (response.status_code < 0) {
                 response = {500, {}};
             }
+            write_header(fd, WireType::stream_response, static_cast<std::uint32_t>(response.status_code), 0,
+                         state->options.io_timeout, stream_deadline);
+            write_stream_chunks(fd, WireType::stream_response_chunk, response.body,
+                                state->options.stream_chunk_size, state->options.max_stream_size,
+                                state->options.io_timeout, stream_deadline);
+            // Release admission before the end marker becomes visible to the
+            // client. A sequential request can then never race the guard cleanup.
+            stream_guard.release();
+            write_header(fd, WireType::stream_response_end, 0, 0, state->options.io_timeout, stream_deadline);
+            continue;
+        } catch (...) {
+            // The peer closed the connection after its final request (recv
+            // returns zero), timed out, sent malformed frames, or the server
+            // stopped. The session is over; the worker loop closes the
+            // descriptor. Any failure is isolated to this connection.
+            break;
         }
-
-        // A handler may intentionally inspect only a prefix. Consume the rest
-        // before sending a response so the half-duplex exchange cannot deadlock.
-        incoming.drain(state->options.stream_chunk_size);
-        incoming.deactivate();
-
-        if (response.status_code < 0) {
-            response = {500, {}};
-        }
-        write_header(fd, WireType::stream_response, static_cast<std::uint32_t>(response.status_code), 0,
-                     state->options.io_timeout, stream_deadline);
-        write_stream_chunks(fd, WireType::stream_response_chunk, response.body, state->options.stream_chunk_size,
-                            state->options.max_stream_size, state->options.io_timeout, stream_deadline);
-        // Release admission before the end marker becomes visible to the
-        // client. A sequential request can then never race the guard cleanup.
-        stream_guard.release();
-        write_header(fd, WireType::stream_response_end, 0, 0, state->options.io_timeout, stream_deadline);
-    } catch (...) {
-        // Invalid, timed-out, disconnected, or shutdown peers are isolated to
-        // their worker. Public server state is unaffected.
     }
     return ClientDisposition::complete;
 }
@@ -1017,6 +1113,15 @@ void serialized_worker_loop(const std::shared_ptr<detail::ServerState>& state) n
             state->pending_serialized_requests.pop_front();
         }
 
+        if (job.maintenance) {
+            try {
+                job.maintenance();
+            } catch (...) {
+                // A failed maintenance task must never take the executor down.
+            }
+            continue;
+        }
+
         const int fd = job.fd.get();
         try {
             // A robot command that has already exceeded its server-side
@@ -1032,10 +1137,10 @@ void serialized_worker_loop(const std::shared_ptr<detail::ServerState>& state) n
             try {
                 write_response(fd, response, state->options.max_message_size,
                                state->options.io_timeout, job.deadline);
-            } catch (const std::invalid_argument&) {
-                write_internal_server_error(fd, state, job.deadline);
-            } catch (const std::length_error&) {
-                write_internal_server_error(fd, state, job.deadline);
+            } catch (const std::invalid_argument& error) {
+                write_internal_server_error(fd, state, job.deadline, error.what());
+            } catch (const std::length_error& error) {
+                write_internal_server_error(fd, state, job.deadline, error.what());
             }
         } catch (...) {
             // Expired, disconnected, or shutdown queued requests are dropped.
@@ -1104,7 +1209,7 @@ void worker_loop(const std::shared_ptr<detail::ServerState>& state) noexcept {
         }
 
         FileDescriptor client(connection.fd);
-        const ClientDisposition disposition = handle_client(state, client, connection.deadline);
+        const ClientDisposition disposition = handle_client(state, client);
 
         if (disposition == ClientDisposition::serialized_handoff) {
             // Ownership was moved into the serialized queue under
@@ -1350,6 +1455,29 @@ void Server::on_serialized(std::string route, Handler handler) {
     }
 }
 
+void Server::enqueue_maintenance(std::function<void()> task) {
+    if (!task) {
+        throw std::invalid_argument("maintenance task must not be empty");
+    }
+    const auto state = state_;
+    // The task shares the serialized executor, so it is strictly ordered with
+    // on_serialized handler execution and never races against it. It cannot be
+    // forcibly cancelled by portable C++; if a long serialized command is
+    // running, the task waits behind it.
+    if (!ensure_serialized_worker(state)) {
+        throw std::logic_error("server is not running");
+    }
+    std::unique_lock<std::mutex> lock(state->serialized_mutex);
+    if (state->serialized_stopping.load() || !state->running.load()) {
+        throw std::logic_error("server is not running");
+    }
+    detail::PendingSerializedRequest job;
+    job.maintenance = std::move(task);
+    state->pending_serialized_requests.push_back(std::move(job));
+    lock.unlock();
+    state->serialized_cv.notify_one();
+}
+
 void Server::on_stream(std::string route, StreamHandler handler) {
     if (route.empty()) {
         throw std::invalid_argument("route must not be empty");
@@ -1511,8 +1639,7 @@ void Server::run() {
                 std::lock_guard<std::mutex> lock(state->work_mutex);
                 if (!state->workers_stopping && state->running.load() &&
                     state->pending_connections.size() + state->active_fds.size() < state->options.max_connections) {
-                    state->pending_connections.push_back(
-                        {client.release(), deadline_from_now(state->options.request_timeout)});
+                    state->pending_connections.push_back({client.release()});
                     accepted = true;
                 }
             }
@@ -1565,7 +1692,8 @@ Response Client::request(std::string_view route, std::string_view body) const {
     connect_nonblocking(fd.get(), address, options_.connect_timeout, deadline);
 
     write_request(fd.get(), route, body, options_.max_message_size, options_.io_timeout, deadline);
-    return read_response(fd.get(), options_.max_message_size, options_.io_timeout, deadline);
+    BufferedReader reader(fd.get());
+    return read_response(reader, options_.max_message_size, options_.io_timeout, deadline);
 }
 
 int Client::request_stream(std::string_view route, const StreamReader& request_body,
@@ -1588,12 +1716,13 @@ int Client::request_stream(std::string_view route, const StreamReader& request_b
                         options_.max_stream_size, options_.io_timeout, deadline);
     write_header(fd.get(), WireType::stream_request_end, 0, 0, options_.io_timeout, deadline);
 
-    const auto header = read_header(fd.get(), WireType::stream_response, options_.io_timeout, deadline);
+    BufferedReader reader(fd.get());
+    const auto header = read_header(reader, WireType::stream_response, options_.io_timeout, deadline);
     if (header.arg1 > static_cast<std::uint32_t>(INT_MAX) || header.arg2 != 0) {
         throw std::runtime_error("invalid stream response header");
     }
 
-    IncomingStream incoming(fd.get(), WireType::stream_response_chunk, WireType::stream_response_end,
+    IncomingStream incoming(reader, WireType::stream_response_chunk, WireType::stream_response_end,
                             options_.max_stream_size, options_.io_timeout, deadline);
     std::vector<char> buffer(options_.stream_chunk_size);
     while (true) {
@@ -1607,6 +1736,87 @@ int Client::request_stream(std::string_view route, const StreamReader& request_b
     }
     incoming.deactivate();
     return static_cast<int>(header.arg1);
+}
+
+Session::Session(std::string socket_path, ClientOptions options)
+    : state_(std::make_unique<detail::SessionState>()) {
+    state_->options = options;
+    const Deadline deadline = deadline_from_now(options.request_timeout);
+    state_->fd = make_socket();
+    const sockaddr_un address = make_address(socket_path);
+    connect_nonblocking(state_->fd.get(), address, options.connect_timeout, deadline);
+}
+
+Session::~Session() = default;
+
+Response Session::request(std::string_view route, std::string_view body) {
+    protocol::validate_request_lengths(route.size(), body.size(), state_->options.max_message_size);
+    std::lock_guard<std::mutex> lock(state_->mutex);
+    if (state_->broken) {
+        throw std::logic_error("session connection is no longer usable");
+    }
+    const Deadline deadline = deadline_from_now(state_->options.request_timeout);
+    try {
+        write_request(state_->fd.get(), route, body, state_->options.max_message_size,
+                      state_->options.io_timeout, deadline);
+        BufferedReader reader(state_->fd.get());
+        return read_response(reader, state_->options.max_message_size, state_->options.io_timeout, deadline);
+    } catch (...) {
+        state_->broken = true;
+        throw;
+    }
+}
+
+int Session::request_stream(std::string_view route, const StreamReader& request_body,
+                            const std::function<void(std::string_view)>& response_chunk) {
+    if (route.empty()) {
+        throw std::invalid_argument("route must not be empty");
+    }
+    if (route.size() > state_->options.max_message_size || route.size() > protocol::max_wire_field) {
+        throw std::length_error("route exceeds max_message_size");
+    }
+    std::lock_guard<std::mutex> lock(state_->mutex);
+    if (state_->broken) {
+        throw std::logic_error("session connection is no longer usable");
+    }
+    const Deadline deadline = deadline_from_now(state_->options.stream_timeout);
+    try {
+        write_frame_with_payload(state_->fd.get(), WireType::stream_request,
+                                 static_cast<std::uint32_t>(route.size()), 0, route.data(), route.size(),
+                                 state_->options.io_timeout, deadline);
+        write_stream_chunks(state_->fd.get(), WireType::stream_request_chunk, request_body,
+                            state_->options.stream_chunk_size, state_->options.max_stream_size,
+                            state_->options.io_timeout, deadline);
+        write_header(state_->fd.get(), WireType::stream_request_end, 0, 0, state_->options.io_timeout, deadline);
+
+        BufferedReader reader(state_->fd.get());
+        const auto header = read_header(reader, WireType::stream_response, state_->options.io_timeout, deadline);
+        if (header.arg1 > static_cast<std::uint32_t>(INT_MAX) || header.arg2 != 0) {
+            throw std::runtime_error("invalid stream response header");
+        }
+
+        IncomingStream incoming(reader, WireType::stream_response_chunk, WireType::stream_response_end,
+                                state_->options.max_stream_size, state_->options.io_timeout, deadline);
+        std::vector<char> buffer(state_->options.stream_chunk_size);
+        while (true) {
+            const std::size_t size = incoming.read(buffer.data(), buffer.size());
+            if (size == 0) {
+                break;
+            }
+            if (response_chunk) {
+                response_chunk(std::string_view(buffer.data(), size));
+            }
+        }
+        incoming.deactivate();
+        return static_cast<int>(header.arg1);
+    } catch (...) {
+        state_->broken = true;
+        throw;
+    }
+}
+
+Session Client::session() const {
+    return Session(socket_path_, options_);
 }
 
 } // namespace easy_uds

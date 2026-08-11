@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.20)
 
-project(easy_uds VERSION 0.4.2 LANGUAGES CXX)
+project(easy_uds VERSION 0.5.0 LANGUAGES CXX)
 
 if(NOT UNIX)
     message(FATAL_ERROR "easy-uds currently requires POSIX Unix-domain socket APIs")
@@ -102,10 +102,15 @@ if(EASY_UDS_BUILD_BENCHMARKS)
     target_link_libraries(easy_uds_stream_benchmark PRIVATE easy_uds::easy_uds)
     add_executable(easy_uds_rpc_benchmark tests/easy_uds_rpc_benchmark.cpp)
     target_link_libraries(easy_uds_rpc_benchmark PRIVATE easy_uds::easy_uds)
+    add_executable(easy_uds_session_benchmark tests/easy_uds_session_benchmark.cpp)
+    target_link_libraries(easy_uds_session_benchmark PRIVATE easy_uds::easy_uds)
     target_compile_options(easy_uds_stream_benchmark PRIVATE
         $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Wall;-Wextra;-Wpedantic>
     )
     target_compile_options(easy_uds_rpc_benchmark PRIVATE
+        $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Wall;-Wextra;-Wpedantic>
+    )
+    target_compile_options(easy_uds_session_benchmark PRIVATE
         $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Wall;-Wextra;-Wpedantic>
     )
     if(EASY_UDS_WARNINGS_AS_ERRORS)

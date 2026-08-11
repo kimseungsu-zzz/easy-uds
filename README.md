@@ -103,6 +103,15 @@ server.run();
 
 The FIFO order is the order in which complete serialized requests are handed off by the regular workers. Queue time counts toward the server's existing `request_timeout`. If that deadline expires before a queued command begins execution, the command is discarded and its handler is **not** called. `stop()` also discards commands that are still waiting in the serialized queue. A serialized handler that has already started has the same cooperative-cancellation limitation as a regular handler and cannot be forcibly interrupted by portable C++.
 
+`Server::enqueue_maintenance()` runs a task on the same FIFO executor, strictly ordered with serialized handlers, so server-side state that serialized handlers touch (for example the driver instance map) can be cleaned up safely from any thread when a client disappears:
+
+```cpp
+// Called from a sweeper thread when a client is detected dead.
+server.enqueue_maintenance([&] { drivers.erase(dead_driver_name); });
+```
+
+Tasks run exactly once, in FIFO order with serialized commands, and a throwing task is caught so the executor keeps running. `enqueue_maintenance()` throws `std::logic_error` when the server is not running.
+
 ### Large or continuous bodies
 
 `request_stream()` pulls request bytes into a reusable fixed-size buffer and delivers response bytes incrementally. Returning `0` from a `StreamReader` ends that side of the stream.
@@ -130,6 +139,21 @@ const int status = client.request_stream("upload", upload, [](std::string_view c
 ```
 
 The exchange is half-duplex: the request stream finishes before the response stream starts. Socket backpressure bounds in-flight data. Set `max_stream_size = 0` and `stream_timeout = 0` for an unbounded long-lived stream; `io_timeout` still closes a peer that stops making progress.
+
+### Persistent sessions for high-frequency polling
+
+`Client::request()` opens, uses, and closes one connection per call. For high-frequency polling (IMU, encoders, health checks), `Client::session()` opens a persistent connection whose `request()` calls reuse the socket, avoiding per-request connect/accept and teardown:
+
+```cpp
+easy_uds::Client client("/tmp/robot-driver.sock");
+easy_uds::Session session = client.session();  // one connection, reused
+while (true) {
+    const auto response = session.request("imu", "poll");
+    // ...process...
+}
+```
+
+A `Session` serializes concurrent calls internally and is permanently broken after any I/O error or peer close — open a fresh session to reconnect. A request to a serialized route ends the session connection after its response.
 
 ## Configuration
 
@@ -229,8 +253,8 @@ Each connection carries exactly one request and one response. Either body may us
 ## Error behavior
 
 - Unknown route: `404 / Not Found`
-- Handler throws: `500 / Internal Server Error`
-- Handler returns a negative status or oversized body: `500 / Internal Server Error`
+- Handler throws: `500` with the exception's `what()` as the response body (bounded by `max_message_size`; a non-`std::exception` throw yields the generic `Internal Server Error` body)
+- Handler returns a negative status or oversized body: `500` with the rejection reason as the response body
 - Malformed/timed-out/disconnected peer: that connection is closed; the server continues running
 - Connection/request deadline exceeded: `std::system_error` with `ETIMEDOUT` on the side observing the timeout
 - Invalid local arguments/configuration: `std::invalid_argument` or `std::length_error`
@@ -299,11 +323,13 @@ cmake -S . -B build-bench -DCMAKE_BUILD_TYPE=Release \
 cmake --build build-bench --parallel
 # Streaming: payload MiB, chunk bytes
 ./build-bench/easy_uds_stream_benchmark 1024 65536
-# Tiny RPC: total requests, client concurrency
+# Tiny RPC: total requests, client concurrency (one-shot, one connection per request)
 ./build-bench/easy_uds_rpc_benchmark 100000 8
+# Tiny RPC over persistent sessions: total requests, concurrent sessions
+./build-bench/easy_uds_session_benchmark 200000 8
 ```
 
-The streaming benchmark generates bytes on demand and discards them at the receiver, so it measures the library and local socket path without disk-I/O effects. The RPC benchmark measures the existing one-connection-per-request API and reports aggregate throughput plus average, p50, p95, and p99 request latency.
+The streaming benchmark generates bytes on demand and discards them at the receiver, so it measures the library and local socket path without disk-I/O effects. The RPC benchmarks measure client-side latency on the one-connection-per-request API and on the persistent `Client::session()` API respectively, reporting aggregate throughput plus average, p50, p95, and p99 request latency.
 
 ## Run the examples
 
@@ -351,6 +377,7 @@ For pre-1.0 shared builds, the ELF `SOVERSION` tracks the major and minor releas
 - `Server(std::string socket_path, ServerOptions options = {})`
 - `on(std::string route, Handler handler)`
 - `on_serialized(std::string route, Handler handler)`
+- `enqueue_maintenance(std::function<void()> task)`
 - `on_stream(std::string route, StreamHandler handler)`
 - `set_max_concurrent_streams(std::size_t limit)`
 - `run()`
@@ -363,7 +390,13 @@ For pre-1.0 shared builds, the ELF `SOVERSION` tracks the major and minor releas
 - `Client(std::string socket_path, ClientOptions options = {})`
 - `request(std::string_view route, std::string_view body = {})`
 - `request_stream(std::string_view route, const StreamReader&, response_chunk)`
+- `session()`
 - `socket_path()`
+
+### `easy_uds::Session`
+
+- `request(std::string_view route, std::string_view body = {})` — reuses the persistent connection
+- `request_stream(std::string_view route, const StreamReader&, response_chunk)`
 
 ### Data types
 

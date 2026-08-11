@@ -49,11 +49,7 @@ int main(int argc, char** argv) {
         return 2;
     }
     server_options.max_connections = std::max<std::size_t>(64, concurrency * 2);
-    // A persistent session occupies one worker for its lifetime, so give the
-    // server as many workers as concurrent sessions and lift the automatic
-    // one-worker reservation (the benchmark saturates sessions on purpose).
     server_options.worker_threads = std::max<std::size_t>(1, concurrency);
-    server_options.max_persistent_sessions = server_options.worker_threads;
     server_options.listen_backlog = static_cast<int>(
         std::min<std::size_t>(server_options.max_connections, static_cast<std::size_t>(std::numeric_limits<int>::max())));
     server_options.stale_socket_grace_period = std::chrono::milliseconds{0};
@@ -83,8 +79,8 @@ int main(int argc, char** argv) {
         workers.emplace_back([&, worker, worker_iterations] {
             auto& samples = latency_samples[worker];
             samples.reserve(worker_iterations);
-            // Open the persistent connection before the start barrier so
-            // connection setup is not part of the measured steady-state latency.
+            // Each worker opens its persistent multiplexed session before the
+            // start barrier so connection setup is not measured.
             easy_uds::Session session = client.session();
             ready.fetch_add(1, std::memory_order_relaxed);
             while (!start_workers.load(std::memory_order_acquire)) {
@@ -96,7 +92,7 @@ int main(int argc, char** argv) {
                     const auto response = session.request("ping");
                     samples.push_back(
                         std::chrono::duration<double, std::micro>(Clock::now() - request_started).count());
-                    if (response.status_code != 200 || response.body != "pong") {
+                    if (response.status != 200 || response.body != "pong") {
                         failed.store(true, std::memory_order_relaxed);
                         return;
                     }

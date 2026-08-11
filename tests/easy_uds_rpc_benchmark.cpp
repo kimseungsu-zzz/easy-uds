@@ -49,6 +49,7 @@ int main(int argc, char** argv) {
         return 2;
     }
     server_options.max_connections = std::max<std::size_t>(64, concurrency * 2);
+    server_options.worker_threads = std::max<std::size_t>(1, concurrency);
     server_options.listen_backlog = static_cast<int>(
         std::min<std::size_t>(server_options.max_connections, static_cast<std::size_t>(std::numeric_limits<int>::max())));
     server_options.stale_socket_grace_period = std::chrono::milliseconds{0};
@@ -91,7 +92,7 @@ int main(int argc, char** argv) {
                     const auto response = client.request("ping");
                     samples.push_back(
                         std::chrono::duration<double, std::micro>(Clock::now() - request_started).count());
-                    if (response.status_code != 200 || response.body != "pong") {
+                    if (response.status != 200 || response.body != "pong") {
                         failed.store(true, std::memory_order_relaxed);
                         return;
                     }
@@ -134,7 +135,7 @@ int main(int argc, char** argv) {
     for (const double sample : samples) {
         latency_sum += sample;
     }
-    std::cout << "requests=" << iterations << ", concurrency=" << concurrency << '\n'
+    std::cout << "requests=" << iterations << ", concurrency=" << concurrency << " (one-shot)\n"
               << "throughput: " << requests_per_second << " requests/s\n"
               << "latency:    avg=" << latency_sum / static_cast<double>(samples.size())
               << " us, p50=" << percentile(samples, 0.50) << " us, p95=" << percentile(samples, 0.95)

@@ -189,13 +189,14 @@ struct SessionState {
     std::atomic<bool> broken{false};
     std::atomic<bool> reader_stop{false};
 
+    // Single mutex + CV pair guards the in-flight table and serves every
+    // pending request, so multiplexing costs one lock/unlock per response
+    // instead of a per-slot mutex/CV round trip.
     std::mutex inflight_mutex;
     std::condition_variable inflight_cv;
     std::uint32_t next_id = 1;
 
     struct Slot {
-        std::mutex mutex;
-        std::condition_variable cv;
         bool done = false;
         Response response;
         std::exception_ptr error;
@@ -223,7 +224,7 @@ void session_reader_loop(detail::SessionState* state) {
             response.body.resize(decoded.arg2);
             reader.read(response.body.data(), response.body.size(), state->options.io_timeout, Deadline::max());
 
-            std::shared_ptr<SessionState::Slot> slot;
+            std::shared_ptr<detail::SessionState::Slot> slot;
             {
                 std::lock_guard<std::mutex> lock(state->inflight_mutex);
                 const auto it = state->inflight.find(decoded.request_id);
@@ -231,35 +232,23 @@ void session_reader_loop(detail::SessionState* state) {
                     continue;  // timed out or already resolved: drop
                 }
                 slot = it->second;
-            }
-            {
-                std::lock_guard<std::mutex> lock(slot->mutex);
                 slot->response = std::move(response);
                 slot->done = true;
             }
-            slot->cv.notify_one();
+            state->inflight_cv.notify_all();
         }
     } catch (...) {
         // Connection failed: break every pending request and mark the session
         // permanently unusable.
         state->broken.store(true, std::memory_order_release);
-        std::vector<std::shared_ptr<SessionState::Slot>> slots;
         {
             std::lock_guard<std::mutex> lock(state->inflight_mutex);
             for (auto& [id, slot] : state->inflight) {
-                slots.push_back(slot);
-            }
-            state->inflight.clear();
-        }
-        const std::exception_ptr error = std::current_exception();
-        for (const auto& slot : slots) {
-            {
-                std::lock_guard<std::mutex> lock(slot->mutex);
-                slot->error = error;
+                slot->error = std::current_exception();
                 slot->done = true;
             }
-            slot->cv.notify_one();
         }
+        state->inflight_cv.notify_all();
     }
 }
 
@@ -324,12 +313,9 @@ Response Session::request(std::string_view route, std::string_view body) {
         throw;
     }
 
-    std::unique_lock<std::mutex> slot_lock(slot->mutex);
-    if (!slot->cv.wait_until(slot_lock, deadline, [&slot] { return slot->done; })) {
-        {
-            std::lock_guard<std::mutex> lock(state_->inflight_mutex);
-            state_->inflight.erase(request_id);
-        }
+    std::unique_lock<std::mutex> lock(state_->inflight_mutex);
+    if (!state_->inflight_cv.wait_until(lock, deadline, [&slot] { return slot->done; })) {
+        state_->inflight.erase(request_id);
         throw_system_error("request timed out", ETIMEDOUT);
     }
     if (slot->error) {

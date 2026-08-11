@@ -41,23 +41,27 @@ int main(int argc, char** argv) {
     server_options.stream_chunk_size = chunk_size;
     server_options.max_stream_size = 0;
     server_options.io_timeout = std::chrono::seconds{30};
+    server_options.request_timeout = std::chrono::seconds{30};
     server_options.stale_socket_grace_period = std::chrono::milliseconds{0};
     easy_uds::Server server(path, server_options);
 
-    server.on_stream("upload", [](const easy_uds::StreamReader& body) {
+    server.on_stream("upload", [](const easy_uds::StreamReader& body, const easy_uds::Request&) {
         std::array<char, 256U * 1024U> buffer{};
         while (body(buffer.data(), buffer.size()) != 0) {
         }
         return easy_uds::StreamResponse{204, {}};
     });
-    server.on_stream("download", [byte_count](const easy_uds::StreamReader&) {
-        easy_uds::StreamReader body = [remaining = byte_count](char* buffer, std::size_t capacity) mutable {
-            const std::size_t size = std::min(capacity, remaining);
-            std::memset(buffer, 0x5a, size);
-            remaining -= size;
-            return size;
-        };
-        return easy_uds::StreamResponse{200, std::move(body)};
+    server.on_stream("download", [byte_count](const easy_uds::StreamReader&, const easy_uds::Request&) {
+        return easy_uds::StreamResponse{
+            200,
+            [remaining = byte_count](char*, std::size_t capacity) mutable {
+                const std::size_t take = std::min(capacity, remaining);
+                if (take == 0) {
+                    return std::size_t{0};
+                }
+                remaining -= take;
+                return take;
+            }};
     });
 
     std::thread server_thread([&] { server.run(); });
@@ -67,13 +71,16 @@ int main(int argc, char** argv) {
     client_options.stream_chunk_size = chunk_size;
     client_options.max_stream_size = 0;
     client_options.io_timeout = std::chrono::seconds{30};
+    client_options.request_timeout = std::chrono::seconds{30};
     easy_uds::Client client(path, client_options);
 
-    easy_uds::StreamReader upload = [remaining = byte_count](char* buffer, std::size_t capacity) mutable {
-        const std::size_t size = std::min(capacity, remaining);
-        std::memset(buffer, 0x5a, size);
-        remaining -= size;
-        return size;
+    easy_uds::StreamReader upload = [remaining = byte_count](char*, std::size_t capacity) mutable {
+        const std::size_t take = std::min(capacity, remaining);
+        if (take == 0) {
+            return std::size_t{0};
+        }
+        remaining -= take;
+        return take;
     };
     const auto upload_start = Clock::now();
     (void)client.request_stream("upload", upload, {});
@@ -89,7 +96,7 @@ int main(int argc, char** argv) {
     (void)::unlink((path + ".lock").c_str());
 
     if (received != byte_count) {
-        std::cerr << "incomplete download\n";
+        std::cerr << "download byte count mismatch: " << received << " != " << byte_count << '\n';
         return 1;
     }
     std::cout << "chunk=" << chunk_size << " bytes, payload=" << mebibytes << " MiB\n"

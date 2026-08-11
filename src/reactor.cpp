@@ -349,13 +349,19 @@ void close_connection(const std::shared_ptr<ServerState>& state, int fd) {
         return;
     }
     const auto connection = it->second->conn;
-    state->connections.erase(fd);
+    connection->closing.store(true, std::memory_order_release);
     if (state->epoll_fd >= 0) {
         epoll_event ev{};
         (void)::epoll_ctl(state->epoll_fd, EPOLL_CTL_DEL, fd, &ev);
     }
-    connection->closing.store(true, std::memory_order_release);
     (void)::shutdown(fd, SHUT_RDWR);
+    if (connection->active_regular.load(std::memory_order_acquire) != 0 ||
+        connection->pending_serialized.load(std::memory_order_acquire) != 0) {
+        // Keep the closing connection counted against max_connections until
+        // every already-dispatched response job has released its fd reference.
+        return;
+    }
+    state->connections.erase(it);
 }
 
 // ---- dispatch (reactor thread) ---------------------------------------------

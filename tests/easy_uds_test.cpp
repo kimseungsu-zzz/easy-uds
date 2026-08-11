@@ -1610,6 +1610,79 @@ void test_disconnected_handler_fd_isolation() {
     cleanup_socket_artifacts(path);
 }
 
+void test_closing_connection_counts_toward_limit() {
+    using namespace easy_uds;
+
+    const std::string path = socket_path("closing-limit");
+    ServerOptions options;
+    options.worker_threads = 1;
+    options.max_connections = 1;
+    options.io_timeout = 1s;
+    options.request_timeout = 2s;
+    Server server(path, options);
+    std::atomic<bool> entered{false};
+    std::atomic<bool> release{false};
+    server.on("slow", [&](const Request&) {
+        entered.store(true, std::memory_order_release);
+        while (!release.load(std::memory_order_acquire)) {
+            std::this_thread::yield();
+        }
+        return Response{200, "old"};
+    });
+    server.on("ping", [](const Request&) { return Response{200, "pong"}; });
+
+    std::thread server_thread([&] { server.run(); });
+    wait_until_running(server);
+
+    const int old_fd = connect_raw(path);
+    const auto slow = fixed_request(0, "slow");
+    send_exact(old_fd, slow.data(), slow.size());
+    const auto entered_deadline = std::chrono::steady_clock::now() + 1s;
+    while (!entered.load(std::memory_order_acquire)) {
+        if (std::chrono::steady_clock::now() >= entered_deadline) {
+            throw std::runtime_error("test failed: closing-limit handler did not start");
+        }
+        std::this_thread::yield();
+    }
+    ::close(old_fd);
+    std::this_thread::sleep_for(50ms);
+
+    std::exception_ptr failure;
+    try {
+        ClientOptions client_options;
+        client_options.io_timeout = 300ms;
+        client_options.request_timeout = 300ms;
+        expect_throws<std::system_error>(
+            [&] { (void)Client(path, client_options).request("ping"); },
+            "closing active connection must still consume its connection slot");
+
+        release.store(true, std::memory_order_release);
+        ClientOptions retry_options;
+        retry_options.io_timeout = 300ms;
+        retry_options.request_timeout = 300ms;
+        bool reopened = false;
+        const auto retry_deadline = std::chrono::steady_clock::now() + 1s;
+        while (!reopened && std::chrono::steady_clock::now() < retry_deadline) {
+            try {
+                reopened = Client(path, retry_options).request("ping").body == "pong";
+            } catch (const std::system_error&) {
+                std::this_thread::sleep_for(10ms);
+            }
+        }
+        expect(reopened, "connection slot should reopen after the old handler releases its fd reference");
+    } catch (...) {
+        failure = std::current_exception();
+    }
+
+    release.store(true, std::memory_order_release);
+    server.stop();
+    server_thread.join();
+    cleanup_socket_artifacts(path);
+    if (failure) {
+        std::rethrow_exception(failure);
+    }
+}
+
 void test_stop_interrupts_blocked_workers() {
     using namespace easy_uds;
 
@@ -1731,6 +1804,7 @@ int main() {
         RUN(test_connection_limit);
         RUN(test_concurrent_clients);
         RUN(test_disconnected_handler_fd_isolation);
+        RUN(test_closing_connection_counts_toward_limit);
         RUN(test_stop_interrupts_blocked_workers);
         RUN(test_handler_error_opt_out);
         RUN(test_run_setup_failure_state);

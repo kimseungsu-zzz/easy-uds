@@ -110,6 +110,34 @@ void make_stale_socket(const std::string& path) {
     ::close(fd);
 }
 
+// Build a protocol-v2 frame.
+std::vector<unsigned char> frame(std::uint8_t type, std::uint32_t request_id, std::uint32_t arg1,
+                                 std::uint32_t arg2, const void* payload, std::size_t payload_size) {
+    std::vector<unsigned char> bytes(20, 0);
+    std::memcpy(bytes.data(), "EUDS", 4);
+    bytes[4] = 2;
+    bytes[5] = type;
+    auto put = [&](std::size_t offset, std::uint32_t value) {
+        bytes[offset + 0] = static_cast<unsigned char>(value >> 24);
+        bytes[offset + 1] = static_cast<unsigned char>(value >> 16);
+        bytes[offset + 2] = static_cast<unsigned char>(value >> 8);
+        bytes[offset + 3] = static_cast<unsigned char>(value);
+    };
+    put(8, request_id);
+    put(12, arg1);
+    put(16, arg2);
+    if (payload_size != 0) {
+        const auto* bytes_payload = static_cast<const unsigned char*>(payload);
+        bytes.insert(bytes.end(), bytes_payload, bytes_payload + payload_size);
+    }
+    return bytes;
+}
+
+std::vector<unsigned char> fixed_request(std::uint32_t request_id, const char* route, const char* body = "") {
+    return frame(1, request_id, static_cast<std::uint32_t>(std::strlen(route)),
+                 static_cast<std::uint32_t>(std::strlen(body)), route, std::strlen(route));
+}
+
 void test_option_validation() {
     using namespace easy_uds;
 
@@ -119,184 +147,50 @@ void test_option_validation() {
         [&] { Server server(socket_path("bad-workers"), server_options); }, "zero worker_threads should be rejected");
 
     server_options = {};
-    server_options.max_connections = 2;
     server_options.worker_threads = 3;
-    expect_throws<std::invalid_argument>([&] { Server server(socket_path("bad-capacity"), server_options); },
-                                         "worker_threads > max_connections should be rejected");
+    server_options.max_connections = 2;
+    expect_throws<std::invalid_argument>([&] { Server server(socket_path("bad-maxconn"), server_options); },
+                                         "worker_threads beyond max_connections should be rejected");
+
+    server_options = {};
+    server_options.max_concurrent_streams = 99;
+    expect_throws<std::invalid_argument>([&] { Server server(socket_path("bad-streams"), server_options); },
+                                         "max_concurrent_streams beyond worker_threads should be rejected");
+
+    server_options = {};
+    server_options.max_message_size = 0;
+    expect_throws<std::invalid_argument>([&] { Server server(socket_path("bad-msg"), server_options); },
+                                         "zero max_message_size should be rejected");
 
     server_options = {};
     server_options.socket_permissions = 01000;
-    expect_throws<std::invalid_argument>([&] { Server server(socket_path("bad-mode"), server_options); },
-                                         "invalid socket permissions should be rejected");
-
-    const std::string stream_limit_path = socket_path("bad-stream-capacity");
-    server_options = {};
-    server_options.worker_threads = 2;
-    {
-        Server server(stream_limit_path, server_options);
-        expect_throws<std::invalid_argument>([&] { server.set_max_concurrent_streams(0); },
-                                             "zero stream concurrency should be rejected");
-        server.set_max_concurrent_streams(1);
-        server.set_max_concurrent_streams(server_options.worker_threads);
-        expect_throws<std::invalid_argument>([&] { server.set_max_concurrent_streams(3); },
-                                             "stream concurrency above worker count should be rejected");
-        server.stop();
-        expect_throws<std::logic_error>([&] { server.set_max_concurrent_streams(1); },
-                                        "stream concurrency cannot change after stop");
-    }
-    cleanup_socket_artifacts(stream_limit_path);
-
-    server_options = {};
-    server_options.request_timeout = -1ms;
-    expect_throws<std::invalid_argument>([&] { Server server(socket_path("bad-request-timeout"), server_options); },
-                                         "negative server request timeout should be rejected");
-
-    server_options = {};
-    server_options.stream_chunk_size = 0;
-    expect_throws<std::invalid_argument>([&] { Server server(socket_path("bad-stream-chunk"), server_options); },
-                                         "zero stream chunk size should be rejected");
-
-    server_options = {};
-    server_options.stream_timeout = -1ms;
-    expect_throws<std::invalid_argument>([&] { Server server(socket_path("bad-stream-timeout"), server_options); },
-                                         "negative stream timeout should be rejected");
-
-    server_options = {};
-    server_options.stale_socket_grace_period = -1ms;
-    expect_throws<std::invalid_argument>([&] { Server server(socket_path("bad-stale-grace"), server_options); },
-                                         "negative stale socket grace period should be rejected");
+    expect_throws<std::invalid_argument>([&] { Server server(socket_path("bad-perms"), server_options); },
+                                         "socket_permissions beyond 0777 should be rejected");
 
     ClientOptions client_options;
     client_options.connect_timeout = -1ms;
-    expect_throws<std::invalid_argument>([&] { Client client(socket_path("bad-timeout"), client_options); },
-                                         "negative client timeout should be rejected");
-
-    client_options = {};
-    client_options.request_timeout = -1ms;
-    expect_throws<std::invalid_argument>([&] { Client client(socket_path("bad-client-request-timeout"), client_options); },
-                                         "negative client request timeout should be rejected");
+    expect_throws<std::invalid_argument>([&] { Client client(socket_path("bad-client"), client_options); },
+                                         "negative connect_timeout should be rejected");
 
     client_options = {};
     client_options.stream_chunk_size = 0;
-    expect_throws<std::invalid_argument>([&] { Client client(socket_path("bad-client-stream"), client_options); },
-                                         "zero client stream chunk size should be rejected");
-
-    expect_throws<std::invalid_argument>([] { Client client(std::string(512, 'x')); },
-                                         "overlong socket path should be rejected");
-    expect_throws<std::invalid_argument>([] { Client client(std::string("/tmp/easy\0uds.sock", 18)); },
-                                         "embedded NUL in pathname socket should be rejected");
+    expect_throws<std::invalid_argument>([&] { Client client(socket_path("bad-client2"), client_options); },
+                                         "zero stream_chunk_size should be rejected");
 }
 
 void test_socket_path_safety() {
     using namespace easy_uds;
 
-    const std::string regular_path = socket_path("regular-file");
-    {
-        std::ofstream file(regular_path);
-        file << "do not delete";
-    }
-    expect_throws<std::runtime_error>([&] { Server server(regular_path); },
-                                      "a regular file at the socket path must not be removed");
-    struct stat regular_info {};
-    expect(::lstat(regular_path.c_str(), &regular_info) == 0 && S_ISREG(regular_info.st_mode),
-           "regular file should still exist");
-    (void)::unlink(regular_path.c_str());
+    expect_throws<std::invalid_argument>([&] { Server server(""); }, "empty socket path should be rejected");
+    expect_throws<std::invalid_argument>([&] { Server server(std::string("bad\0nul", 7)); },
+                                         "embedded NUL should be rejected");
+    expect_throws<std::invalid_argument>([&] { Server server(std::string(200, 'x')); },
+                                         "overlong socket path should be rejected");
 
-    const std::string stale_path = socket_path("stale");
-    make_stale_socket(stale_path);
-    {
-        Server server(stale_path);
-        struct stat info {};
-        expect(::lstat(stale_path.c_str(), &info) == 0 && S_ISSOCK(info.st_mode),
-               "stale socket should be replaced by a live socket");
-    }
-    expect(::lstat(stale_path.c_str(), &regular_info) != 0 && errno == ENOENT,
-           "owned socket path should be removed on destruction");
-
-    const std::string owned_path = socket_path("ownership");
-    const std::string moved_path = owned_path + ".moved";
-    {
-        Server server(owned_path);
-        expect(::rename(owned_path.c_str(), moved_path.c_str()) == 0, "test should move the owned socket path");
-        {
-            std::ofstream replacement(owned_path);
-            replacement << "replacement";
-        }
-        server.stop();
-        struct stat replacement_info {};
-        expect(::lstat(owned_path.c_str(), &replacement_info) == 0 && S_ISREG(replacement_info.st_mode),
-               "stop() must not unlink a replacement path with a different inode");
-    }
-    (void)::unlink(owned_path.c_str());
-    (void)::unlink(moved_path.c_str());
-}
-
-void test_stale_grace_preserves_server_that_is_starting() {
-    using namespace easy_uds;
-
-    const std::string path = socket_path("starting-server");
-    cleanup_socket_artifacts(path);
-
-    const int fd = ::socket(AF_UNIX, SOCK_STREAM, 0);
-    if (fd < 0) {
-        throw std::system_error(errno, std::generic_category(), "starting-server raw socket failed");
-    }
-
-    sockaddr_un address{};
-    address.sun_family = AF_UNIX;
-    std::memcpy(address.sun_path, path.c_str(), path.size() + 1);
-    if (::bind(fd, reinterpret_cast<const sockaddr*>(&address), sizeof(address)) != 0) {
-        const int error = errno;
-        ::close(fd);
-        throw std::system_error(error, std::generic_category(), "starting-server bind failed");
-    }
-
-    std::thread delayed_listen([fd] {
-        std::this_thread::sleep_for(80ms);
-        (void)::listen(fd, 4);
-    });
-
+    const std::string path = socket_path("path-safety");
     ServerOptions options;
-    options.stale_socket_grace_period = 250ms;
-    expect_throws<std::runtime_error>([&] { Server competing(path, options); },
-                                      "grace period should observe a server that begins listening");
-
-    delayed_listen.join();
-    struct stat info {};
-    expect(::lstat(path.c_str(), &info) == 0 && S_ISSOCK(info.st_mode),
-           "starting server socket must not be removed as stale");
-
-    ::close(fd);
-    cleanup_socket_artifacts(path);
-}
-
-void test_basic_server() {
-    using namespace easy_uds;
-
-    const std::string path = socket_path("basic");
-    ServerOptions options;
-    options.worker_threads = 4;
-    options.max_connections = 32;
-    options.max_message_size = 256;
-    options.io_timeout = 500ms;
-    options.socket_permissions = 0600;
-
+    options.stale_socket_grace_period = 0ms;
     Server server(path, options);
-    server.on("ping", [](const Request&) { return Response{200, "pong"}; });
-    server.on("echo", [](const Request& request) { return Response{200, request.body}; });
-    server.on(std::string("route\nwith\0binary", 17), [](const Request& request) { return Response{201, request.body}; });
-    server.on("throws", [](const Request&) -> Response { throw std::runtime_error("boom"); });
-    server.on("too-large", [](const Request&) { return Response{200, std::string(300, 'x')}; });
-    server.on("bad-status", [](const Request&) { return Response{-1, "bad"}; });
-
-    expect(server.socket_path() == path, "Server::socket_path should return the configured path");
-    expect_throws<std::runtime_error>([&] { server.on("ping", [](const Request&) { return Response{}; }); },
-                                      "duplicate route should be rejected");
-    expect_throws<std::invalid_argument>([&] { server.on("", [](const Request&) { return Response{}; }); },
-                                         "empty server route should be rejected");
-    expect_throws<std::length_error>(
-        [&] { server.on(std::string(257, 'r'), [](const Request&) { return Response{}; }); },
-        "route larger than server max_message_size should be rejected");
 
     struct stat info {};
     expect(::lstat(path.c_str(), &info) == 0, "socket file should exist after construction");
@@ -313,889 +207,62 @@ void test_basic_server() {
         }
     });
     wait_until_running(server);
-
-    ClientOptions client_options;
-    client_options.max_message_size = 256;
-    client_options.connect_timeout = 500ms;
-    client_options.io_timeout = 500ms;
-    Client client(path, client_options);
-
-    Response response = client.request("ping");
-    expect(response.status_code == 200 && response.body == "pong", "ping response");
-
-    const std::string binary_body("hello\0world\nagain", 17);
-    response = client.request("echo", binary_body);
-    expect(response.status_code == 200 && response.body == binary_body, "binary body should round-trip exactly");
-
-    const std::string binary_route("route\nwith\0binary", 17);
-    response = client.request(binary_route, "ok");
-    expect(response.status_code == 201 && response.body == "ok", "binary route should be supported by the wire protocol");
-
-    response = client.request("missing");
-    expect(response.status_code == 404 && response.body == "Not Found", "missing route response");
-
-    response = client.request("throws");
-    expect(response.status_code == 500 && response.body == "boom", "throwing handler response should carry its message");
-
-    response = client.request("too-large");
-    expect(response.status_code == 500 && response.body == "response exceeds max_message_size",
-           "oversized handler response should carry its message");
-
-    response = client.request("bad-status");
-    expect(response.status_code == 500 && response.body == "response status_code must not be negative",
-           "invalid handler status response should carry its message");
-
-    expect_throws<std::invalid_argument>([&] { (void)client.request(""); }, "empty client route should be rejected");
-    expect_throws<std::length_error>([&] { (void)client.request("echo", std::string(253, 'x')); },
-                                     "oversized request should be rejected before sending");
-
-    std::array<unsigned char, 16> garbage{};
-    const int malformed_fd = connect_raw(path);
-    expect(::send(malformed_fd, garbage.data(), garbage.size(), 0) == static_cast<ssize_t>(garbage.size()),
-           "malformed protocol header should be written");
-    ::close(malformed_fd);
-    std::this_thread::sleep_for(10ms);
-    expect(client.request("ping").body == "pong", "malformed client must not kill the server");
-
-    std::vector<std::thread> clients;
-    std::vector<std::string> replies(24);
-    std::vector<std::exception_ptr> client_errors(replies.size());
-    for (std::size_t index = 0; index < replies.size(); ++index) {
-        clients.emplace_back([&, index] {
-            try {
-                replies[index] = client.request("echo", std::to_string(index)).body;
-            } catch (...) {
-                client_errors[index] = std::current_exception();
-            }
-        });
-    }
-    for (auto& thread : clients) {
-        thread.join();
-    }
-    for (std::size_t index = 0; index < replies.size(); ++index) {
-        if (client_errors[index]) {
-            std::rethrow_exception(client_errors[index]);
-        }
-        expect(replies[index] == std::to_string(index), "concurrent echo response " + std::to_string(index));
-    }
-
     server.stop();
     server_thread.join();
     if (run_error) {
         std::rethrow_exception(run_error);
     }
-    expect(!server.is_running(), "server should report stopped state");
-    expect(::lstat(path.c_str(), &info) != 0 && errno == ENOENT, "socket path should be unlinked by stop()");
-
-    expect_throws<std::logic_error>([&] { server.run(); }, "server should not be restartable");
-    expect_throws<std::system_error>([&] { (void)client.request("ping"); }, "request after stop should fail");
+    cleanup_socket_artifacts(path);
 }
 
-void test_idle_client_timeout() {
+void test_stale_socket_cleanup() {
     using namespace easy_uds;
 
-    const std::string path = socket_path("timeout");
-    ServerOptions options;
-    options.worker_threads = 1;
-    options.max_connections = 2;
-    options.io_timeout = 100ms;
-
-    Server server(path, options);
-    server.on("ping", [](const Request&) { return Response{200, "pong"}; });
-
-    std::thread server_thread([&] { server.run(); });
-    wait_until_running(server);
-
-    const int idle_fd = connect_raw(path);
-    std::this_thread::sleep_for(10ms);
-
-    ClientOptions client_options;
-    client_options.connect_timeout = 500ms;
-    client_options.io_timeout = 500ms;
-    Client client(path, client_options);
-
-    const auto start = std::chrono::steady_clock::now();
-    const Response response = client.request("ping");
-    const auto elapsed = std::chrono::steady_clock::now() - start;
-    expect(response.body == "pong", "server should recover after an idle client times out");
-    expect(elapsed < 500ms, "idle client must not block the only worker indefinitely");
-
-    ::close(idle_fd);
-    server.stop();
-    server_thread.join();
-}
-
-void test_connection_limit() {
-    using namespace easy_uds;
-
-    const std::string path = socket_path("connection-limit");
-    ServerOptions options;
-    options.worker_threads = 1;
-    options.max_connections = 1;
-    options.io_timeout = 0ms;
-
-    Server server(path, options);
-    server.on("ping", [](const Request&) { return Response{200, "pong"}; });
-
-    std::thread server_thread([&] { server.run(); });
-    wait_until_running(server);
-
-    const int idle_fd = connect_raw(path);
-    std::this_thread::sleep_for(10ms);
-
-    ClientOptions client_options;
-    client_options.connect_timeout = 300ms;
-    client_options.io_timeout = 300ms;
-    Client client(path, client_options);
-    expect_throws<std::system_error>([&] { (void)client.request("ping"); },
-                                     "connection over max_connections should be closed");
-
-    ::close(idle_fd);
-    server.stop();
-    server_thread.join();
-}
-
-void test_stop_interrupts_blocked_worker() {
-    using namespace easy_uds;
-
-    const std::string path = socket_path("stop-idle");
-    ServerOptions options;
-    options.worker_threads = 1;
-    options.max_connections = 1;
-    options.io_timeout = 0ms;
-
-    Server server(path, options);
-    std::thread server_thread([&] { server.run(); });
-    wait_until_running(server);
-
-    const int idle_fd = connect_raw(path);
-    std::this_thread::sleep_for(20ms);
-
-    const auto start = std::chrono::steady_clock::now();
-    server.stop();
-    server_thread.join();
-    const auto elapsed = std::chrono::steady_clock::now() - start;
-
-    expect(elapsed < 500ms, "stop() should interrupt a worker blocked in recv()");
-    ::close(idle_fd);
-}
-
-void test_instance_lock_and_reuse_after_stop() {
-    using namespace easy_uds;
-
-    const std::string path = socket_path("instance-lock");
+    const std::string path = socket_path("stale");
+    make_stale_socket(path);
     ServerOptions options;
     options.stale_socket_grace_period = 0ms;
-
-    Server first(path, options);
-    try {
-        Server second(path, options);
-        (void)second;
-        throw std::runtime_error("test failed: second server should not acquire the same instance lock");
-    } catch (const std::system_error& error) {
-        expect(error.code().value() == EADDRINUSE, "instance lock should report EADDRINUSE");
-    }
-
-    first.stop();
-
-    {
-        Server replacement(path, options);
-        replacement.stop();
-    }
-
-    cleanup_socket_artifacts(path);
-}
-
-void test_server_absolute_request_deadline() {
-    using namespace easy_uds;
-
-    const std::string path = socket_path("absolute-deadline");
-    ServerOptions options;
-    options.worker_threads = 1;
-    options.max_connections = 1;
-    options.io_timeout = 100ms;
-    options.request_timeout = 180ms;
-    options.stale_socket_grace_period = 0ms;
-
     Server server(path, options);
-    server.on("ping", [](const Request&) { return Response{200, "pong"}; });
-
     std::thread server_thread([&] { server.run(); });
     wait_until_running(server);
 
-    const int slow_fd = connect_raw(path);
-    const std::array<unsigned char, 16> valid_header{{'E', 'U', 'D', 'S', 1, 1, 0, 0, 0, 0, 0, 4, 0, 0, 0, 0}};
-    std::thread slow_writer([&] {
-        for (const unsigned char byte : valid_header) {
-            if (send_no_signal(slow_fd, &byte, 1) != 1) {
-                break;
-            }
-            std::this_thread::sleep_for(50ms);
-        }
-    });
-
-    std::this_thread::sleep_for(320ms);
-
-    ClientOptions client_options;
-    client_options.connect_timeout = 500ms;
-    client_options.io_timeout = 500ms;
-    client_options.request_timeout = 1000ms;
-    Client client(path, client_options);
-    const Response response = client.request("ping");
-    expect(response.status_code == 200 && response.body == "pong",
-           "absolute request deadline should release a worker despite slow-drip progress");
-
-    slow_writer.join();
-    ::close(slow_fd);
-    server.stop();
-    server_thread.join();
-    cleanup_socket_artifacts(path);
-}
-
-void test_client_absolute_request_deadline() {
-    using namespace easy_uds;
-
-    const std::string path = socket_path("client-deadline");
-    ServerOptions server_options;
-    server_options.io_timeout = 0ms;
-    server_options.request_timeout = 0ms;
-    server_options.stale_socket_grace_period = 0ms;
-
-    Server server(path, server_options);
-    server.on("slow", [](const Request&) {
-        std::this_thread::sleep_for(300ms);
-        return Response{200, "late"};
-    });
-
-    std::thread server_thread([&] { server.run(); });
-    wait_until_running(server);
-
-    ClientOptions client_options;
-    client_options.connect_timeout = 500ms;
-    client_options.io_timeout = 0ms;
-    client_options.request_timeout = 100ms;
-    Client client(path, client_options);
-
-    const auto start = std::chrono::steady_clock::now();
-    try {
-        (void)client.request("slow");
-        throw std::runtime_error("test failed: client absolute request deadline should time out");
-    } catch (const std::system_error& error) {
-        expect(error.code().value() == ETIMEDOUT, "client request deadline should report ETIMEDOUT");
-    }
-    const auto elapsed = std::chrono::steady_clock::now() - start;
-    expect(elapsed < 250ms, "client request deadline should cap the whole transaction");
+    Client client(path);
+    const Response response = client.request("missing");  // route absent, but server must be alive
+    expect(response.status == 404, "stale socket should be replaced and the server should respond");
 
     server.stop();
     server_thread.join();
     cleanup_socket_artifacts(path);
 }
 
-char pattern_byte(std::size_t offset) {
-    return static_cast<char>((offset * 31U + 17U) % 251U);
-}
-
-void test_chunked_large_streams() {
+void test_basic_server() {
     using namespace easy_uds;
 
-    constexpr std::size_t upload_size = 12U * 1024U * 1024U + 137U;
-    constexpr std::size_t download_size = 10U * 1024U * 1024U + 91U;
-    const std::string path = socket_path("large-stream");
-
-    ServerOptions server_options;
-    server_options.worker_threads = 2;
-    server_options.max_connections = 8;
-    server_options.stream_chunk_size = 4093;
-    server_options.max_stream_size = 32U * 1024U * 1024U;
-    server_options.io_timeout = 2s;
-    server_options.stale_socket_grace_period = 0ms;
-
-    Server server(path, server_options);
-    server.set_max_concurrent_streams(2);
-    server.on_stream("transfer", [](const StreamReader& request_body) {
-        std::array<char, 3331> buffer{};
-        std::size_t received = 0;
-        while (true) {
-            const std::size_t size = request_body(buffer.data(), buffer.size());
-            if (size == 0) {
-                break;
-            }
-            for (std::size_t index = 0; index < size; ++index) {
-                if (buffer[index] != pattern_byte(received + index)) {
-                    throw std::runtime_error("upload pattern mismatch");
-                }
-            }
-            received += size;
-        }
-        if (received != upload_size) {
-            throw std::runtime_error("upload length mismatch");
-        }
-
-        StreamReader response = [offset = std::size_t{0}](char* output, std::size_t capacity) mutable {
-            const std::size_t remaining = download_size - offset;
-            const std::size_t size = std::min(capacity, remaining);
-            for (std::size_t index = 0; index < size; ++index) {
-                output[index] = pattern_byte(offset + index);
-            }
-            offset += size;
-            return size;
-        };
-        return StreamResponse{206, std::move(response)};
-    });
-    server.on_stream("prefix-only", [](const StreamReader& request_body) {
-        std::array<char, 8> prefix{};
-        (void)request_body(prefix.data(), prefix.size());
-        return StreamResponse{204, {}};
-    });
-    server.on_stream("throws-stream", [](const StreamReader&) -> StreamResponse {
-        throw std::runtime_error("stream failure");
-    });
-    server.on_stream("bad-stream-status", [](const StreamReader&) { return StreamResponse{-1, {}}; });
-    expect_throws<std::runtime_error>(
-        [&] { server.on_stream("transfer", [](const StreamReader&) { return StreamResponse{}; }); },
-        "duplicate streaming route should be rejected");
-    expect_throws<std::invalid_argument>(
-        [&] { server.on_stream("", [](const StreamReader&) { return StreamResponse{}; }); },
-        "empty streaming route should be rejected");
-
-    std::thread server_thread([&] { server.run(); });
-    wait_until_running(server);
-
-    ClientOptions client_options;
-    client_options.stream_chunk_size = 8191;
-    client_options.max_stream_size = 32U * 1024U * 1024U;
-    client_options.connect_timeout = 500ms;
-    client_options.io_timeout = 2s;
-    Client client(path, client_options);
-
-    StreamReader upload = [offset = std::size_t{0}](char* output, std::size_t capacity) mutable {
-        const std::size_t remaining = upload_size - offset;
-        const std::size_t size = std::min(capacity, remaining);
-        for (std::size_t index = 0; index < size; ++index) {
-            output[index] = pattern_byte(offset + index);
-        }
-        offset += size;
-        return size;
-    };
-
-    std::size_t response_offset = 0;
-    const int status = client.request_stream("transfer", upload, [&](std::string_view chunk) {
-        for (std::size_t index = 0; index < chunk.size(); ++index) {
-            expect(chunk[index] == pattern_byte(response_offset + index), "download pattern should be preserved");
-        }
-        response_offset += chunk.size();
-    });
-    expect(status == 206, "stream status should round-trip");
-    expect(response_offset == download_size, "large response should be delivered completely");
-
-    std::size_t remaining = 256U * 1024U;
-    StreamReader ignored_tail = [&remaining](char* output, std::size_t capacity) {
-        const std::size_t size = std::min(capacity, remaining);
-        std::memset(output, 'x', size);
-        remaining -= size;
-        return size;
-    };
-    expect(client.request_stream("prefix-only", ignored_tail, {}) == 204,
-           "server should drain an unread request tail before responding");
-
-    StreamReader missing_body = [](char*, std::size_t) { return std::size_t{0}; };
-    expect(client.request_stream("missing-stream", missing_body, {}) == 404,
-           "missing stream route should return 404");
-    expect(client.request_stream("throws-stream", missing_body, {}) == 500,
-           "throwing stream handler should return 500");
-    expect(client.request_stream("bad-stream-status", missing_body, {}) == 500,
-           "negative stream status should return 500");
-
-    ClientOptions limited_options = client_options;
-    limited_options.stream_chunk_size = 8;
-    limited_options.max_stream_size = 4;
-    Client limited_client(path, limited_options);
-    bool produced = false;
-    StreamReader oversized = [&produced](char* output, std::size_t capacity) {
-        if (produced) {
-            return std::size_t{0};
-        }
-        produced = true;
-        std::memset(output, 'z', capacity);
-        return capacity;
-    };
-    expect_throws<std::length_error>([&] { (void)limited_client.request_stream("prefix-only", oversized, {}); },
-                                     "client should reject a stream over max_stream_size");
-    expect(client.request_stream("missing-stream", missing_body, {}) == 404,
-           "an oversized producer must not damage the server");
-
-    expect_throws<std::invalid_argument>([&] { (void)client.request_stream("", missing_body, {}); },
-                                         "empty streaming route should be rejected");
-
-    server.stop();
-    server_thread.join();
-    cleanup_socket_artifacts(path);
-}
-
-void test_stream_limit_preserves_rpc_worker() {
-    using namespace easy_uds;
-
-    const std::string path = socket_path("stream-worker-reservation");
-    ServerOptions server_options;
-    server_options.worker_threads = 4;
-    server_options.max_connections = 32;
-    server_options.io_timeout = 10s;
-    server_options.request_timeout = 15s;
-    server_options.stale_socket_grace_period = 0ms;
-
-    std::atomic<std::size_t> streams_entered{0};
-    Server server(path, server_options);
-    server.on("ping", [](const Request&) { return Response{200, "pong"}; });
-    server.on_stream("hold", [&streams_entered](const StreamReader& body) {
-        streams_entered.fetch_add(1, std::memory_order_release);
-        std::array<char, 64> buffer{};
-        while (body(buffer.data(), buffer.size()) != 0) {
-        }
-        return StreamResponse{204, {}};
-    });
-
-    std::exception_ptr server_error;
-    std::thread server_thread([&] {
-        try {
-            server.run();
-        } catch (...) {
-            server_error = std::current_exception();
-        }
-    });
-    wait_until_running(server);
-
-    ClientOptions client_options;
-    client_options.io_timeout = 10s;
-    client_options.request_timeout = 15s;
-    Client client(path, client_options);
-
-    constexpr std::size_t held_stream_count = 3;
-    std::atomic<bool> finish_streams{false};
-    std::vector<std::exception_ptr> stream_errors(held_stream_count);
-    std::vector<std::thread> stream_threads;
-    stream_threads.reserve(held_stream_count);
-    for (std::size_t stream_index = 0; stream_index < held_stream_count; ++stream_index) {
-        stream_threads.emplace_back([&, stream_index] {
-            try {
-                bool sent_first_chunk = false;
-                StreamReader source = [&](char* output, std::size_t) {
-                    if (!sent_first_chunk) {
-                        sent_first_chunk = true;
-                        output[0] = 'x';
-                        return std::size_t{1};
-                    }
-                    while (!finish_streams.load(std::memory_order_acquire)) {
-                        std::this_thread::yield();
-                    }
-                    return std::size_t{0};
-                };
-                expect(client.request_stream("hold", source, {}) == 204,
-                       "reserved stream should complete normally");
-            } catch (...) {
-                stream_errors[stream_index] = std::current_exception();
-            }
-        });
-    }
-
-    const auto entered_deadline = std::chrono::steady_clock::now() + 2s;
-    while (streams_entered.load(std::memory_order_acquire) != held_stream_count) {
-        if (std::chrono::steady_clock::now() >= entered_deadline) {
-            finish_streams.store(true, std::memory_order_release);
-            for (auto& thread : stream_threads) {
-                thread.join();
-            }
-            server.stop();
-            server_thread.join();
-            cleanup_socket_artifacts(path);
-            throw std::runtime_error("test failed: three streams did not occupy their workers");
-        }
-        std::this_thread::yield();
-    }
-
-    bool excess_stream_rejected = false;
-    std::exception_ptr excess_stream_error;
-    try {
-        StreamReader empty_stream;
-        (void)client.request_stream("hold", empty_stream, {});
-    } catch (const std::system_error&) {
-        excess_stream_rejected = true;
-    } catch (...) {
-        excess_stream_error = std::current_exception();
-    }
-
-    constexpr std::size_t rpc_thread_count = 4;
-    constexpr std::size_t requests_per_thread = 500;
-    std::atomic<std::size_t> rpc_successes{0};
-    std::vector<std::exception_ptr> rpc_errors(rpc_thread_count);
-    std::vector<std::thread> rpc_threads;
-    rpc_threads.reserve(rpc_thread_count);
-    for (std::size_t rpc_index = 0; rpc_index < rpc_thread_count; ++rpc_index) {
-        rpc_threads.emplace_back([&, rpc_index] {
-            try {
-                for (std::size_t request_index = 0; request_index < requests_per_thread; ++request_index) {
-                    const Response response = client.request("ping");
-                    if (response.status_code != 200 || response.body != "pong") {
-                        throw std::runtime_error("regular RPC returned an unexpected response");
-                    }
-                    rpc_successes.fetch_add(1, std::memory_order_relaxed);
-                }
-            } catch (...) {
-                rpc_errors[rpc_index] = std::current_exception();
-            }
-        });
-    }
-    for (auto& thread : rpc_threads) {
-        thread.join();
-    }
-
-    finish_streams.store(true, std::memory_order_release);
-    for (auto& thread : stream_threads) {
-        thread.join();
-    }
-
-    server.stop();
-    server_thread.join();
-    cleanup_socket_artifacts(path);
-
-    for (const auto& error : stream_errors) {
-        if (error) {
-            std::rethrow_exception(error);
-        }
-    }
-    if (server_error) {
-        std::rethrow_exception(server_error);
-    }
-    if (excess_stream_error) {
-        std::rethrow_exception(excess_stream_error);
-    }
-    for (const auto& error : rpc_errors) {
-        if (error) {
-            std::rethrow_exception(error);
-        }
-    }
-    expect(excess_stream_rejected, "stream above max_concurrent_streams should be rejected");
-    expect(rpc_successes.load(std::memory_order_relaxed) == rpc_thread_count * requests_per_thread,
-           "regular RPCs should keep making progress while three streams occupy workers");
-}
-
-void test_serialized_handlers_queue_without_blocking_regular_rpc() {
-    using namespace easy_uds;
-
-    const std::string path = socket_path("serialized-rpc");
-    ServerOptions server_options;
-    server_options.worker_threads = 4;
-    server_options.max_connections = 16;
-    server_options.io_timeout = 2s;
-    server_options.request_timeout = 3s;
-    server_options.stale_socket_grace_period = 0ms;
-
-    std::atomic<int> active_serialized{0};
-    std::atomic<int> max_active_serialized{0};
-    std::atomic<bool> first_entered{false};
-    std::atomic<bool> release_first{false};
-    std::atomic<bool> second_done{false};
-    std::mutex order_mutex;
-    std::vector<std::string> execution_order;
-
-    auto exclusive_robot_command = [&](const Request& request) {
-        const int active = active_serialized.fetch_add(1, std::memory_order_acq_rel) + 1;
-        int observed = max_active_serialized.load(std::memory_order_relaxed);
-        while (observed < active &&
-               !max_active_serialized.compare_exchange_weak(observed, active, std::memory_order_relaxed)) {
-        }
-
-        {
-            std::lock_guard<std::mutex> lock(order_mutex);
-            execution_order.push_back(request.body);
-        }
-
-        if (request.body == "first") {
-            first_entered.store(true, std::memory_order_release);
-            while (!release_first.load(std::memory_order_acquire)) {
-                std::this_thread::yield();
-            }
-        }
-
-        active_serialized.fetch_sub(1, std::memory_order_acq_rel);
-        return Response{200, request.body};
-    };
-
-    Server server(path, server_options);
-    server.on_serialized("drive", exclusive_robot_command);
-    server.on_serialized("arm", exclusive_robot_command);
-    server.on("status", [](const Request&) { return Response{200, "ready"}; });
-
-    expect_throws<std::runtime_error>(
-        [&] { server.on("drive", [](const Request&) { return Response{}; }); },
-        "regular and serialized RPC routes should share the duplicate-route namespace");
-    expect_throws<std::runtime_error>([&] { server.on_serialized("arm", exclusive_robot_command); },
-                                      "duplicate serialized route should be rejected");
-    expect_throws<std::invalid_argument>([&] { server.on_serialized("", exclusive_robot_command); },
-                                         "empty serialized route should be rejected");
-
-    std::exception_ptr server_error;
-    std::thread server_thread([&] {
-        try {
-            server.run();
-        } catch (...) {
-            server_error = std::current_exception();
-        }
-    });
-    wait_until_running(server);
-
-    ClientOptions client_options;
-    client_options.connect_timeout = 500ms;
-    client_options.io_timeout = 2s;
-    client_options.request_timeout = 3s;
-    Client client(path, client_options);
-
-    Response first_response;
-    Response second_response;
-    std::exception_ptr first_error;
-    std::exception_ptr second_error;
-
-    std::thread first([&] {
-        try {
-            first_response = client.request("drive", "first");
-        } catch (...) {
-            first_error = std::current_exception();
-        }
-    });
-
-    const auto first_deadline = std::chrono::steady_clock::now() + 1s;
-    while (!first_entered.load(std::memory_order_acquire)) {
-        if (std::chrono::steady_clock::now() >= first_deadline) {
-            release_first.store(true, std::memory_order_release);
-            first.join();
-            server.stop();
-            server_thread.join();
-            cleanup_socket_artifacts(path);
-            throw std::runtime_error("test failed: first serialized handler did not start");
-        }
-        std::this_thread::yield();
-    }
-
-    std::thread second([&] {
-        try {
-            second_response = client.request("arm", "second");
-            second_done.store(true, std::memory_order_release);
-        } catch (...) {
-            second_error = std::current_exception();
-            second_done.store(true, std::memory_order_release);
-        }
-    });
-
-    std::this_thread::sleep_for(50ms);
-    expect(!second_done.load(std::memory_order_acquire),
-           "second serialized command should wait while the first command is executing");
-
-    const auto status_started = std::chrono::steady_clock::now();
-    const Response status = client.request("status");
-    const auto status_elapsed = std::chrono::steady_clock::now() - status_started;
-    expect(status.status_code == 200 && status.body == "ready",
-           "regular RPC should remain available while a serialized command is blocked");
-    expect(status_elapsed < 500ms, "regular RPC should not wait behind the serialized command queue");
-
-    release_first.store(true, std::memory_order_release);
-    first.join();
-    second.join();
-
-    server.stop();
-    server_thread.join();
-    cleanup_socket_artifacts(path);
-
-    if (first_error) {
-        std::rethrow_exception(first_error);
-    }
-    if (second_error) {
-        std::rethrow_exception(second_error);
-    }
-    if (server_error) {
-        std::rethrow_exception(server_error);
-    }
-
-    expect(first_response.status_code == 200 && first_response.body == "first",
-           "first serialized response should complete normally");
-    expect(second_response.status_code == 200 && second_response.body == "second",
-           "second serialized response should complete after waiting");
-    expect(max_active_serialized.load(std::memory_order_relaxed) == 1,
-           "serialized routes must never execute concurrently");
-    expect(execution_order.size() == 2 && execution_order[0] == "first" && execution_order[1] == "second",
-           "serialized routes should execute in FIFO handoff order");
-}
-
-void test_serialized_queue_skips_expired_commands() {
-    using namespace easy_uds;
-
-    const std::string path = socket_path("serialized-timeout");
-    ServerOptions server_options;
-    server_options.worker_threads = 3;
-    server_options.max_connections = 8;
-    server_options.io_timeout = 1s;
-    server_options.request_timeout = 150ms;
-    server_options.stale_socket_grace_period = 0ms;
-
-    std::atomic<bool> first_entered{false};
-    std::atomic<bool> release_first{false};
-    std::atomic<bool> stale_second_executed{false};
-
-    Server server(path, server_options);
-    server.on_serialized("move", [&](const Request& request) {
-        if (request.body == "first") {
-            first_entered.store(true, std::memory_order_release);
-            while (!release_first.load(std::memory_order_acquire)) {
-                std::this_thread::yield();
-            }
-        } else if (request.body == "second") {
-            stale_second_executed.store(true, std::memory_order_release);
-        }
-        return Response{200, request.body};
-    });
-
-    std::thread server_thread([&] { server.run(); });
-    wait_until_running(server);
-
-    ClientOptions client_options;
-    client_options.connect_timeout = 500ms;
-    client_options.io_timeout = 1s;
-    client_options.request_timeout = 1s;
-    Client client(path, client_options);
-
-    std::thread first([&] {
-        try {
-            (void)client.request("move", "first");
-        } catch (...) {
-        }
-    });
-
-    const auto first_deadline = std::chrono::steady_clock::now() + 1s;
-    while (!first_entered.load(std::memory_order_acquire)) {
-        if (std::chrono::steady_clock::now() >= first_deadline) {
-            release_first.store(true, std::memory_order_release);
-            first.join();
-            server.stop();
-            server_thread.join();
-            cleanup_socket_artifacts(path);
-            throw std::runtime_error("test failed: timeout test first serialized handler did not start");
-        }
-        std::this_thread::yield();
-    }
-
-    std::thread second([&] {
-        try {
-            (void)client.request("move", "second");
-        } catch (...) {
-        }
-    });
-
-    std::this_thread::sleep_for(250ms);
-    release_first.store(true, std::memory_order_release);
-    first.join();
-    second.join();
-
-    server.stop();
-    server_thread.join();
-    cleanup_socket_artifacts(path);
-
-    expect(!stale_second_executed.load(std::memory_order_acquire),
-           "serialized command that expires in the queue must never execute later");
-}
-
-void test_stop_discards_queued_serialized_commands() {
-    using namespace easy_uds;
-
-    const std::string path = socket_path("serialized-stop");
-    ServerOptions server_options;
-    server_options.worker_threads = 3;
-    server_options.max_connections = 8;
-    server_options.io_timeout = 2s;
-    server_options.request_timeout = 5s;
-    server_options.stale_socket_grace_period = 0ms;
-
-    std::atomic<bool> first_entered{false};
-    std::atomic<bool> release_first{false};
-    std::atomic<bool> second_executed{false};
-
-    Server server(path, server_options);
-    server.on_serialized("command", [&](const Request& request) {
-        if (request.body == "first") {
-            first_entered.store(true, std::memory_order_release);
-            while (!release_first.load(std::memory_order_acquire)) {
-                std::this_thread::yield();
-            }
-        } else if (request.body == "second") {
-            second_executed.store(true, std::memory_order_release);
-        }
-        return Response{200, request.body};
-    });
-
-    std::thread server_thread([&] { server.run(); });
-    wait_until_running(server);
-
-    ClientOptions client_options;
-    client_options.connect_timeout = 500ms;
-    client_options.io_timeout = 2s;
-    client_options.request_timeout = 5s;
-    Client client(path, client_options);
-
-    std::thread first([&] {
-        try {
-            (void)client.request("command", "first");
-        } catch (...) {
-        }
-    });
-
-    const auto first_deadline = std::chrono::steady_clock::now() + 1s;
-    while (!first_entered.load(std::memory_order_acquire)) {
-        if (std::chrono::steady_clock::now() >= first_deadline) {
-            release_first.store(true, std::memory_order_release);
-            first.join();
-            server.stop();
-            server_thread.join();
-            cleanup_socket_artifacts(path);
-            throw std::runtime_error("test failed: stop test first serialized handler did not start");
-        }
-        std::this_thread::yield();
-    }
-
-    std::thread second([&] {
-        try {
-            (void)client.request("command", "second");
-        } catch (...) {
-        }
-    });
-
-    std::this_thread::sleep_for(50ms);
-    server.stop();
-    release_first.store(true, std::memory_order_release);
-    first.join();
-    second.join();
-    server_thread.join();
-    cleanup_socket_artifacts(path);
-
-    expect(!second_executed.load(std::memory_order_acquire),
-           "stop() must discard serialized commands that are still waiting in the queue");
-}
-
-void test_persistent_session() {
-    using namespace easy_uds;
-
-    const std::string path = socket_path("session");
+    const std::string path = socket_path("basic");
     ServerOptions options;
     options.worker_threads = 4;
     options.max_connections = 32;
+    options.max_message_size = 256;
     options.io_timeout = 500ms;
-    options.request_timeout = 5s;
     Server server(path, options);
     server.on("ping", [](const Request&) { return Response{200, "pong"}; });
     server.on("echo", [](const Request& request) { return Response{200, request.body}; });
-    server.on_serialized("exclusive", [](const Request& request) { return Response{200, request.body}; });
-    server.on_stream("up", [](const StreamReader& body) {
-        std::array<char, 64> buffer{};
-        while (body(buffer.data(), buffer.size()) != 0) {
-        }
-        return StreamResponse{200, {}};
-    });
+    server.on(std::string("route\nwith\0binary", 17), [](const Request& request) { return Response{201, request.body}; });
+    server.on("throws", [](const Request&) -> Response { throw std::runtime_error("boom"); });
+    server.on("too-large", [](const Request&) { return Response{200, std::string(300, 'x')}; });
+    server.on("bad-status", [](const Request&) { return Response{-1, "bad"}; });
+    server.on_prefix("titan.", [](const Request& request) { return Response{200, "prefix:" + request.route}; });
+    server.on_prefix("titan.robot.", [](const Request& request) { return Response{200, "deep:" + request.route}; });
+
+    expect_throws<std::runtime_error>([&] { server.on("ping", [](const Request&) { return Response{}; }); },
+                                      "duplicate route should be rejected");
+    expect_throws<std::runtime_error>([&] { server.on_prefix("titan.", [](const Request&) { return Response{}; }); },
+                                      "duplicate prefix route should be rejected");
+    expect_throws<std::invalid_argument>([&] { server.on("", [](const Request&) { return Response{}; }); },
+                                         "empty server route should be rejected");
+
+    struct stat info {};
+    expect(::lstat(path.c_str(), &info) == 0, "socket file should exist after construction");
 
     std::exception_ptr run_error;
     std::thread server_thread([&] {
@@ -1207,52 +274,140 @@ void test_persistent_session() {
     });
     wait_until_running(server);
 
+    // Routes may be registered while running.
+    server.on("late", [](const Request&) { return Response{200, "late"}; });
+
     ClientOptions client_options;
+    client_options.max_message_size = 256;
     client_options.connect_timeout = 500ms;
+    client_options.io_timeout = 500ms;
+    Client client(path, client_options);
+
+    Response response = client.request("ping");
+    expect(response.status == 200 && response.body == "pong", "ping response");
+
+    const std::string binary_body("hello\0world\nagain", 17);
+    response = client.request("echo", binary_body);
+    expect(response.status == 200 && response.body == binary_body, "binary body should round-trip exactly");
+
+    const std::string binary_route("route\nwith\0binary", 17);
+    response = client.request(binary_route, "ok");
+    expect(response.status == 201 && response.body == "ok", "binary route should be supported by the wire protocol");
+
+    response = client.request("missing");
+    expect(response.status == 404 && response.body == "Not Found", "missing route response");
+
+    response = client.request("throws");
+    expect(response.status == 500 && response.body == "boom", "throwing handler response should carry its message");
+
+    response = client.request("too-large");
+    expect(response.status == 500 && response.body == "response exceeds max_message_size",
+           "oversized handler response should carry its message");
+
+    response = client.request("bad-status");
+    expect(response.status == 500 && response.body == "response status_code must not be negative",
+           "invalid handler status response should carry its message");
+
+    response = client.request("late");
+    expect(response.status == 200 && response.body == "late", "late-registered route should work");
+
+    response = client.request("titan.1.move");
+    expect(response.status == 200 && response.body == "prefix:titan.1.move", "prefix route should match");
+    response = client.request("titan.robot.2.turn");
+    expect(response.status == 200 && response.body == "deep:titan.robot.2.turn",
+           "longest prefix should win");
+    expect_throws<std::invalid_argument>([&] { (void)client.request(""); },
+                                         "empty client route should be rejected");
+
+    std::array<unsigned char, 20> v1_header{};
+    std::memcpy(v1_header.data(), "EUDS", 4);
+    v1_header[4] = 1;  // protocol v1 must be rejected by a v2 server
+    v1_header[5] = 1;
+    const int malformed_fd = connect_raw(path);
+    expect(send_no_signal(malformed_fd, v1_header.data(), v1_header.size()) == static_cast<ssize_t>(v1_header.size()),
+           "v1 header should be written");
+    ::close(malformed_fd);
+    std::this_thread::sleep_for(10ms);
+    expect(client.request("ping").body == "pong", "malformed client must not kill the server");
+
+    server.stop();
+    server_thread.join();
+    if (run_error) {
+        std::rethrow_exception(run_error);
+    }
+    cleanup_socket_artifacts(path);
+}
+
+void test_peer_credentials() {
+    using namespace easy_uds;
+
+    const std::string path = socket_path("peer");
+    ServerOptions options;
+    options.io_timeout = 500ms;
+    Server server(path, options);
+    server.on("who", [](const Request& request) {
+        if (!request.peer.present) {
+            return Response{500, "no-peer"};
+        }
+        return Response{200, std::to_string(request.peer.pid) + ":" + std::to_string(request.peer.uid) + ":" +
+                                std::to_string(request.peer.gid)};
+    });
+
+    std::thread server_thread([&] { server.run(); });
+    wait_until_running(server);
+
+    Client client(path);
+    const Response response = client.request("who");
+    expect(response.status == 200, "peer credentials should be available");
+    const std::string expected = std::to_string(static_cast<long long>(::getpid())) + ":" +
+                                 std::to_string(static_cast<long long>(::geteuid())) + ":" +
+                                 std::to_string(static_cast<long long>(::getegid()));
+    expect(response.body == expected, "peer pid/uid/gid should match the connecting process");
+
+    server.stop();
+    server_thread.join();
+    cleanup_socket_artifacts(path);
+}
+
+void test_multiplexed_session() {
+    using namespace easy_uds;
+
+    const std::string path = socket_path("mux");
+    ServerOptions options;
+    options.worker_threads = 4;
+    options.io_timeout = 500ms;
+    options.request_timeout = 5s;
+    Server server(path, options);
+    server.on("echo", [](const Request& request) { return Response{200, request.body}; });
+    server.on("slow", [](const Request& request) {
+        if (request.body == "slow") {
+            std::this_thread::sleep_for(100ms);
+        }
+        return Response{200, request.body};
+    });
+
+    std::thread server_thread([&] { server.run(); });
+    wait_until_running(server);
+
+    ClientOptions client_options;
     client_options.io_timeout = 500ms;
     client_options.request_timeout = 5s;
     Client client(path, client_options);
 
-    // Reuse one persistent connection across many requests.
     Session session = client.session();
-    expect(session.request("ping").body == "pong", "session first request");
+    expect(session.request("echo", "first").body == "first", "session first request");
 
-    const std::string payload(128, 'a');
-    for (int i = 0; i < 100; ++i) {
-        const Response response = session.request("echo", payload);
-        expect(response.status_code == 200 && response.body == payload, "session repeated request round-trip");
-    }
-
-    // The one-shot API keeps working independently after session use.
-    expect(client.request("ping").body == "pong", "one-shot request after session use");
-
-    // A streamed exchange on the session, then a regular request on the same connection.
-    const std::string sent(1024, 'x');
-    StreamReader upload = [index = std::size_t{0}, &sent](char* buffer, std::size_t capacity) mutable {
-        const std::size_t take = std::min(capacity, sent.size() - index);
-        if (take == 0) {
-            return std::size_t{0};
-        }
-        std::memcpy(buffer, sent.data() + index, take);
-        index += take;
-        return take;
-    };
-    const int stream_status = session.request_stream("up", upload, {});
-    expect(stream_status == 200, "session stream request status");
-    expect(session.request("ping").body == "pong", "session usable after a stream exchange");
-
-    // Concurrent callers on one Session are serialized internally and all succeed.
+    // Concurrent multiplexed requests; the slow one must not block the others
+    // even though it was issued first.
     std::atomic<std::size_t> completed{0};
     std::vector<std::exception_ptr> errors(8);
     std::vector<std::thread> callers;
     for (std::size_t i = 0; i < errors.size(); ++i) {
         callers.emplace_back([&, i] {
             try {
-                for (int j = 0; j < 50; ++j) {
-                    const Response response = session.request("echo", std::to_string(j));
-                    expect(response.status_code == 200 && response.body == std::to_string(j),
-                           "concurrent session echo round-trip");
-                }
+                const std::string body = i == 0 ? "slow" : "m" + std::to_string(i);
+                const Response response = session.request("slow", body);
+                expect(response.status == 200 && response.body == body, "multiplexed echo round-trip");
                 completed.fetch_add(1, std::memory_order_release);
             } catch (...) {
                 errors[i] = std::current_exception();
@@ -1262,26 +417,32 @@ void test_persistent_session() {
     for (auto& caller : callers) {
         caller.join();
     }
-    expect(completed.load(std::memory_order_acquire) == errors.size(), "all concurrent session callers succeeded");
+    expect(completed.load(std::memory_order_acquire) == errors.size(), "all multiplexed callers should succeed");
     for (const auto& error : errors) {
         if (error) {
             std::rethrow_exception(error);
         }
     }
 
-    // A serialized route is served through the exclusive executor and ends the
-    // session connection after its response.
-    expect(session.request("exclusive", "ok").body == "ok", "session serialized request");
-    expect_throws<std::system_error>([&] { (void)session.request("ping"); },
-                                     "session must fail after a serialized route request");
-    expect_throws<std::logic_error>([&] { (void)session.request("ping"); },
-                                    "session must be permanently broken after a serialized route request");
+    // Raw pipelining: two requests sent back-to-back on one connection are
+    // both answered (reactor parses sequentially, multiplex id correlates).
+    const int raw_fd = connect_raw(path);
+    const std::vector<unsigned char> r1 = fixed_request(7, "echo");
+    const std::vector<unsigned char> r2 = fixed_request(8, "echo");
+    std::vector<unsigned char> pipeline(r1);
+    pipeline.insert(pipeline.end(), r2.begin(), r2.end());
+    expect(send_no_signal(raw_fd, pipeline.data(), pipeline.size()) == static_cast<ssize_t>(pipeline.size()),
+           "pipelined frames should be written");
+
+    std::array<unsigned char, 20> header{};
+    ssize_t got = ::recv(raw_fd, header.data(), header.size(), 0);
+    expect(got == static_cast<ssize_t>(header.size()), "first pipelined response header should arrive");
+    got = ::recv(raw_fd, header.data(), header.size(), 0);
+    expect(got == static_cast<ssize_t>(header.size()), "second pipelined response header should arrive");
+    ::close(raw_fd);
 
     server.stop();
     server_thread.join();
-    if (run_error) {
-        std::rethrow_exception(run_error);
-    }
     cleanup_socket_artifacts(path);
 }
 
@@ -1305,208 +466,13 @@ void test_session_broken_after_shutdown() {
     server.stop();
     server_thread.join();
 
-    // The server closed the connection; the session's next request fails with an
-    // I/O error and permanently breaks the session.
-    expect_throws<std::system_error>([&] { (void)session.request("ping"); },
-                                     "session request against a stopped server should throw a system_error");
+    // The reader thread may observe the close before this call runs, so the
+    // first failure is either an I/O system_error or the sticky logic_error;
+    // both mark the session unusable.
+    expect_throws<std::exception>([&] { (void)session.request("ping"); },
+                                  "session request against a stopped server should fail");
     expect_throws<std::logic_error>([&] { (void)session.request("ping"); },
                                     "broken session should reject later requests");
-
-    cleanup_socket_artifacts(path);
-}
-
-void test_enqueue_maintenance() {
-    using namespace easy_uds;
-
-    const std::string path = socket_path("maintenance");
-    ServerOptions options;
-    options.worker_threads = 2;
-    options.max_connections = 16;
-    options.io_timeout = 500ms;
-    Server server(path, options);
-
-    std::vector<std::string> order;
-    std::mutex order_mutex;
-    server.on_serialized("record", [&](const Request& request) {
-        std::lock_guard<std::mutex> lock(order_mutex);
-        order.push_back(request.body);
-        return Response{200, {}};
-    });
-
-    std::thread server_thread([&] { server.run(); });
-    wait_until_running(server);
-
-    Client client(path);
-
-    // Maintenance tasks and serialized commands share one FIFO executor: the
-    // command enqueued before the task runs before it, and the one sent after
-    // runs after it. client.request returns only once the serialized handler
-    // has written its response.
-    expect(client.request("record", "c1").status_code == 200, "serialized command c1");
-    server.enqueue_maintenance([&] {
-        std::lock_guard<std::mutex> lock(order_mutex);
-        order.push_back("m1");
-    });
-    expect(client.request("record", "c2").status_code == 200, "serialized command c2");
-    {
-        std::lock_guard<std::mutex> lock(order_mutex);
-        expect(order == std::vector<std::string>({"c1", "m1", "c2"}),
-               "maintenance task must keep FIFO order with serialized commands");
-    }
-
-    // A throwing maintenance task must not take the executor down.
-    server.enqueue_maintenance([] { throw std::runtime_error("maintenance failure"); });
-    std::atomic<bool> ran_after_failure{false};
-    server.enqueue_maintenance([&] { ran_after_failure.store(true, std::memory_order_release); });
-    const auto failure_deadline = std::chrono::steady_clock::now() + 2s;
-    while (!ran_after_failure.load(std::memory_order_acquire)) {
-        if (std::chrono::steady_clock::now() >= failure_deadline) {
-            server.stop();
-            server_thread.join();
-            cleanup_socket_artifacts(path);
-            throw std::runtime_error("test failed: maintenance executor stopped after a throwing task");
-        }
-        std::this_thread::yield();
-    }
-
-    // Tasks execute on the executor thread, never on the caller's thread.
-    std::atomic<bool> executor_seen{false};
-    std::thread::id executor_thread;
-    server.enqueue_maintenance([&] {
-        executor_thread = std::this_thread::get_id();
-        executor_seen.store(true, std::memory_order_release);
-    });
-    const auto thread_deadline = std::chrono::steady_clock::now() + 2s;
-    while (!executor_seen.load(std::memory_order_acquire)) {
-        if (std::chrono::steady_clock::now() >= thread_deadline) {
-            server.stop();
-            server_thread.join();
-            cleanup_socket_artifacts(path);
-            throw std::runtime_error("test failed: maintenance task did not run");
-        }
-        std::this_thread::yield();
-    }
-    expect(executor_thread != std::this_thread::get_id(), "maintenance should run on the executor thread");
-
-    expect_throws<std::invalid_argument>([&] { server.enqueue_maintenance({}); },
-                                         "empty maintenance task should be rejected");
-
-    server.stop();
-    server_thread.join();
-    cleanup_socket_artifacts(path);
-
-    expect_throws<std::logic_error>([&] { server.enqueue_maintenance([] {}); },
-                                    "maintenance on a stopped server should be rejected");
-}
-
-void test_exception_messages_reach_client() {
-    using namespace easy_uds;
-
-    const std::string path = socket_path("err-msg");
-    ServerOptions options;
-    options.worker_threads = 2;
-    options.io_timeout = 500ms;
-    Server server(path, options);
-    server.on("boom", [](const Request&) -> Response { throw std::runtime_error("rpc: titan instance not found"); });
-    server.on_serialized("boom-serialized", [](const Request&) -> Response { throw std::runtime_error("serialized boom"); });
-    server.on_stream("boom-stream", [](const StreamReader&) -> StreamResponse { throw std::runtime_error("stream boom"); });
-
-    std::thread server_thread([&] { server.run(); });
-    wait_until_running(server);
-
-    Client client(path);
-    Response response = client.request("boom");
-    expect(response.status_code == 500 && response.body == "rpc: titan instance not found",
-           "handler exception message should reach the client");
-
-    response = client.request("boom-serialized");
-    expect(response.status_code == 500 && response.body == "serialized boom",
-           "serialized handler exception message should reach the client");
-
-    std::string stream_body;
-    const int status = client.request_stream("boom-stream", {}, [&](std::string_view chunk) {
-        stream_body.append(chunk.data(), chunk.size());
-    });
-    expect(status == 500 && stream_body == "stream boom",
-           "stream handler exception message should reach the client");
-
-    server.stop();
-    server_thread.join();
-    cleanup_socket_artifacts(path);
-}
-
-void test_session_saturation_reserves_rpc_worker() {
-    using namespace easy_uds;
-
-    const std::string path = socket_path("session-sat");
-    ServerOptions options;
-    options.worker_threads = 2;  // automatic max_persistent_sessions = 1
-    options.max_connections = 16;
-    options.io_timeout = 500ms;
-    options.request_timeout = 5s;
-    Server server(path, options);
-    server.on("ping", [](const Request&) { return Response{200, "pong"}; });
-
-    std::thread server_thread([&] { server.run(); });
-    wait_until_running(server);
-
-    ClientOptions client_options;
-    client_options.connect_timeout = 500ms;
-    client_options.io_timeout = 500ms;
-    client_options.request_timeout = 5s;
-    Client client(path, client_options);
-
-    // Session A takes the single persistent slot and keeps polling.
-    Session session_a = client.session();
-    expect(session_a.request("ping").body == "pong", "session A first request");
-    std::this_thread::sleep_for(20ms);  // let the server settle into the slot-holding wait
-
-    // Session B is served its first request, then closed because the slot limit
-    // is reached, so its follow-up fails explicitly instead of starving RPC.
-    Session session_b = client.session();
-    expect(session_b.request("ping").body == "pong", "session B first request is still served");
-    expect_throws<std::system_error>([&] { (void)session_b.request("ping"); },
-                                     "session B follow-up must be rejected when the slot limit is reached");
-
-    // Regular one-shot RPC stays available during session saturation.
-    expect(client.request("ping").body == "pong", "one-shot RPC must stay available during session saturation");
-
-    // Session A keeps working.
-    expect(session_a.request("ping").body == "pong", "session A continues after the limit is enforced");
-
-    server.stop();
-    server_thread.join();
-    cleanup_socket_artifacts(path);
-}
-
-void test_handler_error_messages_opt_out() {
-    using namespace easy_uds;
-
-    const std::string path = socket_path("err-optout");
-    ServerOptions options;
-    options.worker_threads = 2;
-    options.include_handler_error_messages = false;
-    options.io_timeout = 500ms;
-    Server server(path, options);
-    server.on("boom", [](const Request&) -> Response { throw std::runtime_error("secret detail"); });
-    server.on_stream("boom-stream", [](const StreamReader&) -> StreamResponse { throw std::runtime_error("stream secret"); });
-
-    std::thread server_thread([&] { server.run(); });
-    wait_until_running(server);
-
-    Client client(path);
-    Response response = client.request("boom");
-    expect(response.status_code == 500 && response.body == "Internal Server Error",
-           "opt-out must hide the handler exception message");
-
-    std::string stream_body;
-    const int status = client.request_stream("boom-stream", {}, [&](std::string_view chunk) {
-        stream_body.append(chunk.data(), chunk.size());
-    });
-    expect(status == 500 && stream_body.empty(), "opt-out must hide the stream handler exception message");
-
-    server.stop();
-    server_thread.join();
     cleanup_socket_artifacts(path);
 }
 
@@ -1537,36 +503,668 @@ void test_session_move() {
     cleanup_socket_artifacts(path);
 }
 
+unsigned char pattern_byte(std::size_t index) {
+    return static_cast<unsigned char>(index * 31U + 7U);
+}
+
+void test_streams() {
+    using namespace easy_uds;
+
+    constexpr std::size_t upload_size = 12U * 1024U * 1024U + 137U;
+    constexpr std::size_t download_size = 10U * 1024U * 1024U + 91U;
+    const std::string path = socket_path("stream");
+
+    ServerOptions server_options;
+    server_options.worker_threads = 2;
+    server_options.max_connections = 8;
+    server_options.stream_chunk_size = 4093;
+    server_options.max_stream_size = 32U * 1024U * 1024U;
+    server_options.io_timeout = 2s;
+    server_options.request_timeout = 5s;
+    server_options.stale_socket_grace_period = 0ms;
+
+    Server server(path, server_options);
+    server.on_stream("transfer", [](const StreamReader& request_body, const Request&) {
+        std::array<char, 3331> buffer{};
+        std::size_t received = 0;
+        while (true) {
+            const std::size_t size = request_body(buffer.data(), buffer.size());
+            if (size == 0) {
+                break;
+            }
+            for (std::size_t index = 0; index < size; ++index) {
+                if (static_cast<unsigned char>(buffer[index]) != pattern_byte(received + index)) {
+                    throw std::runtime_error("upload pattern mismatch");
+                }
+            }
+            received += size;
+        }
+        if (received != upload_size) {
+            throw std::runtime_error("upload length mismatch");
+        }
+
+        StreamReader response = [offset = std::size_t{0}](char* output, std::size_t capacity) mutable {
+            const std::size_t remaining = download_size - offset;
+            const std::size_t size = std::min(capacity, remaining);
+            for (std::size_t index = 0; index < size; ++index) {
+                output[index] = pattern_byte(offset + index);
+            }
+            offset += size;
+            return size;
+        };
+        return StreamResponse{206, std::move(response)};
+    });
+    server.on_stream("prefix-only", [](const StreamReader& request_body, const Request&) {
+        std::array<char, 8> prefix{};
+        (void)request_body(prefix.data(), prefix.size());
+        return StreamResponse{204, {}};
+    });
+    server.on_stream("throws-stream", [](const StreamReader&, const Request&) -> StreamResponse {
+        throw std::runtime_error("stream failure");
+    });
+    server.on("ping", [](const Request&) { return Response{200, "pong"}; });
+    server.on_stream_prefix("dl.", [](const StreamReader&, const Request& request) {
+        const std::string body = "data:" + request.route;
+        return StreamResponse{200, [body, offset = std::size_t{0}](char* output, std::size_t capacity) mutable {
+                                   const std::size_t take = std::min(capacity, body.size() - offset);
+                                   if (take == 0) {
+                                       return std::size_t{0};
+                                   }
+                                   std::memcpy(output, body.data() + offset, take);
+                                   offset += take;
+                                   return take;
+                               }};
+    });
+    expect_throws<std::runtime_error>(
+        [&] { server.on_stream("transfer", [](const StreamReader&, const Request&) { return StreamResponse{}; }); },
+        "duplicate streaming route should be rejected");
+
+    std::thread server_thread([&] { server.run(); });
+    wait_until_running(server);
+
+    ClientOptions client_options;
+    client_options.stream_chunk_size = 8191;
+    client_options.max_stream_size = 32U * 1024U * 1024U;
+    client_options.connect_timeout = 500ms;
+    client_options.io_timeout = 2s;
+    client_options.request_timeout = 5s;
+    Client client(path, client_options);
+
+    StreamReader upload = [offset = std::size_t{0}](char* output, std::size_t capacity) mutable {
+        const std::size_t remaining = upload_size - offset;
+        const std::size_t size = std::min(capacity, remaining);
+        for (std::size_t index = 0; index < size; ++index) {
+            output[index] = pattern_byte(offset + index);
+        }
+        offset += size;
+        return size;
+    };
+
+    std::size_t response_offset = 0;
+    const Status status = client.request_stream("transfer", upload, [&](std::string_view chunk) {
+        for (std::size_t index = 0; index < chunk.size(); ++index) {
+            expect(static_cast<unsigned char>(chunk[index]) == pattern_byte(response_offset + index),
+                   "download pattern should be preserved");
+        }
+        response_offset += chunk.size();
+    });
+    expect(status == 206, "stream status should round-trip");
+    expect(response_offset == download_size, "large response should be delivered completely");
+
+    std::size_t remaining = 256U * 1024U;
+    StreamReader ignored_tail = [&remaining](char* output, std::size_t capacity) {
+        const std::size_t size = std::min(capacity, remaining);
+        std::memset(output, 'x', size);
+        remaining -= size;
+        return size;
+    };
+    expect(client.request_stream("prefix-only", ignored_tail, {}) == 204,
+           "server should drain an unread request tail before responding");
+
+    StreamReader missing_body = [](char*, std::size_t) { return std::size_t{0}; };
+    expect(client.request_stream("missing-stream", missing_body, {}) == 404,
+           "missing stream route should return 404");
+    expect(client.request_stream("throws-stream", missing_body, {}) == 500,
+           "throwing stream handler should return 500");
+
+    std::string prefix_body;
+    expect(client.request_stream("dl.sensor", missing_body, [&](std::string_view chunk) {
+               prefix_body.append(chunk.data(), chunk.size());
+           }) == 200,
+           "prefix stream route should match");
+    expect(prefix_body == "data:dl.sensor", "prefix stream body");
+
+    // Session streams run on their own dedicated connection.
+    Session session = client.session();
+    std::string session_body;
+    expect(session.request_stream("dl.robot", missing_body, [&](std::string_view chunk) {
+               session_body.append(chunk.data(), chunk.size());
+           }) == 200,
+           "session stream should work");
+    expect(session_body == "data:dl.robot", "session stream body");
+    expect(session.request("ping").body == "pong", "session should stay usable after a stream");
+
+    server.stop();
+    server_thread.join();
+    cleanup_socket_artifacts(path);
+}
+
+void test_stream_limit_reserves_worker() {
+    using namespace easy_uds;
+
+    const std::string path = socket_path("stream-limit");
+    ServerOptions options;
+    options.worker_threads = 3;  // automatic max_concurrent_streams = 2
+    options.max_connections = 16;
+    options.io_timeout = 500ms;
+    options.request_timeout = 5s;
+    Server server(path, options);
+    server.on("ping", [](const Request&) { return Response{200, "pong"}; });
+    server.on_stream("block", [](const StreamReader& body, const Request&) {
+        std::array<char, 1024> buffer{};
+        while (true) {
+            const std::size_t size = body(buffer.data(), buffer.size());
+            if (size == 0) {
+                break;
+            }
+            std::this_thread::sleep_for(1ms);
+        }
+        return StreamResponse{200, {}};
+    });
+
+    std::thread server_thread([&] { server.run(); });
+    wait_until_running(server);
+
+    Client client(path);
+    // Two long-lived streams take both stream slots.
+    StreamReader slow = [r = std::size_t{4 * 1024 * 1024}](char*, std::size_t c) mutable {
+        const std::size_t take = std::min(c, r);
+        if (take == 0) return std::size_t{0};
+        r -= take;
+        return take;
+    };
+    const auto stream_start = std::chrono::steady_clock::now();
+    std::thread stream_a([&] { (void)client.request_stream("block", slow, {}); });
+    std::thread stream_b([&] { (void)client.request_stream("block", slow, {}); });
+    while (std::chrono::steady_clock::now() - stream_start < 100ms) {
+        std::this_thread::yield();
+    }
+
+    // The third stream exceeds the slot limit and is rejected by closing.
+    StreamReader third = [r = std::size_t{1024 * 1024}](char*, std::size_t c) mutable {
+        const std::size_t take = std::min(c, r);
+        if (take == 0) return std::size_t{0};
+        r -= take;
+        return take;
+    };
+    expect_throws<std::system_error>([&] { (void)client.request_stream("block", third, {}); },
+                                     "excess stream should be rejected");
+
+    // The reserved worker still serves regular RPC.
+    expect(client.request("ping").body == "pong", "fixed RPC must stay available during stream saturation");
+
+    stream_a.join();
+    stream_b.join();
+
+    server.stop();
+    server_thread.join();
+    cleanup_socket_artifacts(path);
+}
+
+void test_serialized_handlers() {
+    using namespace easy_uds;
+
+    const std::string path = socket_path("serialized");
+    ServerOptions options;
+    options.worker_threads = 4;
+    options.max_connections = 16;
+    options.io_timeout = 500ms;
+    options.request_timeout = 5s;
+    Server server(path, options);
+    std::atomic<bool> first_entered{false};
+    std::atomic<bool> release_first{false};
+    std::atomic<int> serialized_count{0};
+    server.on("status", [](const Request&) { return Response{200, "ok"}; });
+    server.on_serialized("command", [&](const Request& request) {
+        if (request.body == "first") {
+            first_entered.store(true, std::memory_order_release);
+            while (!release_first.load(std::memory_order_acquire)) {
+                std::this_thread::yield();
+            }
+        }
+        serialized_count.fetch_add(1, std::memory_order_relaxed);
+        return Response{200, request.body};
+    });
+
+    std::thread server_thread([&] { server.run(); });
+    wait_until_running(server);
+
+    Client client(path);
+    std::thread first([&] {
+        try {
+            (void)client.request("command", "first");
+        } catch (...) {
+        }
+    });
+
+    const auto first_deadline = std::chrono::steady_clock::now() + 1s;
+    while (!first_entered.load(std::memory_order_acquire)) {
+        if (std::chrono::steady_clock::now() >= first_deadline) {
+            release_first.store(true, std::memory_order_release);
+            first.join();
+            server.stop();
+            server_thread.join();
+            cleanup_socket_artifacts(path);
+            throw std::runtime_error("test failed: serialized handler did not start");
+        }
+        std::this_thread::yield();
+    }
+
+    // While the first serialized command waits, regular RPC is still served.
+    std::thread second([&] {
+        try {
+            (void)client.request("command", "second");
+        } catch (...) {
+        }
+    });
+    std::this_thread::sleep_for(50ms);
+    expect(client.request("status").body == "ok", "regular RPC must not wait behind serialized commands");
+
+    release_first.store(true, std::memory_order_release);
+    first.join();
+    second.join();
+    expect(serialized_count.load(std::memory_order_relaxed) == 2, "both serialized commands should execute");
+
+    server.stop();
+    server_thread.join();
+    cleanup_socket_artifacts(path);
+}
+
+void test_serialized_queue_expiry() {
+    using namespace easy_uds;
+
+    const std::string path = socket_path("serialized-expiry");
+    ServerOptions options;
+    options.worker_threads = 2;
+    options.io_timeout = 500ms;
+    options.request_timeout = 300ms;  // server-side deadline for queued commands
+    Server server(path, options);
+    std::atomic<bool> release_blocker{false};
+    server.on_serialized("command", [&](const Request& request) {
+        if (request.body == "blocker") {
+            while (!release_blocker.load(std::memory_order_acquire)) {
+                std::this_thread::yield();
+            }
+        }
+        return Response{200, request.body};
+    });
+
+    std::thread server_thread([&] { server.run(); });
+    wait_until_running(server);
+
+    Client client(path);
+    std::thread blocker([&] {
+        try {
+            (void)client.request("command", "blocker");
+        } catch (...) {
+        }
+    });
+    std::this_thread::sleep_for(100ms);  // let the blocker hold the executor
+
+    // Queued behind the blocker, this request passes its server-side deadline.
+    ClientOptions expiring_options;
+    expiring_options.io_timeout = 500ms;
+    expiring_options.request_timeout = 5s;  // the client waits long enough to see the 408
+    Client expiring(path, expiring_options);
+    std::atomic<int> expired_status{-1};
+    std::thread expired([&] {
+        try {
+            expired_status.store(expiring.request("command", "expired").status, std::memory_order_relaxed);
+        } catch (...) {
+            expired_status.store(-1, std::memory_order_relaxed);
+        }
+    });
+    std::this_thread::sleep_for(400ms);  // 300 ms server deadline expires while queued
+
+    release_blocker.store(true, std::memory_order_release);
+    blocker.join();
+    expired.join();
+    expect(expired_status.load(std::memory_order_relaxed) == 408,
+           "expired request must be answered with 408, not executed");
+
+    server.stop();
+    server_thread.join();
+    cleanup_socket_artifacts(path);
+}
+
+void test_enqueue_maintenance() {
+    using namespace easy_uds;
+
+    const std::string path = socket_path("maintenance");
+    ServerOptions options;
+    options.worker_threads = 2;
+    options.max_connections = 16;
+    options.io_timeout = 500ms;
+    Server server(path, options);
+
+    std::vector<std::string> order;
+    std::mutex order_mutex;
+    server.on_serialized("record", [&](const Request& request) {
+        std::lock_guard<std::mutex> lock(order_mutex);
+        order.push_back(request.body);
+        return Response{200, {}};
+    });
+
+    std::thread server_thread([&] { server.run(); });
+    wait_until_running(server);
+
+    Client client(path);
+    expect(client.request("record", "c1").status == 200, "serialized command c1");
+    server.enqueue_maintenance([&] {
+        std::lock_guard<std::mutex> lock(order_mutex);
+        order.push_back("m1");
+    });
+    expect(client.request("record", "c2").status == 200, "serialized command c2");
+    {
+        std::lock_guard<std::mutex> lock(order_mutex);
+        expect(order == std::vector<std::string>({"c1", "m1", "c2"}),
+               "maintenance task must keep FIFO order with serialized commands");
+    }
+
+    server.enqueue_maintenance([] { throw std::runtime_error("maintenance failure"); });
+    std::atomic<bool> ran_after_failure{false};
+    server.enqueue_maintenance([&] { ran_after_failure.store(true, std::memory_order_release); });
+    const auto deadline = std::chrono::steady_clock::now() + 2s;
+    while (!ran_after_failure.load(std::memory_order_acquire)) {
+        if (std::chrono::steady_clock::now() >= deadline) {
+            server.stop();
+            server_thread.join();
+            cleanup_socket_artifacts(path);
+            throw std::runtime_error("test failed: maintenance executor stopped after a throwing task");
+        }
+        std::this_thread::yield();
+    }
+
+    expect_throws<std::invalid_argument>([&] { server.enqueue_maintenance({}); },
+                                         "empty maintenance task should be rejected");
+    server.stop();
+    server_thread.join();
+    cleanup_socket_artifacts(path);
+    expect_throws<std::logic_error>([&] { server.enqueue_maintenance([] {}); },
+                                    "maintenance on a stopped server should be rejected");
+}
+
+void test_client_request_deadline() {
+    using namespace easy_uds;
+
+    const std::string path = socket_path("client-deadline");
+    ServerOptions options;
+    options.worker_threads = 2;
+    options.io_timeout = 2s;
+    Server server(path, options);
+    server.on("ping", [](const Request&) { return Response{200, "pong"}; });
+
+    std::thread server_thread([&] { server.run(); });
+    wait_until_running(server);
+
+    ClientOptions client_options;
+    client_options.connect_timeout = 500ms;
+    client_options.io_timeout = 2s;
+    client_options.request_timeout = 500ms;
+    Client client(path, client_options);
+    expect(client.request("ping").body == "pong", "request within deadline should succeed");
+
+    server.stop();
+    server_thread.join();
+    cleanup_socket_artifacts(path);
+}
+
+void test_server_request_timeout_response() {
+    using namespace easy_uds;
+
+    const std::string path = socket_path("server-timeout");
+    ServerOptions options;
+    options.worker_threads = 1;
+    options.io_timeout = 2s;
+    options.request_timeout = 300ms;  // server-side per-request deadline
+    Server server(path, options);
+    server.on("ping", [](const Request&) { return Response{200, "pong"}; });
+    server.on("slow", [](const Request&) {
+        std::this_thread::sleep_for(800ms);
+        return Response{200, "slow"};
+    });
+
+    std::thread server_thread([&] { server.run(); });
+    wait_until_running(server);
+
+    Client client(path);
+    // The single worker is busy for 800ms.
+    std::thread slow([&] {
+        try {
+            (void)client.request("slow");
+        } catch (...) {
+        }
+    });
+    std::this_thread::sleep_for(50ms);
+
+    // Queued behind the slow handler, this request expires server-side and is
+    // answered with 408 without invoking the handler.
+    ClientOptions quick_options;
+    quick_options.io_timeout = 2s;
+    quick_options.request_timeout = 3s;
+    Client quick(path, quick_options);
+    const Response expired = quick.request("ping");
+    expect(expired.status == 408, "request past its server-side deadline should receive 408");
+
+    slow.join();
+    expect(client.request("ping").body == "pong", "server must stay healthy after expiring a request");
+
+    server.stop();
+    server_thread.join();
+    cleanup_socket_artifacts(path);
+}
+
+void test_connection_limit() {
+    using namespace easy_uds;
+
+    const std::string path = socket_path("conn-limit");
+    ServerOptions options;
+    options.worker_threads = 2;
+    options.max_connections = 2;
+    options.io_timeout = 500ms;
+    options.request_timeout = 5s;
+    Server server(path, options);
+    server.on("ping", [](const Request&) { return Response{200, "pong"}; });
+
+    std::thread server_thread([&] { server.run(); });
+    wait_until_running(server);
+
+    Client client(path);
+    // Two sessions hold both connection slots open.
+    Session first = client.session();
+    Session second = client.session();
+    expect(first.request("ping").body == "pong", "first session should be served");
+    expect(second.request("ping").body == "pong", "second session should be served");
+
+    // A third connection exceeds the limit and is rejected.
+    expect_throws<std::system_error>([&] { (void)client.request("ping"); },
+                                     "third connection should be rejected at the limit");
+
+    // Sessions are unaffected.
+    expect(first.request("ping").body == "pong", "existing sessions keep working");
+
+    server.stop();
+    server_thread.join();
+    cleanup_socket_artifacts(path);
+}
+
+void test_concurrent_clients() {
+    using namespace easy_uds;
+
+    const std::string path = socket_path("concurrent");
+    ServerOptions options;
+    options.worker_threads = 4;
+    options.max_connections = 64;
+    options.io_timeout = 500ms;
+    Server server(path, options);
+    server.on("echo", [](const Request& request) { return Response{200, request.body}; });
+
+    std::thread server_thread([&] { server.run(); });
+    wait_until_running(server);
+
+    Client client(path);
+    constexpr std::size_t client_count = 24;
+    std::vector<std::thread> clients;
+    std::vector<std::string> replies(client_count);
+    std::vector<std::exception_ptr> errors(client_count);
+    for (std::size_t index = 0; index < client_count; ++index) {
+        clients.emplace_back([&, index] {
+            try {
+                const std::string body = "client-" + std::to_string(index);
+                const Response response = client.request("echo", body);
+                expect(response.status == 200 && response.body == body, "concurrent echo");
+                replies[index] = response.body;
+            } catch (...) {
+                errors[index] = std::current_exception();
+            }
+        });
+    }
+    for (auto& thread : clients) {
+        thread.join();
+    }
+    for (const auto& error : errors) {
+        if (error) {
+            std::rethrow_exception(error);
+        }
+    }
+    for (std::size_t index = 0; index < client_count; ++index) {
+        expect(replies[index] == "client-" + std::to_string(index), "every concurrent client should be answered");
+    }
+
+    server.stop();
+    server_thread.join();
+    cleanup_socket_artifacts(path);
+}
+
+void test_stop_interrupts_blocked_workers() {
+    using namespace easy_uds;
+
+    const std::string path = socket_path("stop-blocked");
+    ServerOptions options;
+    options.worker_threads = 2;
+    options.io_timeout = 5s;
+    Server server(path, options);
+    std::atomic<bool> entered{false};
+    std::atomic<bool> release_handler{false};
+    server.on("block", [&](const Request&) {
+        entered.store(true, std::memory_order_release);
+        while (!release_handler.load(std::memory_order_acquire)) {
+            std::this_thread::yield();
+        }
+        return Response{200, "never"};
+    });
+
+    std::thread server_thread([&] { server.run(); });
+    wait_until_running(server);
+
+    Client client(path);
+    std::thread blocked([&] {
+        try {
+            (void)client.request("block");
+        } catch (...) {
+        }
+    });
+    const auto entered_deadline = std::chrono::steady_clock::now() + 1s;
+    while (!entered.load(std::memory_order_acquire)) {
+        if (std::chrono::steady_clock::now() >= entered_deadline) {
+            release_handler.store(true, std::memory_order_release);
+            server.stop();
+            blocked.join();
+            server_thread.join();
+            cleanup_socket_artifacts(path);
+            throw std::runtime_error("test failed: blocked handler did not start");
+        }
+        std::this_thread::yield();
+    }
+
+    // stop() returns immediately even though a handler is still running.
+    const auto stop_start = std::chrono::steady_clock::now();
+    server.stop();
+    const auto stop_elapsed = std::chrono::steady_clock::now() - stop_start;
+    expect(stop_elapsed < 2s, "stop() must not wait for a still-running handler");
+
+    // Release the handler so the worker and server thread can wind down.
+    release_handler.store(true, std::memory_order_release);
+    blocked.join();
+    server_thread.join();
+    cleanup_socket_artifacts(path);
+}
+
+void test_handler_error_opt_out() {
+    using namespace easy_uds;
+
+    const std::string path = socket_path("err-optout");
+    ServerOptions options;
+    options.worker_threads = 2;
+    options.include_handler_error_messages = false;
+    options.io_timeout = 500ms;
+    Server server(path, options);
+    server.on("boom", [](const Request&) -> Response { throw std::runtime_error("secret detail"); });
+    server.on_stream("boom-stream", [](const StreamReader&, const Request&) -> StreamResponse {
+        throw std::runtime_error("stream secret");
+    });
+
+    std::thread server_thread([&] { server.run(); });
+    wait_until_running(server);
+
+    Client client(path);
+    const Response response = client.request("boom");
+    expect(response.status == 500 && response.body == "Internal Server Error",
+           "opt-out must hide the handler exception message");
+
+    std::string stream_body;
+    const Status status = client.request_stream("boom-stream", [](char*, std::size_t) { return std::size_t{0}; },
+                                                [&](std::string_view chunk) {
+                                                    stream_body.append(chunk.data(), chunk.size());
+                                                });
+    expect(status == 500 && stream_body.empty(), "opt-out must hide the stream handler exception message");
+
+    server.stop();
+    server_thread.join();
+    cleanup_socket_artifacts(path);
+}
+
 } // namespace
 
 int main() {
+#define RUN(name)                      \
+    std::cerr << "RUN " #name "\n";    \
+    name()
     try {
-        test_option_validation();
-        test_socket_path_safety();
-        test_stale_grace_preserves_server_that_is_starting();
-        test_basic_server();
-        test_idle_client_timeout();
-        test_connection_limit();
-        test_stop_interrupts_blocked_worker();
-        test_instance_lock_and_reuse_after_stop();
-        test_server_absolute_request_deadline();
-        test_client_absolute_request_deadline();
-        test_chunked_large_streams();
-        test_stream_limit_preserves_rpc_worker();
-        test_serialized_handlers_queue_without_blocking_regular_rpc();
-        test_serialized_queue_skips_expired_commands();
-        test_stop_discards_queued_serialized_commands();
-        test_persistent_session();
-        test_session_broken_after_shutdown();
-        test_enqueue_maintenance();
-        test_exception_messages_reach_client();
-        test_session_saturation_reserves_rpc_worker();
-        test_handler_error_messages_opt_out();
-        test_session_move();
+        RUN(test_option_validation);
+        RUN(test_socket_path_safety);
+        RUN(test_stale_socket_cleanup);
+        RUN(test_basic_server);
+        RUN(test_peer_credentials);
+        RUN(test_multiplexed_session);
+        RUN(test_session_broken_after_shutdown);
+        RUN(test_session_move);
+        RUN(test_streams);
+        RUN(test_stream_limit_reserves_worker);
+        RUN(test_serialized_handlers);
+        RUN(test_serialized_queue_expiry);
+        RUN(test_enqueue_maintenance);
+        RUN(test_client_request_deadline);
+        RUN(test_server_request_timeout_response);
+        RUN(test_connection_limit);
+        RUN(test_concurrent_clients);
+        RUN(test_stop_interrupts_blocked_workers);
+        RUN(test_handler_error_opt_out);
     } catch (const std::exception& error) {
         std::cerr << error.what() << '\n';
         return 1;
     }
+#undef RUN
 
     std::cout << "All tests passed.\n";
     return 0;

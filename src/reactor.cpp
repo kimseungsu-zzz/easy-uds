@@ -241,8 +241,9 @@ bool find_stream_handler(const std::shared_ptr<ServerState>& state, const std::s
 
 void write_error_response(const std::shared_ptr<ServerState>& state,
                           const std::shared_ptr<Connection>& connection, std::uint32_t request_id,
-                          std::string_view message, std::chrono::milliseconds io_timeout, Deadline deadline) {
-    const easy_uds::Response response{500, bounded_error_body(message, state->options.max_message_size)};
+                          std::string_view message, std::chrono::milliseconds io_timeout, Deadline deadline,
+                          easy_uds::Status status) {
+    const easy_uds::Response response{status, bounded_error_body(message, state->options.max_message_size)};
     write_fixed_response(state, connection, request_id, response, io_timeout, deadline);
 }
 
@@ -494,7 +495,7 @@ void worker_loop(const std::shared_ptr<ServerState>& state) {
             if (Clock::now() >= job.deadline) {
                 write_error_response(state, job.connection, job.request.request_id,
                                      "request timed out before execution", state->options.io_timeout,
-                                     Deadline::max());
+                                     Deadline::max(), 408);
                 continue;
             }
             if (!state->running.load()) {
@@ -546,7 +547,7 @@ void serialized_worker_loop(const std::shared_ptr<ServerState>& state) {
             if (Clock::now() >= job.deadline) {
                 write_error_response(state, job.connection, job.request.request_id,
                                      "request timed out before execution", state->options.io_timeout,
-                                     Deadline::max());
+                                     Deadline::max(), 408);
                 continue;
             }
             if (!state->running.load()) {

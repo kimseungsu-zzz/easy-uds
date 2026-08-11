@@ -166,7 +166,8 @@ void write_fixed_response(const std::shared_ptr<ServerState>& state,
 
 void write_error_response(const std::shared_ptr<ServerState>& state,
                           const std::shared_ptr<Connection>& connection, std::uint32_t request_id,
-                          std::string_view message, std::chrono::milliseconds io_timeout, Deadline deadline);
+                          std::string_view message, std::chrono::milliseconds io_timeout, Deadline deadline,
+                          easy_uds::Status status = 500);
 
 // Enqueues a parsed request for the regular worker pool.
 void enqueue_worker_job(const std::shared_ptr<ServerState>& state, std::shared_ptr<Connection> connection,

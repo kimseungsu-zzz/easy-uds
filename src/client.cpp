@@ -114,6 +114,7 @@ Status run_oneshot_stream(const std::string& socket_path, const ClientOptions& o
     }
 
     std::vector<char> buffer(options.stream_chunk_size);
+    std::size_t total_size = 0;
     while (true) {
         HeaderBytes chunk_header{};
         reader.read(chunk_header.data(), chunk_header.size(), options.io_timeout, deadline);
@@ -128,6 +129,12 @@ Status run_oneshot_stream(const std::string& socket_path, const ClientOptions& o
             chunk.arg2 != 0) {
             throw std::runtime_error("invalid stream chunk frame");
         }
+        const std::size_t chunk_size = chunk.arg1;
+        if (chunk_size > std::numeric_limits<std::size_t>::max() - total_size ||
+            (options.max_stream_size != 0 && chunk_size > options.max_stream_size - total_size)) {
+            throw std::length_error("stream exceeds max_stream_size");
+        }
+        total_size += chunk_size;
         std::size_t remaining = chunk.arg1;
         while (remaining != 0) {
             const std::size_t take = std::min(remaining, buffer.size());

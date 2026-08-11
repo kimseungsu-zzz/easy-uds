@@ -193,7 +193,7 @@ options.max_concurrent_streams = 3;
 | `io_timeout` | `5000 ms` | Maximum idle time between successful socket-I/O progress events; `0` disables it |
 | `request_timeout` | `30000 ms` | Absolute deadline per request; a request that expires before a worker runs it is answered `408`. `0` disables it |
 | `stream_timeout` | `0` | Absolute streaming-exchange deadline after the stream header; `0` disables it |
-| `session_idle_grace` | `1 ms` | A worker that just served a fixed request keeps reading the connection directly (no reactor hop per request) while the peer keeps sending within this grace; after an idle gap it returns the connection to the reactor. `0` disables the fast path |
+| `session_idle_grace` | `1 ms` | The last completing worker waits directly for one follow-up request during this grace, avoiding its reactor dispatch hop. It returns the connection to the reactor before running the handler, preserving multiplexing. `0` disables the fast path |
 | `include_handler_error_messages` | `true` | Include handler exception messages in `500` bodies; disable to hide internal details from clients |
 | `stale_socket_grace_period` | `250 ms` | Time to keep probing a connection-refused existing socket before treating it as stale |
 | `listen_backlog` | `64` | Backlog passed to `listen()` |
@@ -349,7 +349,7 @@ session request()     p50 ~38 µs (1 in-flight) ~67k req/s @ c8
 stream (64 KiB chunks)  upload ~5.7 GiB/s, download ~9.5 GiB/s
 ```
 
-The reactor makes one-shot latency independent of connection teardown. Sessions recover the near-floor latency with a worker-lease continuation fast path (the serving worker keeps reading the connection until the peer pauses longer than `session_idle_grace`, then returns it to the reactor), plus a client-side spin-wait — so a high-frequency poller on a session reaches the same p50 as 0.5.x lockstep while the reactor still absorbs idle connections.
+The reactor makes one-shot latency independent of connection teardown. Sessions recover the near-floor latency with a worker-lease continuation fast path (the last completing worker waits for one follow-up request, then returns the connection to the reactor before executing its handler), plus a client-side spin-wait. This keeps the low-latency sequential path while allowing later requests to run concurrently during a slow handler.
 
 ## Run the examples
 

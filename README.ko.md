@@ -261,7 +261,7 @@ options.max_concurrent_streams = 3;
 | `io_timeout` | `5 s` | 성공적인 socket I/O 진행 사이의 최대 idle 시간 |
 | `request_timeout` | `30 s` | 일반 RPC의 첫 header byte부터 response 완료까지 absolute deadline. serialized queue 대기도 포함 |
 | `stream_timeout` | `0` | stream 전체 absolute deadline. `0`은 비활성 |
-| `session_idle_grace` | `1 ms` | 고정 요청을 처리한 워커가 이 시간 안에 다음 요청이 오면 연결을 직접 계속 읽어 처리(요청당 리액터 홉 없음). 유휴 간격이 지나면 리액터로 반환. `0`은 고속 경로 비활성 |
+| `session_idle_grace` | `1 ms` | 마지막 요청을 마친 워커가 이 시간 동안 후속 요청 하나를 직접 기다려 리액터 디스패치 홉을 줄입니다. 핸들러 실행 전에는 연결을 리액터에 반환해 멀티플렉싱을 유지합니다. `0`은 고속 경로 비활성 |
 | `max_concurrent_streams` | `0` (자동) | 동시 stream 수 상한. 자동 모드는 일반 RPC용 worker 1개 예약(`worker_threads - 1`). 명시값은 `1`~`worker_threads` |
 | `include_handler_error_messages` | `true` | `500` body에 handler 예외 메시지 포함. 내부 정보 노출을 피하려면 `false` |
 | `stale_socket_grace_period` | `250 ms` | refused socket을 stale로 판단하기 전 대기 시간 |

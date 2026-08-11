@@ -20,6 +20,7 @@
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/un.h>
+#include <sys/resource.h>
 #include <poll.h>
 #include <unistd.h>
 
@@ -85,6 +86,22 @@ ssize_t send_no_signal(int fd, const void* data, std::size_t size) {
 #else
     return ::send(fd, data, size, 0);
 #endif
+}
+
+void send_exact(int fd, const void* data, std::size_t size) {
+    const auto* bytes = static_cast<const unsigned char*>(data);
+    std::size_t sent = 0;
+    while (sent < size) {
+        const ssize_t result = send_no_signal(fd, bytes + sent, size - sent);
+        if (result > 0) {
+            sent += static_cast<std::size_t>(result);
+            continue;
+        }
+        if (result < 0 && errno == EINTR) {
+            continue;
+        }
+        throw std::system_error(result == 0 ? EPIPE : errno, std::generic_category(), "raw send failed");
+    }
 }
 
 void recv_exact(int fd, void* data, std::size_t size) {
@@ -421,10 +438,12 @@ void test_multiplexed_session() {
     options.request_timeout = 5s;
     options.session_idle_grace = 0ms;  // exercise pure reactor rearm with pipelined read-ahead
     Server server(path, options);
+    std::atomic<bool> slow_entered{false};
     server.on("echo", [](const Request& request) { return Response{200, request.body}; });
-    server.on("slow", [](const Request& request) {
+    server.on("slow", [&](const Request& request) {
         if (request.body == "slow") {
-            std::this_thread::sleep_for(100ms);
+            slow_entered.store(true, std::memory_order_release);
+            std::this_thread::sleep_for(250ms);
         }
         return Response{200, request.body};
     });
@@ -439,6 +458,33 @@ void test_multiplexed_session() {
 
     Session session = client.session();
     expect(session.request("echo", "first").body == "first", "session first request");
+
+    // Prove that a later fast request is dispatched while a slow handler on
+    // this same connection is still running.
+    std::exception_ptr explicit_slow_error;
+    std::thread explicit_slow([&] {
+        try {
+            expect(session.request("slow", "slow").body == "slow", "explicit slow response");
+        } catch (...) {
+            explicit_slow_error = std::current_exception();
+        }
+    });
+    const auto entered_deadline = std::chrono::steady_clock::now() + 1s;
+    while (!slow_entered.load(std::memory_order_acquire)) {
+        if (std::chrono::steady_clock::now() >= entered_deadline) {
+            explicit_slow.join();
+            throw std::runtime_error("test failed: slow multiplexed handler did not start");
+        }
+        std::this_thread::yield();
+    }
+    const auto fast_started = std::chrono::steady_clock::now();
+    expect(session.request("slow", "fast").body == "fast", "fast multiplexed response");
+    const auto fast_elapsed = std::chrono::steady_clock::now() - fast_started;
+    explicit_slow.join();
+    if (explicit_slow_error) {
+        std::rethrow_exception(explicit_slow_error);
+    }
+    expect(fast_elapsed < 200ms, "slow request must not head-of-line block a later fast request");
 
     // Concurrent multiplexed requests; the slow one must not block the others
     // even though it was issued first.
@@ -570,13 +616,113 @@ void test_stream_connection_reuse() {
            "fixed request after stream should be written");
     recv_exact(fd, header.data(), header.size());
     expect(header[5] == 2 && get_u32(header.data() + 8) == 12, "fixed response after stream");
-    std::array<char, 4> body{};
-    recv_exact(fd, body.data(), body.size());
-    expect(std::string(body.data(), body.size()) == "pong", "fixed body after stream");
+    std::array<char, 4> fixed_body{};
+    recv_exact(fd, fixed_body.data(), fixed_body.size());
+    expect(std::string(fixed_body.data(), fixed_body.size()) == "pong", "fixed response body after stream");
+
+    // The fixed-request continuation lease must replay a following stream
+    // header to the reactor instead of rejecting it as a fixed frame.
+    try {
+        const auto second_stream_start = frame(3, 13, 4, 0, "sink", 4);
+        const auto second_stream_end = frame(5, 13, 0, 0, nullptr, 0);
+        send_exact(fd, second_stream_start.data(), second_stream_start.size());
+        send_exact(fd, second_stream_end.data(), second_stream_end.size());
+        recv_exact(fd, header.data(), header.size());
+        expect(header[5] == 6 && get_u32(header.data() + 8) == 13,
+               "stream response after fixed request (type=" + std::to_string(header[5]) +
+                   ", id=" + std::to_string(get_u32(header.data() + 8)) + ")");
+        recv_exact(fd, header.data(), header.size());
+        expect(header[5] == 8 && get_u32(header.data() + 8) == 13, "stream end after fixed request");
+    } catch (...) {
+        ::close(fd);
+        server.stop();
+        server_thread.join();
+        cleanup_socket_artifacts(path);
+        throw;
+    }
     ::close(fd);
 
     server.stop();
     server_thread.join();
+    cleanup_socket_artifacts(path);
+}
+
+void test_client_stream_response_limit() {
+    using namespace easy_uds;
+
+    const std::string path = socket_path("client-stream-limit");
+    const int listener = ::socket(AF_UNIX, SOCK_STREAM, 0);
+    if (listener < 0) {
+        throw std::system_error(errno, std::generic_category(), "fake stream listener failed");
+    }
+    sockaddr_un address{};
+    address.sun_family = AF_UNIX;
+    std::memcpy(address.sun_path, path.c_str(), path.size() + 1);
+    if (::bind(listener, reinterpret_cast<const sockaddr*>(&address), sizeof(address)) != 0 ||
+        ::listen(listener, 1) != 0) {
+        const int error = errno;
+        ::close(listener);
+        cleanup_socket_artifacts(path);
+        throw std::system_error(error, std::generic_category(), "fake stream server setup failed");
+    }
+
+    std::thread fake_server([&] {
+        const int fd = ::accept(listener, nullptr, nullptr);
+        if (fd < 0) {
+            return;
+        }
+        std::array<unsigned char, 41> request{};
+        recv_exact(fd, request.data(), request.size());
+        const auto start = frame(6, 0, 200, 0, nullptr, 0);
+        const auto first = frame(7, 0, 3, 0, "abc", 3);
+        const auto second = frame(7, 0, 3, 0, "def", 3);
+        const auto end = frame(8, 0, 0, 0, nullptr, 0);
+        send_exact(fd, start.data(), start.size());
+        send_exact(fd, first.data(), first.size());
+        send_exact(fd, second.data(), second.size());
+        send_exact(fd, end.data(), end.size());
+        ::close(fd);
+    });
+
+    ClientOptions options;
+    options.max_stream_size = 4;
+    options.io_timeout = 1s;
+    options.stream_timeout = 1s;
+    expect_throws<std::length_error>(
+        [&] {
+            (void)Client(path, options).request_stream("x", [](char*, std::size_t) { return std::size_t{0}; },
+                                                       [](std::string_view) {});
+        },
+        "client must enforce max_stream_size on the response body");
+    fake_server.join();
+    ::close(listener);
+    cleanup_socket_artifacts(path);
+}
+
+void test_run_setup_failure_state() {
+    using namespace easy_uds;
+
+    const std::string path = socket_path("run-setup-failure");
+    ServerOptions options;
+    options.stale_socket_grace_period = 0ms;
+    Server server(path, options);
+
+    rlimit original{};
+    expect(::getrlimit(RLIMIT_NOFILE, &original) == 0, "getrlimit should succeed");
+    rlimit limited = original;
+    limited.rlim_cur = 0;
+    expect(::setrlimit(RLIMIT_NOFILE, &limited) == 0, "lowering RLIMIT_NOFILE should succeed");
+    bool threw = false;
+    try {
+        server.run();
+    } catch (const std::system_error&) {
+        threw = true;
+    }
+    const bool restored = ::setrlimit(RLIMIT_NOFILE, &original) == 0;
+    expect(restored, "restoring RLIMIT_NOFILE should succeed");
+    expect(threw, "run setup should fail when no descriptor can be allocated");
+    expect(!server.is_running(), "failed run setup must clear the running state");
+    server.stop();
     cleanup_socket_artifacts(path);
 }
 
@@ -1380,6 +1526,7 @@ int main() {
         RUN(test_multiplexed_session);
         RUN(test_fragmented_fast_path_header);
         RUN(test_stream_connection_reuse);
+        RUN(test_client_stream_response_limit);
         RUN(test_session_broken_after_shutdown);
         RUN(test_session_broken_after_timeout);
         RUN(test_session_move);
@@ -1395,6 +1542,7 @@ int main() {
         RUN(test_concurrent_clients);
         RUN(test_stop_interrupts_blocked_workers);
         RUN(test_handler_error_opt_out);
+        RUN(test_run_setup_failure_state);
     } catch (const std::exception& error) {
         std::cerr << error.what() << '\n';
         return 1;

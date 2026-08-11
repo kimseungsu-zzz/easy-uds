@@ -402,26 +402,26 @@ void dispatch_request(const std::shared_ptr<ServerState>& state, const std::shar
         return;
     }
 
-    // Lease the connection to the serving worker so it can keep reading
-    // follow-up requests directly (no reactor hop per request); the worker
-    // re-arms it with the reactor after the idle grace elapses.
-    {
-        std::lock_guard<std::mutex> lock(state->connections_mutex);
-        if (state->epoll_fd >= 0) {
-            epoll_event ev{};
-            (void)::epoll_ctl(state->epoll_fd, EPOLL_CTL_DEL, rc->conn->fd, &ev);
-        }
-        rc->conn->worker_owned = true;
+    // Keep the reactor on the connection while the handler runs so later
+    // multiplexed requests can be parsed and dispatched to other workers.
+    // The last completing request may take a short continuation lease after
+    // its response has been written.
+    rc->conn->active_regular.fetch_add(1, std::memory_order_relaxed);
+    if (request.request_id != 0) {
+        rc->conn->session_capable.store(true, std::memory_order_relaxed);
     }
-    std::string leftover = std::move(rc->pending);
-    const std::size_t leftover_offset = rc->pending_offset;
-    rc->pending.clear();
-    rc->pending_offset = 0;
     enqueue_worker_job(state, rc->conn, std::move(request), rc->deadline, std::move(handler), false,
-                       std::move(leftover), leftover_offset);
+                       {}, 0);
 }
 
 void dispatch_stream(const std::shared_ptr<ServerState>& state, const std::shared_ptr<ReactorConnection>& rc) {
+    if (rc->conn->active_regular.load(std::memory_order_acquire) != 0 ||
+        rc->conn->pending_serialized.load(std::memory_order_acquire) != 0) {
+        // Streams are exclusive per connection and may not overlap an
+        // outstanding fixed response.
+        rc->conn->closing = true;
+        return;
+    }
     if (!try_acquire_stream_slot(state)) {
         // Excess stream: reject explicitly by closing the connection.
         rc->conn->closing = true;
@@ -622,18 +622,62 @@ void serve_fixed_request(const std::shared_ptr<ServerState>& state, const std::s
     }
 }
 
-// A worker that just served a fixed request keeps reading the leased
-// connection directly, serving follow-up requests inline, until the peer
-// pauses longer than session_idle_grace (or closes the connection); it then
-// returns the connection to the reactor.
+bool try_acquire_continuation_lease(const std::shared_ptr<ServerState>& state,
+                                    const std::shared_ptr<Connection>& conn) {
+    if (!state->running.load() || !conn->session_capable.load(std::memory_order_relaxed) ||
+        conn->closing.load(std::memory_order_acquire) ||
+        conn->active_regular.load(std::memory_order_acquire) != 0 ||
+        conn->pending_serialized.load(std::memory_order_acquire) != 0) {
+        return false;
+    }
+
+    std::lock_guard<std::mutex> lock(state->connections_mutex);
+    const auto it = state->connections.find(conn->fd);
+    if (it == state->connections.end() || it->second->conn != conn || it->second->reactor_busy ||
+        it->second->phase != ParsePhase::header ||
+        it->second->pending_offset != it->second->pending.size() ||
+        conn->stream_active.load(std::memory_order_acquire) ||
+        conn->worker_owned.load(std::memory_order_acquire) ||
+        conn->closing.load(std::memory_order_acquire) ||
+        conn->active_regular.load(std::memory_order_acquire) != 0 ||
+        conn->pending_serialized.load(std::memory_order_acquire) != 0) {
+        return false;
+    }
+
+    epoll_event ev{};
+    if (::epoll_ctl(state->epoll_fd, EPOLL_CTL_DEL, conn->fd, &ev) != 0 && errno != ENOENT) {
+        conn->closing.store(true, std::memory_order_release);
+        return false;
+    }
+    conn->worker_owned.store(true, std::memory_order_release);
+    return true;
+}
+
+bool complete_regular_request(const std::shared_ptr<ServerState>& state,
+                              const std::shared_ptr<Connection>& conn) {
+    const std::size_t previous = conn->active_regular.fetch_sub(1, std::memory_order_acq_rel);
+    if (previous != 1) {
+        return false;
+    }
+    if (conn->closing.load(std::memory_order_acquire)) {
+        wake_reactor(state);
+        return false;
+    }
+    return try_acquire_continuation_lease(state, conn);
+}
+
+// A worker that just served the last active fixed request waits briefly for
+// one follow-up request. It returns the connection to the reactor before
+// invoking that request's handler, preserving true multiplexing during slow
+// handler execution.
 void continue_connection(const std::shared_ptr<ServerState>& state, std::shared_ptr<Connection> conn,
                          std::string buffered, std::size_t buffered_offset) {
     const int fd = conn->fd;
     const std::chrono::milliseconds grace = state->options.session_idle_grace;
-    StreamByteSource source(buffered, buffered_offset, fd);
-    bool request_started = false;
-    try {
-        while (state->running.load() && !conn->closing.load(std::memory_order_acquire)) {
+    while (state->running.load() && !conn->closing.load(std::memory_order_acquire)) {
+        StreamByteSource source(buffered, buffered_offset, fd);
+        bool request_started = false;
+        try {
             // Apply the short grace only while no byte of the next request is
             // available. Once a header starts, use the normal request deadline
             // so a fragmented header is never discarded during rearm.
@@ -650,6 +694,14 @@ void continue_connection(const std::shared_ptr<ServerState>& state, std::shared_
             HeaderBytes header{};
             source.read(header.data(), header.size(), state->options.io_timeout, req_deadline);
             const auto decoded = protocol::decode_header(header);
+            if (decoded.type == WireType::stream_request) {
+                // A stream is valid after a fixed request. Replay the header
+                // through the reactor, which owns stream admission/dispatch.
+                std::string replay(reinterpret_cast<const char*>(header.data()), header.size());
+                replay.append(buffered.data() + buffered_offset, buffered.size() - buffered_offset);
+                rearm_connection(state, conn, std::move(replay), 0);
+                return;
+            }
             if (decoded.type != WireType::request) {
                 throw std::runtime_error("unexpected frame on persistent connection");
             }
@@ -667,16 +719,32 @@ void continue_connection(const std::shared_ptr<ServerState>& state, std::shared_
             request.peer = conn->peer;
             request.request_id = decoded.request_id;
 
+            // Publish reactor ownership before executing the handler. If the
+            // handler is slow, later requests on this same session can now be
+            // dispatched to other workers and answered out of order.
+            conn->active_regular.fetch_add(1, std::memory_order_relaxed);
+            if (request.request_id != 0) {
+                conn->session_capable.store(true, std::memory_order_relaxed);
+            }
+            rearm_connection(state, conn, std::move(buffered), buffered_offset);
             serve_fixed_request(state, conn, request, req_deadline);
-            request_started = false;
+            if (!complete_regular_request(state, conn)) {
+                return;
+            }
+            buffered.clear();
+            buffered_offset = 0;
+        } catch (const std::system_error& error) {
+            if (error.code().value() != ETIMEDOUT || request_started) {
+                conn->closing.store(true, std::memory_order_release);  // peer closed or request I/O failure
+            }
+            // ETIMEDOUT without a started request is just the idle grace.
+            rearm_connection(state, conn, std::move(buffered), buffered_offset);
+            return;
+        } catch (...) {
+            conn->closing.store(true, std::memory_order_release);  // malformed frame or protocol error
+            rearm_connection(state, conn, std::move(buffered), buffered_offset);
+            return;
         }
-    } catch (const std::system_error& error) {
-        if (error.code().value() != ETIMEDOUT || request_started) {
-            conn->closing.store(true, std::memory_order_release);  // peer closed or request I/O failure
-        }
-        // ETIMEDOUT: the idle grace elapsed; hand back to the reactor.
-    } catch (...) {
-        conn->closing.store(true, std::memory_order_release);  // malformed frame or protocol error
     }
     rearm_connection(state, conn, std::move(buffered), buffered_offset);
 }
@@ -709,32 +777,22 @@ void worker_loop(const std::shared_ptr<ServerState>& state) {
                 write_error_response(state, job.connection, job.request.request_id,
                                      "request timed out before execution", state->options.io_timeout,
                                      Deadline::max(), 408);
-                rearm_connection(state, job.connection);
-                continue;
-            }
-            if (!state->running.load()) {
-                rearm_connection(state, job.connection);
-                continue;
-            }
-            const easy_uds::Response response = invoke_request_handler(job.handler, job.request, state);
-            try {
-                write_fixed_response(state, job.connection, job.request.request_id, response,
-                                     state->options.io_timeout, job.deadline);
-            } catch (const std::exception&) {
-                job.connection->closing = true;
-            } catch (...) {
-                job.connection->closing = true;
+            } else if (state->running.load()) {
+                const easy_uds::Response response = invoke_request_handler(job.handler, job.request, state);
+                try {
+                    write_fixed_response(state, job.connection, job.request.request_id, response,
+                                         state->options.io_timeout, job.deadline);
+                } catch (const std::exception&) {
+                    job.connection->closing = true;
+                } catch (...) {
+                    job.connection->closing = true;
+                }
             }
         } catch (...) {
             job.connection->closing = true;
         }
 
-        // Request id zero is reserved for the one-shot client path. It has no
-        // follow-up request to accelerate, so return it immediately instead of
-        // holding a worker in the session-only idle-grace continuation path.
-        if (job.request.request_id == 0 && job.buffered_offset == job.buffered.size()) {
-            rearm_connection(state, job.connection);
-        } else {
+        if (complete_regular_request(state, job.connection)) {
             continue_connection(state, job.connection, std::move(job.buffered), job.buffered_offset);
         }
     }
@@ -945,8 +1003,11 @@ Deadline expire_reactor_connections(const std::shared_ptr<ServerState>& state) {
         for (const auto& [fd, rc] : state->connections) {
             const auto& connection = rc->conn;
             if (connection->stream_active.load(std::memory_order_acquire) ||
-                connection->worker_owned.load(std::memory_order_acquire) ||
-                connection->closing.load(std::memory_order_acquire)) {
+                connection->worker_owned.load(std::memory_order_acquire)) {
+                continue;
+            }
+            if (connection->closing.load(std::memory_order_acquire)) {
+                expired.push_back(fd);
                 continue;
             }
 
@@ -1055,6 +1116,7 @@ void run_reactor(const std::shared_ptr<ServerState>& state) {
             const int fd = static_cast<int>(static_cast<std::uint32_t>(token));
             const std::uint32_t generation = static_cast<std::uint32_t>(token >> 32);
             std::shared_ptr<ReactorConnection> rc;
+            bool close_requested = false;
             {
                 std::lock_guard<std::mutex> lock(state->connections_mutex);
                 const auto it = state->connections.find(fd);
@@ -1062,10 +1124,17 @@ void run_reactor(const std::shared_ptr<ServerState>& state) {
                     continue;
                 }
                 rc = it->second;
+                if (rc->conn->closing.load(std::memory_order_acquire)) {
+                    close_requested = true;
+                } else if (rc->conn->stream_active.load(std::memory_order_acquire) ||
+                           rc->conn->worker_owned.load(std::memory_order_acquire)) {
+                    continue;
+                } else {
+                    rc->reactor_busy = true;
+                }
             }
-            if (rc->conn->stream_active.load(std::memory_order_acquire) ||
-                rc->conn->worker_owned.load(std::memory_order_acquire) ||
-                rc->conn->closing.load(std::memory_order_acquire)) {
+            if (close_requested) {
+                close_connection(state, fd);
                 continue;
             }
             if ((mask & (EPOLLERR | EPOLLHUP | EPOLLRDHUP)) != 0) {
@@ -1081,6 +1150,14 @@ void run_reactor(const std::shared_ptr<ServerState>& state) {
                 }
                 if (rc->conn->closing.load(std::memory_order_acquire)) {
                     close_connection(state, fd);
+                    continue;
+                }
+            }
+            {
+                std::lock_guard<std::mutex> lock(state->connections_mutex);
+                const auto it = state->connections.find(fd);
+                if (it != state->connections.end() && it->second == rc) {
+                    rc->reactor_busy = false;
                 }
             }
         }

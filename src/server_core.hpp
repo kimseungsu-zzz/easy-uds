@@ -41,6 +41,8 @@ struct Connection {
     std::atomic<bool> stream_active{false};  // a stream worker owns the fd (exclusive lease)
     std::atomic<bool> worker_owned{false};   // a fixed-request worker is leasing the fd
     std::atomic<bool> closing{false};
+    std::atomic<bool> session_capable{false};
+    std::atomic<std::size_t> active_regular{0};
     std::atomic<std::size_t> pending_serialized{0};
     std::atomic<Clock::duration::rep> last_io_progress;
 
@@ -66,6 +68,7 @@ struct ReactorConnection {
     std::uint32_t arg1 = 0;
     std::uint32_t arg2 = 0;
     Deadline deadline = Deadline::max();     // absolute deadline once a request starts
+    bool reactor_busy = false;               // guarded by connections_mutex
     std::string pending;              // bytes read ahead of the parser
     std::size_t pending_offset = 0;   // consumed prefix of pending
 };
@@ -133,7 +136,8 @@ struct ServerState {
     std::vector<std::thread> workers;
 
     // Connections by fd, keyed in the map until closed. Guarded by
-    // connections_mutex; the reactor parses, stream workers lease.
+    // connections_mutex; the reactor parses, while stream exchanges and the
+    // short fixed-request continuation path take exclusive read leases.
     std::mutex connections_mutex;
     std::unordered_map<int, std::shared_ptr<ReactorConnection>> connections;
 };

@@ -238,6 +238,8 @@ class RunActiveGuard {
     explicit RunActiveGuard(std::shared_ptr<detail::ServerState> state) : state_(std::move(state)) {}
 
     ~RunActiveGuard() {
+        state_->running.store(false);
+        unlink_owned_socket(state_);
         std::lock_guard<std::mutex> lock(state_->lifecycle_mutex);
         close_lifecycle_fds_locked(state_);
         state_->run_active = false;

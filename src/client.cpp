@@ -45,6 +45,9 @@ Response read_response(BufferedReader& reader, std::size_t max_message_size, std
     HeaderBytes header{};
     reader.read(header.data(), header.size(), io_timeout, deadline);
     const auto decoded = protocol::decode_header(header, WireType::response);
+    if (decoded.request_id != 0) {
+        throw std::runtime_error("unexpected response request_id");
+    }
     if (decoded.arg1 > static_cast<std::uint32_t>(INT32_MAX)) {
         throw std::runtime_error("response status_code is out of range");
     }
@@ -236,7 +239,7 @@ void session_reader_loop(detail::SessionState* state) {
                 std::lock_guard<std::mutex> lock(state->inflight_mutex);
                 const auto it = state->inflight.find(decoded.request_id);
                 if (it == state->inflight.end()) {
-                    continue;  // timed out or already resolved: drop
+                    throw std::runtime_error("unexpected response request_id");
                 }
                 slot = it->second;
                 slot->response = std::move(response);

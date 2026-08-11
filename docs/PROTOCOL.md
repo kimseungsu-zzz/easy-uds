@@ -50,6 +50,7 @@ client                                  server
 ```
 
 Responses may arrive in any order. Stream frames carry the same id as their stream request, keeping concurrent streams distinct. There is no server-side ordering guarantee between concurrent requests.
+An unknown or mismatched response id is a protocol error; clients must not associate that response with another request.
 
 ## Fixed request
 

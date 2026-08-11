@@ -9,6 +9,7 @@
 #include <exception>
 #include <fstream>
 #include <iostream>
+#include <limits>
 #include <mutex>
 #include <stdexcept>
 #include <string>
@@ -750,6 +751,82 @@ void test_client_stream_response_limit() {
     fake_server.join();
     ::close(listener);
     cleanup_socket_artifacts(path);
+}
+
+void test_client_rejects_mismatched_response_ids() {
+    using namespace easy_uds;
+
+    const std::string path = socket_path("client-response-id");
+    const int listener = ::socket(AF_UNIX, SOCK_STREAM, 0);
+    if (listener < 0) {
+        throw std::system_error(errno, std::generic_category(), "fake response-id listener failed");
+    }
+    sockaddr_un address{};
+    address.sun_family = AF_UNIX;
+    std::memcpy(address.sun_path, path.c_str(), path.size() + 1);
+    if (::bind(listener, reinterpret_cast<const sockaddr*>(&address), sizeof(address)) != 0 ||
+        ::listen(listener, 2) != 0) {
+        const int error = errno;
+        ::close(listener);
+        cleanup_socket_artifacts(path);
+        throw std::system_error(error, std::generic_category(), "fake response-id server setup failed");
+    }
+
+    std::atomic<bool> release_session_peer{false};
+    std::thread fake_server([&] {
+        for (int connection = 0; connection < 2; ++connection) {
+            const int fd = ::accept(listener, nullptr, nullptr);
+            if (fd < 0) {
+                return;
+            }
+            std::array<unsigned char, 20> request_header{};
+            recv_exact(fd, request_header.data(), request_header.size());
+            const std::size_t payload_size =
+                static_cast<std::size_t>(get_u32(request_header.data() + 12)) +
+                get_u32(request_header.data() + 16);
+            std::vector<unsigned char> payload(payload_size);
+            recv_exact(fd, payload.data(), payload.size());
+
+            const std::uint32_t request_id = get_u32(request_header.data() + 8);
+            const std::uint32_t wrong_id = request_id == std::numeric_limits<std::uint32_t>::max()
+                                               ? request_id - 1
+                                               : request_id + 1;
+            const auto response = frame(2, wrong_id, 200, 4, "pong", 4);
+            send_exact(fd, response.data(), response.size());
+            if (connection == 1) {
+                const auto deadline = std::chrono::steady_clock::now() + 1s;
+                while (!release_session_peer.load(std::memory_order_acquire) &&
+                       std::chrono::steady_clock::now() < deadline) {
+                    std::this_thread::yield();
+                }
+            }
+            ::close(fd);
+        }
+    });
+
+    ClientOptions options;
+    options.io_timeout = 1s;
+    options.request_timeout = 500ms;
+    expect_throws<std::runtime_error>([&] { (void)Client(path, options).request("ping"); },
+                                      "one-shot client must reject a mismatched response id");
+
+    Session session = Client(path, options).session();
+    bool rejected_as_protocol_error = false;
+    try {
+        (void)session.request("ping");
+    } catch (const std::system_error&) {
+        // A timeout means the unknown id was silently ignored.
+    } catch (const std::runtime_error&) {
+        rejected_as_protocol_error = true;
+    }
+    release_session_peer.store(true, std::memory_order_release);
+    fake_server.join();
+    ::close(listener);
+    cleanup_socket_artifacts(path);
+
+    expect(rejected_as_protocol_error, "session must fail immediately on an unknown response id");
+    expect_throws<std::logic_error>([&] { (void)session.request("ping"); },
+                                    "unknown response id must permanently break the session");
 }
 
 void test_run_setup_failure_state() {
@@ -1789,6 +1866,7 @@ int main() {
         RUN(test_fragmented_fast_path_header);
         RUN(test_stream_connection_reuse);
         RUN(test_client_stream_response_limit);
+        RUN(test_client_rejects_mismatched_response_ids);
         RUN(test_session_broken_after_shutdown);
         RUN(test_session_broken_after_timeout);
         RUN(test_session_move);

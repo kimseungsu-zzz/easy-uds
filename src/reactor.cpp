@@ -344,16 +344,18 @@ void enqueue_worker_job(const std::shared_ptr<ServerState>& state, std::shared_p
 
 void close_connection(const std::shared_ptr<ServerState>& state, int fd) {
     std::lock_guard<std::mutex> lock(state->connections_mutex);
-    if (state->connections.find(fd) == state->connections.end()) {
+    const auto it = state->connections.find(fd);
+    if (it == state->connections.end()) {
         return;
     }
+    const auto connection = it->second->conn;
     state->connections.erase(fd);
     if (state->epoll_fd >= 0) {
         epoll_event ev{};
         (void)::epoll_ctl(state->epoll_fd, EPOLL_CTL_DEL, fd, &ev);
     }
+    connection->closing.store(true, std::memory_order_release);
     (void)::shutdown(fd, SHUT_RDWR);
-    (void)::close(fd);
 }
 
 // ---- dispatch (reactor thread) ---------------------------------------------
@@ -368,16 +370,13 @@ void dispatch_request(const std::shared_ptr<ServerState>& state, const std::shar
     easy_uds::Server::Handler handler;
     bool serialized = false;
     if (!find_request_handler(state, request.route, handler, serialized)) {
-        // Fast path: respond 404 directly, no worker hop.
-        try {
-            std::lock_guard<std::mutex> lock(rc->conn->write_mutex);
-            write_frame_with_payload(rc->conn->fd, WireType::response, rc->request_id, 404, 9, "Not Found", 9,
-                                     state->options.io_timeout, rc->deadline);
-            mark_io_progress(rc->conn);
-        } catch (...) {
-            rc->conn->closing = true;
-        }
-        return;
+        // Keep all potentially blocking response I/O off the reactor. A peer
+        // that floods unknown routes while not reading replies must not stall
+        // accept/parsing for every other connection.
+        const std::size_t max_message_size = state->options.max_message_size;
+        handler = [max_message_size](const easy_uds::Request&) {
+            return easy_uds::Response{404, bounded_error_body("Not Found", max_message_size)};
+        };
     }
 
     if (serialized) {
@@ -433,7 +432,7 @@ void dispatch_stream(const std::shared_ptr<ServerState>& state, const std::share
     request.peer = rc->conn->peer;
     request.request_id = rc->request_id;
 
-    const Deadline stream_deadline = earlier_deadline(rc->deadline, deadline_from_now(state->options.stream_timeout));
+    const Deadline stream_deadline = rc->deadline;
 
     // The stream worker takes over the fd; unread buffered bytes ride along.
     // Remove it from epoll before handing off so rearm can add it exactly once.
@@ -583,10 +582,9 @@ void serve_fixed_request(const std::shared_ptr<ServerState>& state, const std::s
     bool serialized = false;
     if (!find_request_handler(state, request.route, handler, serialized)) {
         try {
-            std::lock_guard<std::mutex> lock(conn->write_mutex);
-            write_frame_with_payload(conn->fd, WireType::response, request.request_id, 404, 9, "Not Found", 9,
-                                     state->options.io_timeout, deadline);
-            mark_io_progress(conn);
+            write_fixed_response(state, conn, request.request_id,
+                                 {404, bounded_error_body("Not Found", state->options.max_message_size)},
+                                 state->options.io_timeout, deadline);
         } catch (...) {
             conn->closing = true;
         }
@@ -851,8 +849,10 @@ void serialized_worker_loop(const std::shared_ptr<ServerState>& state) {
                 write_fixed_response(state, job.connection, job.request.request_id, response,
                                      state->options.io_timeout, job.deadline);
             } catch (...) {
+                job.connection->closing.store(true, std::memory_order_release);
             }
         } catch (...) {
+            job.connection->closing.store(true, std::memory_order_release);
         }
     }
 }
@@ -956,6 +956,10 @@ void consume(const std::shared_ptr<ServerState>& state, const std::shared_ptr<Re
                 rc->route_buffer.clear();
                 rc->route_buffer.reserve(decoded.arg1);
                 rc->phase = ParsePhase::stream_route;
+                // Streaming transactions have their own absolute deadline.
+                // A zero stream_timeout deliberately permits a long-lived
+                // stream even when regular RPC request_timeout is nonzero.
+                rc->deadline = deadline_from_now(state->options.stream_timeout);
                 continue;
             }
             throw std::runtime_error("unexpected protocol message type");
@@ -1014,7 +1018,10 @@ Deadline expire_reactor_connections(const std::shared_ptr<ServerState>& state) {
             Deadline connection_deadline = rc->deadline;
             const bool partial_request = rc->phase != ParsePhase::header ||
                                          rc->pending_offset != rc->pending.size();
-            if (partial_request || connection->pending_serialized.load(std::memory_order_acquire) == 0) {
+            const bool response_pending =
+                connection->active_regular.load(std::memory_order_acquire) != 0 ||
+                connection->pending_serialized.load(std::memory_order_acquire) != 0;
+            if (partial_request || !response_pending) {
                 connection_deadline = earlier_deadline(
                     connection_deadline, inactivity_deadline(connection, state->options.io_timeout));
             }
@@ -1077,7 +1084,7 @@ void run_reactor(const std::shared_ptr<ServerState>& state) {
                         if (errno == EAGAIN || errno == EWOULDBLOCK) {
                             break;
                         }
-                        break;
+                        throw_system_error("accept failed");
                     }
                     ++accepted;
                     {
@@ -1096,7 +1103,6 @@ void run_reactor(const std::shared_ptr<ServerState>& state) {
                         ev.data.u64 = connection_token(client_fd, rc->generation);
                         if (::epoll_ctl(epoll_fd, EPOLL_CTL_ADD, client_fd, &ev) != 0) {
                             state->connections.erase(client_fd);
-                            (void)::close(client_fd);
                         }
                     }
                 }

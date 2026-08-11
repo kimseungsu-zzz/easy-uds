@@ -18,7 +18,7 @@
 - `Server::enqueue_maintenance()` for safe server-side state cleanup from external threads
 - Natural flow control through Unix-socket backpressure
 - Versioned, binary-safe protocol framing (protocol v2 with request-id multiplexing)
-- epoll reactor server: idle connections never occupy a worker
+- epoll reactor server: idle connections never occupy a worker, and response I/O never blocks the reactor
 - Configurable connection limit, inactivity timeout, absolute request deadline (`408` on expiry), connect timeout, backlog, and message size
 - Optimistic non-blocking socket I/O that calls `poll()` only on backpressure
 - Gathered header+payload writes through `sendmsg()` to reduce per-chunk system calls
@@ -191,7 +191,7 @@ options.max_concurrent_streams = 3;
 | `max_stream_size` | `1 GiB` | Maximum bytes per streamed request body and response body; `0` is unbounded |
 | `max_concurrent_streams` | `0` (auto) | Maximum simultaneous streams; auto reserves one worker (`worker_threads - 1`) for regular RPC. Explicit values must be between `1` and `worker_threads` |
 | `io_timeout` | `5000 ms` | Maximum idle time between successful socket-I/O progress events; `0` disables it |
-| `request_timeout` | `30000 ms` | Absolute deadline per request; a request that expires before a worker runs it is answered `408`. `0` disables it |
+| `request_timeout` | `30000 ms` | Absolute deadline per regular request; a request that expires before a worker runs it is answered `408`. `0` disables it |
 | `stream_timeout` | `0` | Absolute streaming-exchange deadline after the stream header; `0` disables it |
 | `session_idle_grace` | `1 ms` | The last completing worker waits directly for one follow-up request during this grace, avoiding its reactor dispatch hop. It returns the connection to the reactor before running the handler, preserving multiplexing. `0` disables the fast path |
 | `include_handler_error_messages` | `true` | Include handler exception messages in `500` bodies; disable to hide internal details from clients |

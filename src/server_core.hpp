@@ -35,6 +35,14 @@ struct StreamHandlerEntry {
 struct Connection {
     Connection(int fd, easy_uds::PeerCredentials peer)
         : fd(fd), peer(peer), last_io_progress(Clock::now().time_since_epoch().count()) {}
+    ~Connection() {
+        if (fd >= 0) {
+            (void)::close(fd);
+        }
+    }
+
+    Connection(const Connection&) = delete;
+    Connection& operator=(const Connection&) = delete;
 
     int fd = -1;
     easy_uds::PeerCredentials peer;
@@ -109,6 +117,9 @@ struct ServerState {
     int wake_write_fd = -1;
     int instance_lock_fd = -1;
     int epoll_fd = -1;
+    dev_t socket_device = 0;
+    ino_t socket_inode = 0;
+    bool socket_identity_valid = false;
     bool stopped = false;
     bool run_started = false;
     bool run_active = false;
@@ -186,7 +197,8 @@ void enqueue_worker_job(const std::shared_ptr<ServerState>& state, std::shared_p
                         easy_uds::Request request, Deadline deadline, easy_uds::Server::Handler handler,
                         bool is_stream, std::string buffered, std::size_t buffered_offset);
 
-// Shuts down and closes a connection; idempotent (map ownership based).
+// Removes and shuts down a connection; the fd closes when the last worker/
+// reactor reference releases Connection, preventing fd-number reuse races.
 void close_connection(const std::shared_ptr<ServerState>& state, int fd);
 
 // Returns a worker-leased connection to the reactor with a fresh parse state.

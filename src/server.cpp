@@ -157,8 +157,9 @@ std::array<FileDescriptor, 2> make_wakeup_pipe() {
 
 void unlink_owned_socket(const std::shared_ptr<detail::ServerState>& state) noexcept {
     struct stat current {};
-    if (::lstat(state->socket_path.c_str(), &current) == 0 && S_ISSOCK(current.st_mode) &&
-        current.st_uid == ::geteuid()) {
+    if (state->socket_identity_valid && ::lstat(state->socket_path.c_str(), &current) == 0 &&
+        S_ISSOCK(current.st_mode) && current.st_uid == ::geteuid() &&
+        current.st_dev == state->socket_device && current.st_ino == state->socket_inode) {
         (void)::unlink(state->socket_path.c_str());
     }
 }
@@ -287,27 +288,42 @@ Server::Server(std::string socket_path, ServerOptions options) : state_(std::mak
     struct stat identity {};
     if (::lstat(state_->socket_path.c_str(), &identity) != 0) {
         const int error = errno;
-        (void)::unlink(state_->socket_path.c_str());
         throw_system_error("lstat bound socket failed", error);
     }
     if (!S_ISSOCK(identity.st_mode) || identity.st_uid != ::geteuid()) {
-        (void)::unlink(state_->socket_path.c_str());
         throw std::runtime_error("bound socket path was replaced before initialization completed");
     }
+    state_->socket_device = identity.st_dev;
+    state_->socket_inode = identity.st_ino;
+    state_->socket_identity_valid = true;
 
     if (::chmod(state_->socket_path.c_str(), static_cast<mode_t>(options.socket_permissions)) != 0) {
         const int error = errno;
-        (void)::unlink(state_->socket_path.c_str());
+        unlink_owned_socket(state_);
         throw_system_error("chmod socket path failed", error);
+    }
+
+    struct stat after_chmod {};
+    if (::lstat(state_->socket_path.c_str(), &after_chmod) != 0 ||
+        !same_file_identity(identity, after_chmod) || !S_ISSOCK(after_chmod.st_mode) ||
+        after_chmod.st_uid != ::geteuid()) {
+        unlink_owned_socket(state_);
+        throw std::runtime_error("socket path changed while applying permissions");
     }
 
     if (::listen(listener.get(), options.listen_backlog) != 0) {
         const int error = errno;
-        (void)::unlink(state_->socket_path.c_str());
+        unlink_owned_socket(state_);
         throw_system_error("listen failed", error);
     }
 
-    std::array<FileDescriptor, 2> wake_pipe = make_wakeup_pipe();
+    std::array<FileDescriptor, 2> wake_pipe;
+    try {
+        wake_pipe = make_wakeup_pipe();
+    } catch (...) {
+        unlink_owned_socket(state_);
+        throw;
+    }
 
     std::lock_guard<std::mutex> lock(state_->lifecycle_mutex);
     state_->listener_fd = listener.release();
@@ -419,7 +435,6 @@ void Server::run() {
             throw std::logic_error("server has already been stopped");
         }
         state->run_active = true;
-        state->running.store(true);
         listener = state->listener_fd;
         wake_read = state->wake_read_fd;
     }
@@ -444,6 +459,14 @@ void Server::run() {
     wake_event.data.u64 = std::numeric_limits<std::uint64_t>::max() - 1;
     if (::epoll_ctl(epoll_fd, EPOLL_CTL_ADD, wake_read, &wake_event) != 0) {
         throw_system_error("epoll_ctl(wakeup) failed");
+    }
+
+    {
+        std::lock_guard<std::mutex> lock(state->lifecycle_mutex);
+        if (state->stopped) {
+            throw std::logic_error("server was stopped during run setup");
+        }
+        state->running.store(true);
     }
 
     try {
@@ -485,8 +508,8 @@ void Server::run() {
     {
         std::lock_guard<std::mutex> lock(state->connections_mutex);
         for (auto& [fd, rc] : state->connections) {
+            rc->conn->closing.store(true, std::memory_order_release);
             (void)::shutdown(fd, SHUT_RDWR);
-            (void)::close(fd);
         }
         state->connections.clear();
     }

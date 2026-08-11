@@ -274,6 +274,36 @@ void test_socket_path_safety() {
     cleanup_socket_artifacts(path);
 }
 
+void test_stop_preserves_replaced_socket_path() {
+    using namespace easy_uds;
+
+    const std::string path = socket_path("replacement-safety");
+    ServerOptions options;
+    options.stale_socket_grace_period = 0ms;
+    Server server(path, options);
+
+    expect(::unlink(path.c_str()) == 0, "original server socket should be removable for replacement test");
+    const int replacement = ::socket(AF_UNIX, SOCK_STREAM, 0);
+    if (replacement < 0) {
+        throw std::system_error(errno, std::generic_category(), "replacement socket creation failed");
+    }
+    sockaddr_un address{};
+    address.sun_family = AF_UNIX;
+    std::memcpy(address.sun_path, path.c_str(), path.size() + 1);
+    if (::bind(replacement, reinterpret_cast<const sockaddr*>(&address), sizeof(address)) != 0) {
+        const int error = errno;
+        ::close(replacement);
+        throw std::system_error(error, std::generic_category(), "replacement socket bind failed");
+    }
+
+    server.stop();
+    struct stat replacement_info {};
+    expect(::lstat(path.c_str(), &replacement_info) == 0 && S_ISSOCK(replacement_info.st_mode),
+           "stop must not unlink a socket that replaced the server-owned inode");
+    ::close(replacement);
+    cleanup_socket_artifacts(path);
+}
+
 void test_stale_socket_cleanup() {
     using namespace easy_uds;
 
@@ -422,6 +452,29 @@ void test_peer_credentials() {
                                  std::to_string(static_cast<long long>(::geteuid())) + ":" +
                                  std::to_string(static_cast<long long>(::getegid()));
     expect(response.body == expected, "peer pid/uid/gid should match the connecting process");
+
+    server.stop();
+    server_thread.join();
+    cleanup_socket_artifacts(path);
+}
+
+void test_tiny_message_limit_404() {
+    using namespace easy_uds;
+
+    const std::string path = socket_path("tiny-404");
+    ServerOptions options;
+    options.max_message_size = 1;
+    options.io_timeout = 500ms;
+    Server server(path, options);
+    std::thread server_thread([&] { server.run(); });
+    wait_until_running(server);
+
+    ClientOptions client_options;
+    client_options.max_message_size = 1;
+    client_options.io_timeout = 500ms;
+    const Response response = Client(path, client_options).request("x");
+    expect(response.status == 404 && response.body.empty(),
+           "404 status must remain valid when Not Found text exceeds max_message_size");
 
     server.stop();
     server_thread.join();
@@ -831,6 +884,10 @@ void test_reactor_request_timeouts() {
     options.session_idle_grace = 100ms;
     Server server(path, options);
     server.on("ping", [](const Request&) { return Response{200, "pong"}; });
+    server.on("slow-normal", [](const Request&) {
+        std::this_thread::sleep_for(300ms);
+        return Response{200, "normal-done"};
+    });
     server.on_serialized("slow", [](const Request&) {
         std::this_thread::sleep_for(300ms);
         return Response{200, "done"};
@@ -865,6 +922,9 @@ void test_reactor_request_timeouts() {
     ClientOptions client_options;
     client_options.io_timeout = 500ms;
     client_options.request_timeout = 500ms;
+    const Response normal_response = Client(path, client_options).request("slow-normal");
+    expect(normal_response.status == 200 && normal_response.body == "normal-done",
+           "normal handler should survive a shorter reactor io_timeout");
     Session serialized_session = Client(path, client_options).session();
     expect(serialized_session.request("ping").body == "pong", "session fast path should be established");
     const Response response = serialized_session.request("slow");
@@ -1082,6 +1142,49 @@ void test_stream_limit_reserves_worker() {
 
     stream_a.join();
     stream_b.join();
+
+    server.stop();
+    server_thread.join();
+    cleanup_socket_artifacts(path);
+}
+
+void test_stream_timeout_is_independent() {
+    using namespace easy_uds;
+
+    const std::string path = socket_path("stream-timeout-independent");
+    ServerOptions options;
+    options.worker_threads = 2;
+    options.io_timeout = 500ms;
+    options.request_timeout = 50ms;
+    options.stream_timeout = 500ms;
+    Server server(path, options);
+    server.on_stream("slow-stream", [](const StreamReader& body, const Request&) {
+        std::array<char, 8> buffer{};
+        while (body(buffer.data(), buffer.size()) != 0) {
+        }
+        std::this_thread::sleep_for(120ms);
+        return StreamResponse{200, [sent = false](char* output, std::size_t capacity) mutable {
+                                  if (sent || capacity == 0) {
+                                      return std::size_t{0};
+                                  }
+                                  output[0] = 'x';
+                                  sent = true;
+                                  return std::size_t{1};
+                              }};
+    });
+
+    std::thread server_thread([&] { server.run(); });
+    wait_until_running(server);
+
+    ClientOptions client_options;
+    client_options.io_timeout = 500ms;
+    client_options.stream_timeout = 500ms;
+    std::string response_body;
+    const Status status = Client(path, client_options).request_stream(
+        "slow-stream", [](char*, std::size_t) { return std::size_t{0}; },
+        [&](std::string_view chunk) { response_body.append(chunk.data(), chunk.size()); });
+    expect(status == 200 && response_body == "x",
+           "stream_timeout must be independent from the shorter regular request_timeout");
 
     server.stop();
     server_thread.join();
@@ -1423,6 +1526,90 @@ void test_concurrent_clients() {
     cleanup_socket_artifacts(path);
 }
 
+void test_disconnected_handler_fd_isolation() {
+    using namespace easy_uds;
+
+    const std::string path = socket_path("fd-isolation");
+    ServerOptions options;
+    options.worker_threads = 2;
+    options.max_connections = 8;
+    options.io_timeout = 1s;
+    options.request_timeout = 2s;
+    Server server(path, options);
+    std::atomic<bool> old_entered{false};
+    std::atomic<bool> release_old{false};
+    std::atomic<bool> new_entered{false};
+    std::atomic<bool> release_new{false};
+    server.on("slow-old", [&](const Request&) {
+        old_entered.store(true, std::memory_order_release);
+        while (!release_old.load(std::memory_order_acquire)) {
+            std::this_thread::yield();
+        }
+        return Response{200, "OLD"};
+    });
+    server.on("slow-new", [&](const Request&) {
+        new_entered.store(true, std::memory_order_release);
+        while (!release_new.load(std::memory_order_acquire)) {
+            std::this_thread::yield();
+        }
+        return Response{200, "NEW"};
+    });
+
+    std::thread server_thread([&] { server.run(); });
+    wait_until_running(server);
+
+    const int old_fd = connect_raw(path);
+    const auto old_request = fixed_request(0, "slow-old");
+    send_exact(old_fd, old_request.data(), old_request.size());
+    const auto old_deadline = std::chrono::steady_clock::now() + 1s;
+    while (!old_entered.load(std::memory_order_acquire)) {
+        if (std::chrono::steady_clock::now() >= old_deadline) {
+            throw std::runtime_error("test failed: disconnected old handler did not start");
+        }
+        std::this_thread::yield();
+    }
+    ::close(old_fd);
+    std::this_thread::sleep_for(50ms);  // let the reactor observe old peer HUP
+
+    std::atomic<bool> new_completed{false};
+    std::string new_body;
+    std::exception_ptr new_error;
+    std::thread new_client([&] {
+        try {
+            new_body = Client(path).request("slow-new").body;
+            new_completed.store(true, std::memory_order_release);
+        } catch (...) {
+            new_error = std::current_exception();
+        }
+    });
+    const auto new_deadline = std::chrono::steady_clock::now() + 1s;
+    while (!new_entered.load(std::memory_order_acquire)) {
+        if (std::chrono::steady_clock::now() >= new_deadline) {
+            release_old.store(true, std::memory_order_release);
+            release_new.store(true, std::memory_order_release);
+            new_client.join();
+            throw std::runtime_error("test failed: replacement handler did not start");
+        }
+        std::this_thread::yield();
+    }
+
+    release_old.store(true, std::memory_order_release);
+    std::this_thread::sleep_for(50ms);
+    const bool old_response_leaked = new_completed.load(std::memory_order_acquire);
+    release_new.store(true, std::memory_order_release);
+    new_client.join();
+    if (new_error) {
+        std::rethrow_exception(new_error);
+    }
+    expect(!old_response_leaked,
+           "old handler response must not be delivered through a reused fd to a new client");
+    expect(new_body == "NEW", "new client must receive only its own handler response");
+
+    server.stop();
+    server_thread.join();
+    cleanup_socket_artifacts(path);
+}
+
 void test_stop_interrupts_blocked_workers() {
     using namespace easy_uds;
 
@@ -1520,9 +1707,11 @@ int main() {
     try {
         RUN(test_option_validation);
         RUN(test_socket_path_safety);
+        RUN(test_stop_preserves_replaced_socket_path);
         RUN(test_stale_socket_cleanup);
         RUN(test_basic_server);
         RUN(test_peer_credentials);
+        RUN(test_tiny_message_limit_404);
         RUN(test_multiplexed_session);
         RUN(test_fragmented_fast_path_header);
         RUN(test_stream_connection_reuse);
@@ -1533,6 +1722,7 @@ int main() {
         RUN(test_reactor_request_timeouts);
         RUN(test_streams);
         RUN(test_stream_limit_reserves_worker);
+        RUN(test_stream_timeout_is_independent);
         RUN(test_serialized_handlers);
         RUN(test_serialized_queue_expiry);
         RUN(test_enqueue_maintenance);
@@ -1540,6 +1730,7 @@ int main() {
         RUN(test_server_request_timeout_response);
         RUN(test_connection_limit);
         RUN(test_concurrent_clients);
+        RUN(test_disconnected_handler_fd_isolation);
         RUN(test_stop_interrupts_blocked_workers);
         RUN(test_handler_error_opt_out);
         RUN(test_run_setup_failure_state);

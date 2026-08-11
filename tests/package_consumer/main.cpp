@@ -2,7 +2,7 @@
 
 #include <string_view>
 
-static_assert(easy_uds::version == std::string_view{"0.5.0"});
+static_assert(easy_uds::version == std::string_view{"0.5.1"});
 static_assert(easy_uds::protocol_version == 1U);
 
 int main() {

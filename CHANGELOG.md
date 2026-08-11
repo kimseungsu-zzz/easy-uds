@@ -2,6 +2,16 @@
 
 All notable changes to this project are documented here.
 
+## 0.5.1
+
+- Added `ServerOptions::max_persistent_sessions` so persistent sessions cannot starve regular RPC traffic. Every connection waiting for its next request occupies one worker, so the automatic default (`worker_threads - 1`, at least 1) reserves a worker for one-shot requests, mirroring the stream admission limit. A connection whose follow-up wait would exceed the limit is closed after its response, so the client's next request fails explicitly instead of blocking indefinitely.
+- Added `ServerOptions::include_handler_error_messages` (default `true`). When disabled, handler exception messages and response-rejection reasons are replaced by a generic `Internal Server Error` body so clients cannot learn internal details.
+- `Session` is now movable (move constructor/assignment); a moved-from session rejects requests with `std::logic_error`.
+- Updated `docs/PROTOCOL.md` to specify the v0.5.0 persistent-connection lifecycle (lockstep multi-exchange connections, session-end conditions, serialized-route and session-limit termination).
+- Added `easy_uds_session_fuzz`, a stateful libFuzzer target that feeds adversarial byte sequences into a live server over real connections, covering the session loop, read-ahead buffering, and stream frame parsing; CI runs a bounded smoke test.
+- Added regression tests for session saturation (regular RPC stays available while sessions hold the reservation), error-message opt-out, session move, and moved-from rejection.
+- `SECURITY.md` supported release line updated to 0.5.x.
+
 ## 0.5.0
 
 - Added `Client::session()` returning a persistent `Session` connection whose `request()`/`request_stream()` calls reuse one socket, avoiding per-request connect/accept and teardown. On measured WSL2 hardware the tiny-RPC p50 latency dropped from ~62 µs (one-shot) to ~33 µs on a persistent session. A `Session` serializes concurrent calls, is permanently broken after any I/O error or peer close, and ends after a request to a serialized route.

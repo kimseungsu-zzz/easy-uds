@@ -330,7 +330,7 @@ reactor가 listener를 poll하는 동안 `stop()` thread가 listener FD를 직�
 
 ## Wire protocol
 
-모든 message는 16-byte binary header로 시작합니다. header에는 `EUDS` magic, protocol version, message type, 두 개의 32-bit network-byte-order field가 들어갑니다. route와 body는 길이 기반이므로 NUL과 newline을 그대로 보존합니다.
+모든 message는 20-byte binary header로 시작합니다. header에는 `EUDS` magic, protocol version, message type, request id와 두 argument로 구성된 세 개의 32-bit network-byte-order field가 들어갑니다. route와 body는 길이 기반이므로 NUL과 newline을 그대로 보존합니다.
 
 정확한 형식은 [`docs/PROTOCOL.md`](docs/PROTOCOL.md)를 참고하십시오.
 

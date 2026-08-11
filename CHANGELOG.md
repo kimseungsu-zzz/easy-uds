@@ -10,13 +10,14 @@ Breaking rewrite that reshapes the protocol, server internals, and public API be
 
 - 20-byte big-endian header adds a `request id` field for multiplexing; version byte is now `2`. A v2 server rejects v1 connections.
 - Fixed requests on a connection may now be pipelined: the client picks an id, the server echoes it in the response, and responses may arrive out of order. `Client::session()` multiplexes concurrent `request()` calls.
+- Clients reject unknown or mismatched response ids as protocol errors instead of accepting or silently dropping them.
 - Stream frames carry the stream's request id. Streams remain exclusive per connection (half-duplex), and `Session::request_stream()` uses its own dedicated connection.
 - A request that waits past the server-side `request_timeout` before a worker executes it is answered with `408` instead of being silently dropped.
 
 ### Server: epoll reactor (breaking internals)
 
 - The listening/accepting and per-connection frame parsing moved onto an epoll reactor thread; a fixed worker pool executes handlers only. Long-lived connections no longer occupy a worker while idle, fixing the 0.5.x session-starvation risk and the one-shot latency regression at the source.
-- `ServerOptions::max_persistent_sessions` is removed (no longer needed); `max_concurrent_streams` moved into `ServerOptions` (auto mode still reserves a worker for regular RPC and `0` means automatic).
+- `ServerOptions::max_persistent_sessions` is removed (no longer needed); `max_concurrent_streams` moved into `ServerOptions` (`0` means automatic, using `worker_threads - 1` when multiple workers exist and `1` for a single-worker server).
 - Exact routes keep `on()`, and new longest-prefix routing is available via `on_prefix()` / `on_stream_prefix()`.
 
 ### Public API (breaking)
@@ -35,11 +36,18 @@ Breaking rewrite that reshapes the protocol, server internals, and public API be
 
 ### Server: worker-lease continuation fast path
 
-- After serving a fixed request, the worker keeps reading the leased connection directly (no reactor round trip per request) until the peer pauses longer than `ServerOptions::session_idle_grace` (default `1 ms`); it then returns the connection to the reactor so no worker lingers idle. `0` disables the fast path (pure reactor dispatch). Pipelined requests on one connection are served serially by the leasing worker.
+- After the last active fixed response, its worker may lease the connection for one follow-up request during `ServerOptions::session_idle_grace` (default `1 ms`), avoiding a reactor dispatch hop. It returns the connection to the reactor before running that follow-up handler, so later pipelined requests can still execute concurrently. An idle lease returns after the grace, and `0` disables this fast path.
 - One-shot requests (reserved request id `0`) return directly to the reactor after their response; only persistent-session requests use the idle-grace continuation path.
 - Client sessions spin on an atomic completion flag (bounded, then a condition-variable fallback) to avoid a futex round trip per response.
 - Completed session requests are removed from the in-flight table, request timeouts make the session permanently unusable, and request-id wrap avoids ids that are still active.
 - Worker leases preserve partially received follow-up headers across the idle grace, stream leases unregister from epoll before hand-off, and successful streams can be followed by another request on the same wire connection. Epoll registrations carry generation tokens so stale events for a closed fd cannot affect a newer connection that reused the same descriptor number.
+
+### Reliability and limits
+
+- Connection descriptors stay owned until every dispatched response job releases them, preventing fd-number reuse from redirecting a late handler response. Closing connections with in-flight work continue to count against `max_connections` until that work finishes.
+- Reactor inactivity checks no longer expire connections merely because a regular or serialized handler is still producing a response; stream deadlines use `stream_timeout` independently of regular `request_timeout`.
+- Downloaded stream responses are cumulatively checked against the client's `max_stream_size`.
+- Failed `run()` setup no longer reports the server as running, missing-route responses cannot block the reactor, and shutdown only unlinks the exact socket device/inode created by this server.
 
 ## 0.5.1
 

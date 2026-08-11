@@ -243,9 +243,12 @@ void session_reader_loop(detail::SessionState* state) {
         state->broken.store(true, std::memory_order_release);
         {
             std::lock_guard<std::mutex> lock(state->inflight_mutex);
-            for (auto& [id, slot] : state->inflight) {
-                slot->error = std::current_exception();
-                slot->done.store(true, std::memory_order_release);
+            for (auto& entry : state->inflight) {
+                auto& slot = entry.second;
+                if (!slot->done.load(std::memory_order_acquire)) {
+                    slot->error = std::current_exception();
+                    slot->done.store(true, std::memory_order_release);
+                }
             }
         }
         state->inflight_cv.notify_all();
@@ -293,10 +296,9 @@ Response Session::request(std::string_view route, std::string_view body) {
     std::uint32_t request_id = 0;
     {
         std::lock_guard<std::mutex> lock(state_->inflight_mutex);
-        request_id = state_->next_id++;
-        if (request_id == 0) {
-            request_id = state_->next_id++;  // skip the reserved one-shot id
-        }
+        do {
+            request_id = state_->next_id++;
+        } while (request_id == 0 || state_->inflight.find(request_id) != state_->inflight.end());
         state_->inflight.emplace(request_id, slot);
     }
 
@@ -310,6 +312,7 @@ Response Session::request(std::string_view route, std::string_view body) {
             std::lock_guard<std::mutex> lock(state_->inflight_mutex);
             state_->inflight.erase(request_id);
         }
+        (void)::shutdown(state_->fd.get(), SHUT_RDWR);
         throw;
     }
 
@@ -326,13 +329,20 @@ Response Session::request(std::string_view route, std::string_view body) {
     if (!slot->done.load(std::memory_order_acquire)) {
         if (!state_->inflight_cv.wait_until(lock, deadline, [&slot] { return slot->done.load(); })) {
             state_->inflight.erase(request_id);
+            state_->broken.store(true, std::memory_order_release);
+            lock.unlock();
+            (void)::shutdown(state_->fd.get(), SHUT_RDWR);
             throw_system_error("request timed out", ETIMEDOUT);
         }
     }
-    if (slot->error) {
-        std::rethrow_exception(slot->error);
+    const std::exception_ptr error = slot->error;
+    Response response = std::move(slot->response);
+    state_->inflight.erase(request_id);
+    lock.unlock();
+    if (error) {
+        std::rethrow_exception(error);
     }
-    return slot->response;
+    return response;
 }
 
 Status Session::request_stream(std::string_view route, const StreamReader& request_body,

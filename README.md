@@ -4,7 +4,7 @@
 
 `easy-uds` is a small C++17 request/response and chunk-streaming library for local IPC over Unix Domain Sockets (`AF_UNIX`). It keeps the public API intentionally small while providing bounded concurrency, deadlines, binary-safe framing, deterministic shutdown, and CMake package support.
 
-> **Protocol note:** v0.2.0 introduced protocol version 1. v0.4.x retains the original v1 request/response frames and adds new v1 stream frame types. Older peers remain compatible with `request()`, but do not understand `request_stream()`.
+> **Protocol note:** v0.6.0 uses protocol version 2 with a 20-byte header and request-id multiplexing. It is not wire-compatible with protocol v1 used by v0.5.x and earlier.
 
 ## Features
 
@@ -157,7 +157,7 @@ while (true) {
 }
 ```
 
-A `Session` multiplexes concurrent `request()` calls: each is correlated by a request id and answered in any order, so polling threads can share one connection without serializing. It is permanently broken after any I/O error or peer close — open a fresh session to reconnect. A request to a serialized route is served through the exclusive executor and ends the session connection after its response. `request_stream()` on a session runs on its own dedicated connection and is exclusive per session.
+A `Session` multiplexes concurrent `request()` calls: each is correlated by a request id and answered in any order, so polling threads can share one connection without a client-side request lock. It is permanently broken after any I/O error, request timeout, or peer close — open a fresh session to reconnect. A request to a serialized route uses the exclusive executor but does not close the session. `request_stream()` uses its own dedicated connection, so stream calls do not block fixed requests or one another.
 
 ## Configuration
 
@@ -251,11 +251,11 @@ Handlers registered with `on()` run concurrently on worker threads. If they shar
 
 ## Wire protocol
 
-The wire format is binary and versioned. Each message starts with a 16-byte header containing the `EUDS` magic, protocol version, message type, and two 32-bit network-byte-order fields. Routes and bodies are length-delimited, so embedded NULs and newlines are preserved.
+The wire format is binary and versioned. Each message starts with a 20-byte header containing the `EUDS` magic, protocol version, message type, request id, and two 32-bit network-byte-order fields. Routes and bodies are length-delimited, so embedded NULs and newlines are preserved.
 
 See [`docs/PROTOCOL.md`](docs/PROTOCOL.md) for the exact layout.
 
-Each connection carries exactly one request and one response. Either body may use the chunked streaming frame sequence described in the protocol document.
+Fixed requests may be pipelined on a persistent connection and are correlated by request id. A stream is half-duplex and exclusive on its wire connection; after its response ends, that connection may carry another request.
 
 ## Error behavior
 
@@ -416,7 +416,7 @@ For pre-1.0 shared builds, the ELF `SOVERSION` tracks the major and minor releas
 ### `easy_uds::Session`
 
 - `request(std::string_view route, std::string_view body = {})` — multiplexed, concurrent-safe
-- `request_stream(std::string_view route, const StreamReader&, response_chunk)` — exclusive, dedicated connection
+- `request_stream(std::string_view route, const StreamReader&, response_chunk)` — independent dedicated connection
 
 ### Data types
 

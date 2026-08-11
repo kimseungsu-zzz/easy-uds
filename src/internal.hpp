@@ -30,7 +30,6 @@ namespace easy_uds::detail {
 
 using Clock = std::chrono::steady_clock;
 using Deadline = Clock::time_point;
-namespace protocol = easy_uds::detail::protocol;
 using protocol::HeaderBytes;
 using protocol::WireType;
 

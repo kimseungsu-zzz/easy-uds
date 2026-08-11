@@ -6,7 +6,7 @@
 
 특히 한 프로세스에서만 소유할 수 있는 로봇 드라이버나 하드웨어 드라이버를 여러 프로세스가 함께 사용해야 할 때 유용합니다. `on_serialized()`를 사용하면 여러 클라이언트 프로세스가 동시에 명령을 보내더라도 실제 하드웨어 명령은 한 번에 하나씩 FIFO 순서로 실행됩니다.
 
-> **프로토콜 참고:** v0.2.0에서 protocol version 1이 도입되었습니다. v0.4.x는 기존 v1 request/response 프레임을 그대로 유지하면서 stream 프레임을 추가합니다. 기존 peer는 `request()`와 계속 호환되지만 `request_stream()`은 이해하지 못합니다. `on_serialized()`는 wire protocol을 변경하지 않으며 일반 request/response 프레임을 그대로 사용합니다.
+> **프로토콜 참고:** v0.6.0은 20바이트 헤더와 request-id 멀티플렉싱을 사용하는 protocol version 2입니다. v0.5.x 이하의 protocol v1과 wire 호환되지 않습니다.
 
 ## 주요 기능
 
@@ -215,7 +215,7 @@ while (true) {
 }
 ```
 
-`Session`은 동시 `request()` 호출을 **멀티플렉싱**합니다(request id로 상관관계를 매기고 응답은 무순서로 도착). 서버는 유휴 grace 동안 연결을 처리한 워커가 직접 이어 읽는 고속 경로를 쓰므로 고주파 폴링의 단일 요청 왕복 지연이 WSL 원시 바닥(~38 µs p50)에 근접합니다. I/O 오류 또는 peer close 이후에는 영구적으로 사용할 수 없습니다(재연결하려면 새 세션). serialized route에 대한 요청은 그 응답 후 세션 연결이 종료됩니다. `request_stream()`은 전용 연결을 사용하며 세션당 하나만 실행됩니다.
+`Session`은 동시 `request()` 호출을 **멀티플렉싱**합니다(request id로 상관관계를 매기고 응답은 무순서로 도착). 서버는 유휴 grace 동안 연결을 처리한 워커가 직접 이어 읽는 고속 경로를 쓰므로 고주파 폴링의 단일 요청 왕복 지연이 WSL 원시 바닥(~38 µs p50)에 근접합니다. I/O 오류, request timeout 또는 peer close 이후에는 영구적으로 사용할 수 없습니다(재연결하려면 새 세션). serialized route 요청도 응답 후 세션을 유지합니다. `request_stream()`은 독립된 전용 연결을 사용하므로 fixed request나 다른 stream 호출을 막지 않습니다.
 
 `Server::enqueue_maintenance()`는 serialized handler와 같은 FIFO 실행기에서, 그리고 그들과 엄격한 순서로 실행되는 작업을 등록합니다. serialized handler가 접근하는 서버 측 상태(예: 드라이버 인스턴스 맵)를 외부 스레드(스위퍼 등)에서 안전하게 정리할 때 사용합니다:
 
@@ -335,7 +335,7 @@ socket timeout은 `std::system_error`로 전달되며 timeout의 error code는 `
 
 정확한 형식은 [`docs/PROTOCOL.md`](docs/PROTOCOL.md)를 참고하십시오.
 
-하나의 connection에서는 request 하나와 response 하나를 처리합니다. `on_serialized()`도 기존 regular request/response wire format을 그대로 사용하므로 별도의 protocol frame은 없습니다.
+지속 연결에서는 fixed request를 파이프라이닝하고 request id로 응답을 구분할 수 있습니다. stream은 해당 wire connection에서 half-duplex로 독점 실행되며, 응답이 끝난 뒤 같은 connection에 다음 request를 보낼 수 있습니다.
 
 ## 오류 동작
 
@@ -478,7 +478,7 @@ pre-1.0 shared build에서는 minor release 사이 ABI 변경 가능성이 있�
 ### `easy_uds::Session`
 
 - `request(std::string_view route, std::string_view body = {})` — 멀티플렉싱, 동시 호출 가능
-- `request_stream(std::string_view route, const StreamReader&, response_chunk)` — 전용 연결, 세션당 하나
+- `request_stream(std::string_view route, const StreamReader&, response_chunk)` — 독립된 전용 연결
 
 ### 데이터 타입
 

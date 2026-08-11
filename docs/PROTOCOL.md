@@ -117,7 +117,7 @@ client                        server
   |--------- close --------------|
 ```
 
-A persistent session (`Client::session()`) keeps the connection open and multiplexes fixed requests as shown above. Streams are exclusive per connection: a client must not send another request (fixed or streamed) until the stream response has ended, and `request_stream()` uses its own dedicated connection on the session API. The server will parse only sequential frames from one connection; pipelined fixed requests are supported because the id correlates responses.
+A persistent session (`Client::session()`) keeps the connection open and multiplexes fixed requests as shown above. Streams are exclusive per connection: a client must not send another request (fixed or streamed) until the stream response has ended, after which the connection may carry another request. `request_stream()` uses its own dedicated connection on the session API. The server parses sequential frames from one connection; pipelined fixed requests are supported because the id correlates responses.
 
 A connection ends when:
 

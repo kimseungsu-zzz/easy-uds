@@ -36,9 +36,9 @@ struct Connection {
 
     int fd = -1;
     easy_uds::PeerCredentials peer;
-    bool stream_active = false;  // a stream worker owns the fd (exclusive lease)
-    bool worker_owned = false;   // a fixed-request worker is leasing the fd
-    bool closing = false;
+    std::atomic<bool> stream_active{false};  // a stream worker owns the fd (exclusive lease)
+    std::atomic<bool> worker_owned{false};   // a fixed-request worker is leasing the fd
+    std::atomic<bool> closing{false};
 
     // Responses are written as complete frames under this lock so multiplexed
     // responses never interleave inside a frame.
@@ -179,7 +179,8 @@ void enqueue_worker_job(const std::shared_ptr<ServerState>& state, std::shared_p
 void close_connection(const std::shared_ptr<ServerState>& state, int fd);
 
 // Returns a worker-leased connection to the reactor with a fresh parse state.
-void rearm_connection(const std::shared_ptr<ServerState>& state, const std::shared_ptr<Connection>& conn);
+void rearm_connection(const std::shared_ptr<ServerState>& state, const std::shared_ptr<Connection>& conn,
+                      std::string buffered = {}, std::size_t buffered_offset = 0);
 
 std::string bounded_error_body(std::string_view message, std::size_t max_message_size);
 

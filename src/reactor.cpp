@@ -89,6 +89,8 @@ class StreamByteSource {
         }
     }
 
+    [[nodiscard]] bool buffered() const noexcept { return offset_ < buffered_.size(); }
+
   private:
     std::string& buffered_;
     std::size_t& offset_;
@@ -387,7 +389,15 @@ void dispatch_stream(const std::shared_ptr<ServerState>& state, const std::share
     const Deadline stream_deadline = earlier_deadline(rc->deadline, deadline_from_now(state->options.stream_timeout));
 
     // The stream worker takes over the fd; unread buffered bytes ride along.
-    rc->conn->stream_active = true;
+    // Remove it from epoll before handing off so rearm can add it exactly once.
+    {
+        std::lock_guard<std::mutex> lock(state->connections_mutex);
+        if (state->epoll_fd >= 0) {
+            epoll_event ev{};
+            (void)::epoll_ctl(state->epoll_fd, EPOLL_CTL_DEL, rc->conn->fd, &ev);
+        }
+        rc->conn->stream_active.store(true, std::memory_order_release);
+    }
     std::string leftover = std::move(rc->pending);
     const std::size_t leftover_offset = rc->pending_offset;
     rc->pending.clear();
@@ -464,21 +474,21 @@ void run_stream_exchange(const std::shared_ptr<ServerState>& state, PendingJob&&
     } catch (...) {
         // Peer closed, timed out, sent malformed frames, or the server
         // stopped. The connection is done; drop the lease quietly.
+        conn->closing.store(true, std::memory_order_release);
     }
 
     // Lease ends: hand the connection back to the reactor (or close on stop).
-    rearm_connection(state, conn);
+    rearm_connection(state, conn, std::move(job.buffered), job.buffered_offset);
 }
 
 // ---- worker pool -----------------------------------------------------------
 
 // Hands a leased connection back to the reactor with a fresh parse state.
 // Called by a worker; run()'s cleanup handles connections when not running.
-void rearm_connection(const std::shared_ptr<ServerState>& state, const std::shared_ptr<Connection>& conn) {
+void rearm_connection(const std::shared_ptr<ServerState>& state, const std::shared_ptr<Connection>& conn,
+                      std::string buffered, std::size_t buffered_offset) {
     const int fd = conn->fd;
-    conn->stream_active = false;
-    conn->worker_owned = false;
-    if (conn->closing) {
+    if (conn->closing.load(std::memory_order_acquire)) {
         close_connection(state, fd);
         return;
     }
@@ -487,6 +497,8 @@ void rearm_connection(const std::shared_ptr<ServerState>& state, const std::shar
     }
     auto fresh = std::make_shared<ReactorConnection>();
     fresh->conn = conn;
+    fresh->pending = std::move(buffered);
+    fresh->pending_offset = buffered_offset;
     {
         std::lock_guard<std::mutex> lock(state->connections_mutex);
         state->connections[fd] = fresh;
@@ -495,9 +507,12 @@ void rearm_connection(const std::shared_ptr<ServerState>& state, const std::shar
     ev.events = EPOLLIN;
     ev.data.fd = fd;
     if (::epoll_ctl(state->epoll_fd, EPOLL_CTL_ADD, fd, &ev) != 0) {
-        conn->closing = true;
+        conn->closing.store(true, std::memory_order_release);
         close_connection(state, fd);
+        return;
     }
+    conn->stream_active.store(false, std::memory_order_release);
+    conn->worker_owned.store(false, std::memory_order_release);
 }
 
 // Serves one parsed fixed request from the worker side: 404 / serialized
@@ -553,16 +568,25 @@ void continue_connection(const std::shared_ptr<ServerState>& state, std::shared_
                          std::string buffered, std::size_t buffered_offset) {
     const int fd = conn->fd;
     const std::chrono::milliseconds grace = state->options.session_idle_grace;
-    if (grace.count() == 0) {
-        rearm_connection(state, conn);
-        return;
-    }
     StreamByteSource source(buffered, buffered_offset, fd);
+    bool request_started = false;
     try {
-        while (state->running.load() && !conn->closing) {
-            // Wait for the next request header only within the idle grace.
+        while (state->running.load() && !conn->closing.load(std::memory_order_acquire)) {
+            // Apply the short grace only while no byte of the next request is
+            // available. Once a header starts, use the normal request deadline
+            // so a fragmented header is never discarded during rearm.
+            request_started = source.buffered();
+            if (!request_started) {
+                if (grace.count() == 0) {
+                    break;
+                }
+                wait_for_io(fd, POLLIN, std::chrono::milliseconds{0}, deadline_from_now(grace),
+                            "receive timed out");
+                request_started = true;
+            }
+            const Deadline req_deadline = deadline_from_now(state->options.request_timeout);
             HeaderBytes header{};
-            source.read(header.data(), header.size(), state->options.io_timeout, deadline_from_now(grace));
+            source.read(header.data(), header.size(), state->options.io_timeout, req_deadline);
             const auto decoded = protocol::decode_header(header);
             if (decoded.type != WireType::request) {
                 throw std::runtime_error("unexpected frame on persistent connection");
@@ -572,7 +596,6 @@ void continue_connection(const std::shared_ptr<ServerState>& state, std::shared_
             easy_uds::Request request;
             request.route.resize(decoded.arg1);
             request.body.resize(decoded.arg2);
-            const Deadline req_deadline = deadline_from_now(state->options.request_timeout);
             if (decoded.arg1 != 0) {
                 source.read(request.route.data(), request.route.size(), state->options.io_timeout, req_deadline);
             }
@@ -583,16 +606,17 @@ void continue_connection(const std::shared_ptr<ServerState>& state, std::shared_
             request.request_id = decoded.request_id;
 
             serve_fixed_request(state, conn, request, req_deadline);
+            request_started = false;
         }
     } catch (const std::system_error& error) {
-        if (error.code().value() != ETIMEDOUT) {
-            conn->closing = true;  // peer closed or I/O failure
+        if (error.code().value() != ETIMEDOUT || request_started) {
+            conn->closing.store(true, std::memory_order_release);  // peer closed or request I/O failure
         }
         // ETIMEDOUT: the idle grace elapsed; hand back to the reactor.
     } catch (...) {
-        conn->closing = true;  // malformed frame or protocol error
+        conn->closing.store(true, std::memory_order_release);  // malformed frame or protocol error
     }
-    rearm_connection(state, conn);
+    rearm_connection(state, conn, std::move(buffered), buffered_offset);
 }
 
 void worker_loop(const std::shared_ptr<ServerState>& state) {
@@ -740,7 +764,7 @@ void consume(const std::shared_ptr<ServerState>& state, const std::shared_ptr<Re
                 rc->pending_offset = 0;
             }
             rc->pending.append(scratch.data(), static_cast<std::size_t>(n));
-            continue;
+            break;
         }
         if (n == 0) {
             rc->conn->closing = true;
@@ -913,7 +937,9 @@ void run_reactor(const std::shared_ptr<ServerState>& state) {
                 }
                 rc = it->second;
             }
-            if (rc->conn->stream_active || rc->conn->worker_owned || rc->conn->closing) {
+            if (rc->conn->stream_active.load(std::memory_order_acquire) ||
+                rc->conn->worker_owned.load(std::memory_order_acquire) ||
+                rc->conn->closing.load(std::memory_order_acquire)) {
                 continue;
             }
             if ((mask & (EPOLLERR | EPOLLHUP | EPOLLRDHUP)) != 0) {
@@ -927,7 +953,7 @@ void run_reactor(const std::shared_ptr<ServerState>& state) {
                     // Malformed or invalid frames: isolate the peer.
                     rc->conn->closing = true;
                 }
-                if (rc->conn->closing) {
+                if (rc->conn->closing.load(std::memory_order_acquire)) {
                     close_connection(state, fd);
                 }
             }

@@ -127,6 +127,9 @@ if(EASY_UDS_BUILD_BENCHMARKS)
         target_compile_options(easy_uds_rpc_benchmark PRIVATE
             $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Werror>
         )
+        target_compile_options(easy_uds_session_benchmark PRIVATE
+            $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Werror>
+        )
     endif()
 endif()
 

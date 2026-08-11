@@ -48,7 +48,7 @@ struct Request {
     std::string route;
     std::string body;
     PeerCredentials peer;
-    // Correlation id for the multiplexed protocol. The server assigns it per
+    // Correlation id for the multiplexed protocol. The client assigns it per
     // in-flight request; responses to different requests may arrive in any
     // order. Handlers that mutate shared state must not rely on it being
     // sequential.
@@ -240,9 +240,9 @@ class Client {
 
 // A persistent connection opened by Client::session(). Concurrent request()
 // calls are fully multiplexed: the server may answer out of order and each
-// call returns its own response. request_stream() is exclusive per session
-// (one stream at a time, and no fixed request may be in flight while a stream
-// runs). After an I/O error, time-out, or peer close the session is
+// call returns its own response. request_stream() uses a separate dedicated
+// connection, so it does not block fixed requests or another stream call.
+// After an I/O error, time-out, or peer close the fixed-request session is
 // permanently unusable and every later call throws std::logic_error.
 class Session {
   public:

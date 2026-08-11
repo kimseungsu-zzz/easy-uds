@@ -86,6 +86,29 @@ ssize_t send_no_signal(int fd, const void* data, std::size_t size) {
 #endif
 }
 
+void recv_exact(int fd, void* data, std::size_t size) {
+    auto* bytes = static_cast<unsigned char*>(data);
+    std::size_t received = 0;
+    while (received < size) {
+        const ssize_t result = ::recv(fd, bytes + received, size - received, 0);
+        if (result > 0) {
+            received += static_cast<std::size_t>(result);
+            continue;
+        }
+        if (result < 0 && errno == EINTR) {
+            continue;
+        }
+        throw std::system_error(result == 0 ? ECONNRESET : errno, std::generic_category(),
+                                "raw receive failed");
+    }
+}
+
+std::uint32_t get_u32(const unsigned char* bytes) {
+    return (static_cast<std::uint32_t>(bytes[0]) << 24) |
+           (static_cast<std::uint32_t>(bytes[1]) << 16) |
+           (static_cast<std::uint32_t>(bytes[2]) << 8) | static_cast<std::uint32_t>(bytes[3]);
+}
+
 void cleanup_socket_artifacts(const std::string& path) {
     (void)::unlink(path.c_str());
     const std::string lock_path = path + ".lock";
@@ -134,8 +157,10 @@ std::vector<unsigned char> frame(std::uint8_t type, std::uint32_t request_id, st
 }
 
 std::vector<unsigned char> fixed_request(std::uint32_t request_id, const char* route, const char* body = "") {
-    return frame(1, request_id, static_cast<std::uint32_t>(std::strlen(route)),
-                 static_cast<std::uint32_t>(std::strlen(body)), route, std::strlen(route));
+    auto bytes = frame(1, request_id, static_cast<std::uint32_t>(std::strlen(route)),
+                       static_cast<std::uint32_t>(std::strlen(body)), route, std::strlen(route));
+    bytes.insert(bytes.end(), body, body + std::strlen(body));
+    return bytes;
 }
 
 void test_option_validation() {
@@ -377,6 +402,7 @@ void test_multiplexed_session() {
     options.worker_threads = 4;
     options.io_timeout = 500ms;
     options.request_timeout = 5s;
+    options.session_idle_grace = 0ms;  // exercise pure reactor rearm with pipelined read-ahead
     Server server(path, options);
     server.on("echo", [](const Request& request) { return Response{200, request.body}; });
     server.on("slow", [](const Request& request) {
@@ -446,6 +472,97 @@ void test_multiplexed_session() {
     cleanup_socket_artifacts(path);
 }
 
+void test_fragmented_fast_path_header() {
+    using namespace easy_uds;
+
+    const std::string path = socket_path("fragmented-fast-path");
+    ServerOptions options;
+    options.worker_threads = 2;
+    options.io_timeout = 500ms;
+    options.request_timeout = 1s;
+    options.session_idle_grace = 1ms;
+    Server server(path, options);
+    server.on("ping", [](const Request&) { return Response{200, "pong"}; });
+
+    std::thread server_thread([&] { server.run(); });
+    wait_until_running(server);
+
+    const int fd = connect_raw(path);
+    const auto first = fixed_request(1, "ping");
+    expect(send_no_signal(fd, first.data(), first.size()) == static_cast<ssize_t>(first.size()),
+           "first raw request should be written");
+    std::array<unsigned char, 20> response_header{};
+    recv_exact(fd, response_header.data(), response_header.size());
+    std::array<char, 4> response_body{};
+    recv_exact(fd, response_body.data(), response_body.size());
+    expect(std::string(response_body.data(), response_body.size()) == "pong", "first raw response body");
+
+    const auto second = fixed_request(2, "ping");
+    expect(send_no_signal(fd, second.data(), 10) == 10, "partial follow-up header should be written");
+    std::this_thread::sleep_for(20ms);  // longer than session_idle_grace
+    expect(send_no_signal(fd, second.data() + 10, second.size() - 10) ==
+               static_cast<ssize_t>(second.size() - 10),
+           "remaining follow-up frame should be written");
+    recv_exact(fd, response_header.data(), response_header.size());
+    expect(get_u32(response_header.data() + 8) == 2, "fragmented follow-up response id");
+    recv_exact(fd, response_body.data(), response_body.size());
+    expect(std::string(response_body.data(), response_body.size()) == "pong",
+           "fragmented follow-up should complete");
+    ::close(fd);
+
+    server.stop();
+    server_thread.join();
+    cleanup_socket_artifacts(path);
+}
+
+void test_stream_connection_reuse() {
+    using namespace easy_uds;
+
+    const std::string path = socket_path("stream-reuse");
+    ServerOptions options;
+    options.worker_threads = 2;
+    options.io_timeout = 500ms;
+    Server server(path, options);
+    server.on("ping", [](const Request&) { return Response{200, "pong"}; });
+    server.on_stream("discard", [](const StreamReader& body, const Request&) {
+        std::array<char, 64> buffer{};
+        while (body(buffer.data(), buffer.size()) != 0) {
+        }
+        return StreamResponse{204, {}};
+    });
+
+    std::thread server_thread([&] { server.run(); });
+    wait_until_running(server);
+
+    const int fd = connect_raw(path);
+    auto stream_start = frame(3, 11, 7, 0, "discard", 7);
+    const auto stream_end = frame(5, 11, 0, 0, nullptr, 0);
+    stream_start.insert(stream_start.end(), stream_end.begin(), stream_end.end());
+    expect(send_no_signal(fd, stream_start.data(), stream_start.size()) ==
+               static_cast<ssize_t>(stream_start.size()),
+           "stream request should be written");
+
+    std::array<unsigned char, 20> header{};
+    recv_exact(fd, header.data(), header.size());
+    expect(header[5] == 6 && get_u32(header.data() + 8) == 11, "stream response start");
+    recv_exact(fd, header.data(), header.size());
+    expect(header[5] == 8 && get_u32(header.data() + 8) == 11, "stream response end");
+
+    const auto fixed = fixed_request(12, "ping");
+    expect(send_no_signal(fd, fixed.data(), fixed.size()) == static_cast<ssize_t>(fixed.size()),
+           "fixed request after stream should be written");
+    recv_exact(fd, header.data(), header.size());
+    expect(header[5] == 2 && get_u32(header.data() + 8) == 12, "fixed response after stream");
+    std::array<char, 4> body{};
+    recv_exact(fd, body.data(), body.size());
+    expect(std::string(body.data(), body.size()) == "pong", "fixed body after stream");
+    ::close(fd);
+
+    server.stop();
+    server_thread.join();
+    cleanup_socket_artifacts(path);
+}
+
 void test_session_broken_after_shutdown() {
     using namespace easy_uds;
 
@@ -473,6 +590,36 @@ void test_session_broken_after_shutdown() {
                                   "session request against a stopped server should fail");
     expect_throws<std::logic_error>([&] { (void)session.request("ping"); },
                                     "broken session should reject later requests");
+    cleanup_socket_artifacts(path);
+}
+
+void test_session_broken_after_timeout() {
+    using namespace easy_uds;
+
+    const std::string path = socket_path("session-timeout");
+    ServerOptions server_options;
+    server_options.worker_threads = 2;
+    server_options.io_timeout = 500ms;
+    Server server(path, server_options);
+    server.on("slow", [](const Request&) {
+        std::this_thread::sleep_for(100ms);
+        return Response{200, "late"};
+    });
+
+    std::thread server_thread([&] { server.run(); });
+    wait_until_running(server);
+
+    ClientOptions client_options;
+    client_options.io_timeout = 500ms;
+    client_options.request_timeout = 20ms;
+    Session session = Client(path, client_options).session();
+    expect_throws<std::system_error>([&] { (void)session.request("slow"); },
+                                     "session request should report its deadline");
+    expect_throws<std::logic_error>([&] { (void)session.request("slow"); },
+                                    "timed-out session should remain permanently unusable");
+
+    server.stop();
+    server_thread.join();
     cleanup_socket_artifacts(path);
 }
 
@@ -677,15 +824,19 @@ void test_stream_limit_reserves_worker() {
 
     Client client(path);
     // Two long-lived streams take both stream slots.
-    StreamReader slow = [r = std::size_t{4 * 1024 * 1024}](char*, std::size_t c) mutable {
-        const std::size_t take = std::min(c, r);
-        if (take == 0) return std::size_t{0};
-        r -= take;
-        return take;
+    const auto make_slow_reader = [] {
+        return StreamReader{[r = std::size_t{4 * 1024 * 1024}](char*, std::size_t c) mutable {
+            const std::size_t take = std::min(c, r);
+            if (take == 0) return std::size_t{0};
+            r -= take;
+            return take;
+        }};
     };
+    StreamReader slow_a = make_slow_reader();
+    StreamReader slow_b = make_slow_reader();
     const auto stream_start = std::chrono::steady_clock::now();
-    std::thread stream_a([&] { (void)client.request_stream("block", slow, {}); });
-    std::thread stream_b([&] { (void)client.request_stream("block", slow, {}); });
+    std::thread stream_a([&] { (void)client.request_stream("block", slow_a, {}); });
+    std::thread stream_b([&] { (void)client.request_stream("block", slow_b, {}); });
     while (std::chrono::steady_clock::now() - stream_start < 100ms) {
         std::this_thread::yield();
     }
@@ -1147,7 +1298,10 @@ int main() {
         RUN(test_basic_server);
         RUN(test_peer_credentials);
         RUN(test_multiplexed_session);
+        RUN(test_fragmented_fast_path_header);
+        RUN(test_stream_connection_reuse);
         RUN(test_session_broken_after_shutdown);
+        RUN(test_session_broken_after_timeout);
         RUN(test_session_move);
         RUN(test_streams);
         RUN(test_stream_limit_reserves_worker);

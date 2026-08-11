@@ -4,9 +4,11 @@
 #include <array>
 #include <chrono>
 #include <iostream>
+#include <mutex>
 #include <stdexcept>
 #include <string>
 #include <thread>
+#include <utility>
 #include <vector>
 
 #include <unistd.h>
@@ -54,9 +56,7 @@ void run_concurrent_load() {
     server.on("echo", [](const Request& request) { return Response{200, request.body}; });
     server.on_stream("up", [](const StreamReader& body, const Request&) {
         std::array<char, 2048> buffer{};
-        std::size_t total = 0;
         while (body(buffer.data(), buffer.size()) != 0) {
-            total += 1;
         }
         return StreamResponse{200, {}};
     });
@@ -68,6 +68,15 @@ void run_concurrent_load() {
 
     std::atomic<std::size_t> successes{0};
     std::atomic<bool> failed{false};
+    std::mutex failure_mutex;
+    std::string first_failure;
+    const auto record_failure = [&](std::string message) {
+        failed.store(true);
+        std::lock_guard<std::mutex> lock(failure_mutex);
+        if (first_failure.empty()) {
+            first_failure = std::move(message);
+        }
+    };
 
     // 8 one-shot workers.
     std::vector<std::thread> one_shot;
@@ -78,13 +87,17 @@ void run_concurrent_load() {
                     const std::string body = "s" + std::to_string(w) + "-" + std::to_string(i);
                     const Response response = client.request("echo", body);
                     if (response.status != 200 || response.body != body) {
-                        failed.store(true);
+                        record_failure("one-shot response mismatch at worker " + std::to_string(w) +
+                                       ", iteration " + std::to_string(i));
                         return;
                     }
                 }
                 successes.fetch_add(1);
+            } catch (const std::exception& error) {
+                record_failure(std::string{"one-shot error at worker "} + std::to_string(w) + ": " +
+                               error.what());
             } catch (...) {
-                failed.store(true);
+                record_failure("one-shot non-standard exception");
             }
         });
     }
@@ -99,13 +112,15 @@ void run_concurrent_load() {
                     const std::string body = "m" + std::to_string(w) + "-" + std::to_string(i);
                     const Response response = session.request("echo", body);
                     if (response.status != 200 || response.body != body) {
-                        failed.store(true);
+                        record_failure("session response mismatch");
                         return;
                     }
                 }
                 successes.fetch_add(1);
+            } catch (const std::exception& error) {
+                record_failure(std::string{"session error: "} + error.what());
             } catch (...) {
-                failed.store(true);
+                record_failure("session non-standard exception");
             }
         });
     }
@@ -127,7 +142,7 @@ void run_concurrent_load() {
         };
         const Status status = client.request_stream("up", up, {});
         if (status != 200) {
-            failed.store(true);
+            record_failure("stream status mismatch");
         }
     }
 
@@ -135,7 +150,9 @@ void run_concurrent_load() {
     server_thread.join();
     cleanup(path);
 
-    expect(!failed.load(), "no request may fail under concurrent load");
+    if (failed.load()) {
+        throw std::runtime_error("no request may fail under concurrent load: " + first_failure);
+    }
     expect(successes.load() >= 12, "every client worker should complete");
     std::cout << "  concurrent load: ok (12 workers, " << successes.load() << " completed)\n";
 }
@@ -158,7 +175,7 @@ void run_concurrent_stop() {
     std::atomic<bool> stop_requested{false};
     std::vector<std::thread> clients;
     for (int i = 0; i < 8; ++i) {
-        clients.emplace_back([&, i] {
+        clients.emplace_back([&] {
             try {
                 Client client(path);
                 while (!stop_requested.load()) {

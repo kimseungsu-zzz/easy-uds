@@ -50,6 +50,7 @@ enum class ParsePhase { header, request_payload, stream_route };
 
 struct ReactorConnection {
     std::shared_ptr<Connection> conn;
+    std::uint32_t generation = 0;
     ParsePhase phase = ParsePhase::header;
     protocol::HeaderBytes header{};
     std::size_t header_received = 0;
@@ -91,6 +92,7 @@ struct ServerState {
 
     std::atomic<bool> running{false};
     std::atomic<std::size_t> active_streams{0};
+    std::atomic<std::uint32_t> next_connection_generation{1};
     std::size_t max_concurrent_streams = 1;
 
     std::mutex lifecycle_mutex;

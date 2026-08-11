@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <cstring>
 #include <exception>
+#include <limits>
 #include <memory>
 #include <string_view>
 #include <utility>
@@ -23,6 +24,21 @@ using protocol::WireType;
 
 constexpr std::size_t kReadScratch = 64U * 1024U;
 constexpr int kMaxAcceptBatch = 64;
+constexpr std::uint64_t kListenerToken = std::numeric_limits<std::uint64_t>::max();
+constexpr std::uint64_t kWakeToken = kListenerToken - 1;
+
+std::uint32_t allocate_connection_generation(const std::shared_ptr<ServerState>& state) noexcept {
+    std::uint32_t generation = state->next_connection_generation.fetch_add(1, std::memory_order_relaxed);
+    if (generation == 0) {
+        generation = state->next_connection_generation.fetch_add(1, std::memory_order_relaxed);
+    }
+    return generation;
+}
+
+std::uint64_t connection_token(int fd, std::uint32_t generation) noexcept {
+    return (static_cast<std::uint64_t>(generation) << 32) |
+           static_cast<std::uint32_t>(fd);
+}
 
 easy_uds::Response invoke_request_handler(const easy_uds::Server::Handler& handler,
                                           const easy_uds::Request& request,
@@ -497,22 +513,34 @@ void rearm_connection(const std::shared_ptr<ServerState>& state, const std::shar
     }
     auto fresh = std::make_shared<ReactorConnection>();
     fresh->conn = conn;
+    fresh->generation = allocate_connection_generation(state);
     fresh->pending = std::move(buffered);
     fresh->pending_offset = buffered_offset;
+    bool rearm_failed = false;
     {
         std::lock_guard<std::mutex> lock(state->connections_mutex);
         state->connections[fd] = fresh;
+        // Publish reactor ownership while the connection map is locked, then
+        // register the fd before the reactor can observe that transition. This
+        // prevents an immediately-ready EOF/HUP event from being skipped while
+        // the old worker-owned flag is still visible.
+        conn->stream_active.store(false, std::memory_order_release);
+        conn->worker_owned.store(false, std::memory_order_release);
+
+        epoll_event ev{};
+        ev.events = EPOLLIN;
+        ev.data.u64 = connection_token(fd, fresh->generation);
+        if (::epoll_ctl(state->epoll_fd, EPOLL_CTL_ADD, fd, &ev) != 0) {
+            const int add_error = errno;
+            if (add_error != EEXIST || ::epoll_ctl(state->epoll_fd, EPOLL_CTL_MOD, fd, &ev) != 0) {
+                conn->closing.store(true, std::memory_order_release);
+                rearm_failed = true;
+            }
+        }
     }
-    epoll_event ev{};
-    ev.events = EPOLLIN;
-    ev.data.fd = fd;
-    if (::epoll_ctl(state->epoll_fd, EPOLL_CTL_ADD, fd, &ev) != 0) {
-        conn->closing.store(true, std::memory_order_release);
+    if (rearm_failed) {
         close_connection(state, fd);
-        return;
     }
-    conn->stream_active.store(false, std::memory_order_release);
-    conn->worker_owned.store(false, std::memory_order_release);
 }
 
 // Serves one parsed fixed request from the worker side: 404 / serialized
@@ -871,10 +899,10 @@ void run_reactor(const std::shared_ptr<ServerState>& state) {
         }
 
         for (int index = 0; index < count; ++index) {
-            const int fd = events[index].data.fd;
+            const std::uint64_t token = events[index].data.u64;
             const std::uint32_t mask = events[index].events;
 
-            if (fd == listener) {
+            if (token == kListenerToken) {
                 if ((mask & (EPOLLERR | EPOLLHUP)) != 0) {
                     break;  // listening socket failed; treat as fatal
                 }
@@ -905,10 +933,11 @@ void run_reactor(const std::shared_ptr<ServerState>& state) {
                         auto conn = std::make_shared<Connection>(client_fd, capture_peer_credentials(client_fd));
                         auto rc = std::make_shared<ReactorConnection>();
                         rc->conn = conn;
+                        rc->generation = allocate_connection_generation(state);
                         state->connections[client_fd] = rc;
                         epoll_event ev{};
                         ev.events = EPOLLIN;
-                        ev.data.fd = client_fd;
+                        ev.data.u64 = connection_token(client_fd, rc->generation);
                         if (::epoll_ctl(epoll_fd, EPOLL_CTL_ADD, client_fd, &ev) != 0) {
                             state->connections.erase(client_fd);
                             (void)::close(client_fd);
@@ -918,7 +947,7 @@ void run_reactor(const std::shared_ptr<ServerState>& state) {
                 continue;
             }
 
-            if (fd == wake_read) {
+            if (token == kWakeToken) {
                 std::array<unsigned char, 64> drain{};
                 while (::read(wake_read, drain.data(), drain.size()) > 0) {
                 }
@@ -928,11 +957,13 @@ void run_reactor(const std::shared_ptr<ServerState>& state) {
                 break;
             }
 
+            const int fd = static_cast<int>(static_cast<std::uint32_t>(token));
+            const std::uint32_t generation = static_cast<std::uint32_t>(token >> 32);
             std::shared_ptr<ReactorConnection> rc;
             {
                 std::lock_guard<std::mutex> lock(state->connections_mutex);
                 const auto it = state->connections.find(fd);
-                if (it == state->connections.end()) {
+                if (it == state->connections.end() || it->second->generation != generation) {
                     continue;
                 }
                 rc = it->second;

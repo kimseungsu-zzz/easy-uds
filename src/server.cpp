@@ -4,7 +4,9 @@
 #include <array>
 #include <cerrno>
 #include <cstring>
+#include <cstdint>
 #include <exception>
+#include <limits>
 #include <memory>
 #include <string>
 #include <utility>
@@ -431,13 +433,13 @@ void Server::run() {
 
     epoll_event listener_event{};
     listener_event.events = EPOLLIN;
-    listener_event.data.fd = listener;
+    listener_event.data.u64 = std::numeric_limits<std::uint64_t>::max();
     if (::epoll_ctl(epoll_fd, EPOLL_CTL_ADD, listener, &listener_event) != 0) {
         throw_system_error("epoll_ctl(listener) failed");
     }
     epoll_event wake_event{};
     wake_event.events = EPOLLIN;
-    wake_event.data.fd = wake_read;
+    wake_event.data.u64 = std::numeric_limits<std::uint64_t>::max() - 1;
     if (::epoll_ctl(epoll_fd, EPOLL_CTL_ADD, wake_read, &wake_event) != 0) {
         throw_system_error("epoll_ctl(wakeup) failed");
     }

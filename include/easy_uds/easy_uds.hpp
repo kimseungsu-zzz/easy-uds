@@ -4,16 +4,61 @@
 
 #include <chrono>
 #include <cstddef>
+#include <cstdint>
 #include <functional>
 #include <memory>
 #include <string>
 #include <string_view>
 
+#include <sys/types.h>
+
 namespace easy_uds {
 
+// ---- Response status codes -------------------------------------------------
+// Wire-transparent 32-bit status; the well-known set below mirrors the
+// constants the server generates. Handlers may return any non-negative value.
+using Status = std::int32_t;
+
+inline constexpr Status status_ok = 200;
+inline constexpr Status status_created = 201;
+inline constexpr Status status_bad_request = 400;
+inline constexpr Status status_request_timeout = 408;
+inline constexpr Status status_not_found = 404;
+inline constexpr Status status_conflict = 409;
+inline constexpr Status status_internal_error = 500;
+inline constexpr Status status_unavailable = 503;
+
+// ---- Sizes ----------------------------------------------------------------
 inline constexpr std::size_t default_max_message_size = 1024U * 1024U;
 inline constexpr std::size_t default_stream_chunk_size = 64U * 1024U;
 inline constexpr std::size_t default_max_stream_size = 1024U * 1024U * 1024U;
+
+// ---- Request / response ---------------------------------------------------
+// Peer identity of the connecting client, captured with SO_PEERCRED on Linux
+// (getpeereid on BSD). `present` is false when the platform or socket cannot
+// provide credentials.
+struct PeerCredentials {
+    pid_t pid = -1;
+    uid_t uid = static_cast<uid_t>(-1);
+    gid_t gid = static_cast<gid_t>(-1);
+    bool present = false;
+};
+
+struct Request {
+    std::string route;
+    std::string body;
+    PeerCredentials peer;
+    // Correlation id for the multiplexed protocol. The server assigns it per
+    // in-flight request; responses to different requests may arrive in any
+    // order. Handlers that mutate shared state must not rely on it being
+    // sequential.
+    std::uint32_t request_id = 0;
+};
+
+struct Response {
+    Status status = status_ok;
+    std::string body;
+};
 
 // A pull-based byte source. Implementations fill at most `capacity` bytes and
 // return the number produced. Returning zero marks end-of-stream.
@@ -22,46 +67,40 @@ using StreamReader = std::function<std::size_t(char* buffer, std::size_t capacit
 // A streamed response is consumed immediately after the handler returns. Its
 // reader must own (or otherwise outlive) every resource it captures.
 struct StreamResponse {
-    int status_code = 200;
+    Status status = status_ok;
     StreamReader body;
 };
 
-struct Request {
-    std::string route;
-    std::string body;
-};
-
-struct Response {
-    int status_code = 200;
-    std::string body;
-};
-
+// ---- Options --------------------------------------------------------------
 struct ServerOptions {
-    // Fixed worker-pool size. Must be > 0 and <= max_connections.
+    // Fixed worker-pool size used to execute handlers. Must be > 0.
     std::size_t worker_threads = 4;
 
-    // Maximum number of active plus queued client connections.
+    // Maximum number of concurrently open client connections.
     std::size_t max_connections = 64;
 
     // Maximum route+body request bytes and maximum response-body bytes.
     std::size_t max_message_size = default_max_message_size;
 
     // Buffer and wire-frame size used for streamed request/response bodies.
-    // Stream data is never accumulated into a complete in-memory message.
     std::size_t stream_chunk_size = default_stream_chunk_size;
 
     // Maximum bytes in each streamed request body and response body. Zero
     // allows an unbounded stream; io_timeout still detects stalled peers.
     std::size_t max_stream_size = default_max_stream_size;
 
+    // Maximum simultaneous streams. Zero means automatic: reserve one worker
+    // for regular RPC (`worker_threads - 1`, at least 1). Explicit values must
+    // be between 1 and worker_threads.
+    std::size_t max_concurrent_streams = 0;
+
     // Maximum idle time between successful socket-I/O progress events.
     // Zero disables the inactivity timeout.
     std::chrono::milliseconds io_timeout{5000};
 
-    // Absolute deadline for a connection, measured from accept() until the
-    // response is written. It prevents slow-drip peers from holding a worker
-    // forever. Zero disables the absolute deadline. User handler execution is
-    // not forcibly interrupted; if it runs past the deadline, response I/O
+    // Absolute deadline for a request, measured from the moment its header is
+    // read until its response is written. Zero disables it. Handler execution
+    // is not forcibly interrupted; if it runs past the deadline, response I/O
     // fails immediately when the handler returns.
     std::chrono::milliseconds request_timeout{30000};
 
@@ -70,37 +109,24 @@ struct ServerOptions {
     std::chrono::milliseconds stream_timeout{0};
 
     // When a socket pathname exists but refuses connections, wait this long
-    // before considering it stale. This reduces races with another process
-    // that has bound() but not yet listen()ed. Zero performs no grace wait.
+    // before considering it stale. Zero performs no grace wait.
     std::chrono::milliseconds stale_socket_grace_period{250};
-
-    // Maximum number of connections that may wait for their next request on a
-    // persistent session. Every such connection occupies one worker for its
-    // lifetime, so the automatic default reserves one worker for regular RPC
-    // traffic: `worker_threads - 1` (or `1` for a single-worker server). A
-    // connection whose follow-up wait would exceed the limit is closed after
-    // its response, so its client's next request fails explicitly. Zero means
-    // automatic; an explicit value must be between 1 and worker_threads.
-    std::size_t max_persistent_sessions = 0;
-
-    // Include handler exception messages (and response-rejection reasons) in
-    // 500 response bodies so clients can see the root cause. Disable when
-    // clients must not learn internal error details; a generic
-    // "Internal Server Error" body is sent instead.
-    bool include_handler_error_messages = true;
 
     // Backlog passed to listen().
     int listen_backlog = 64;
 
     // Filesystem mode applied to the Unix socket pathname.
     unsigned int socket_permissions = 0600;
+
+    // Include handler exception messages (and response-rejection reasons) in
+    // 500 response bodies so clients can see the root cause. Disable when
+    // clients must not learn internal error details.
+    bool include_handler_error_messages = true;
 };
 
 struct ClientOptions {
     std::size_t max_message_size = default_max_message_size;
-
     std::size_t stream_chunk_size = default_stream_chunk_size;
-
     // Zero allows an unbounded stream.
     std::size_t max_stream_size = default_max_stream_size;
 
@@ -109,27 +135,29 @@ struct ClientOptions {
     std::chrono::milliseconds connect_timeout{2000};
 
     // Maximum idle time between successful socket-I/O progress events.
-    // Zero disables the inactivity timeout.
     std::chrono::milliseconds io_timeout{5000};
 
     // Absolute deadline for connect + request write + response read.
-    // Zero disables the absolute request deadline.
     std::chrono::milliseconds request_timeout{30000};
 
     // Absolute deadline for connect + streamed request + streamed response.
-    // Zero allows a long-lived stream, bounded by connect_timeout/io_timeout.
     std::chrono::milliseconds stream_timeout{0};
 };
 
+// ---- Server ---------------------------------------------------------------
 namespace detail {
 struct ServerState;
 struct SessionState;
 }
 
+// A request/response server over a Unix Domain Socket. Internally an epoll
+// reactor accepts connections and parses frames; a fixed worker pool executes
+// handlers; responses are written back under a per-connection lock, so
+// long-lived connections never occupy a worker while idle.
 class Server {
   public:
     using Handler = std::function<Response(const Request&)>;
-    using StreamHandler = std::function<StreamResponse(const StreamReader& request_body)>;
+    using StreamHandler = std::function<StreamResponse(const StreamReader&, const Request&)>;
 
     explicit Server(std::string socket_path, ServerOptions options = {});
     ~Server();
@@ -139,44 +167,34 @@ class Server {
     Server(Server&&) = delete;
     Server& operator=(Server&&) = delete;
 
-    // Registers or rejects a duplicate route. May be called while run() is active.
+    // Exact-match route. May be called while run() is active.
     void on(std::string route, Handler handler);
 
-    // Registers a regular request/response route whose handler is executed on
-    // one dedicated FIFO executor shared by every serialized route. This is
-    // useful for hardware or other exclusive resources that must not receive
-    // overlapping commands from multiple clients. Waiting serialized requests
-    // do not occupy the normal worker pool. Requests whose server-side absolute
-    // request_timeout expires before execution are discarded without invoking
-    // the handler.
+    // Prefix route: matches every route that starts with `prefix` and has no
+    // more specific exact match. Shorter prefixes lose to longer ones. May be
+    // called while run() is active.
+    void on_prefix(std::string prefix, Handler handler);
+
+    // Exclusive FIFO executor shared by every serialized route. Waiting
+    // serialized requests do not occupy the normal worker pool.
     void on_serialized(std::string route, Handler handler);
 
-    // Runs `task` on the same single FIFO executor as on_serialized handlers,
-    // strictly ordered against them, so it can safely mutate state (for example
-    // a per-driver instance map) that serialized handlers touch. Safe to call
-    // from any thread while the server is running. Each task is executed
-    // exactly once and cannot be forcibly cancelled by portable C++; an
-    // exception thrown by the task is caught and ignored so the executor keeps
-    // running. Throws std::logic_error when the server is not running.
-    void enqueue_maintenance(std::function<void()> task);
-
-    // Registers a streaming route. The handler pulls the request incrementally
-    // and returns a pull-based response, so neither body must be held in memory.
-    // A stream reader is valid only for the duration of its callback.
+    // Streaming route. Exact-match variant.
     void on_stream(std::string route, StreamHandler handler);
 
-    // Overrides the automatic concurrent-stream limit, which reserves one
-    // worker for regular RPCs when possible. The valid range is 1 through
-    // worker_threads; zero is invalid. Must be called before run().
-    void set_max_concurrent_streams(std::size_t limit);
+    // Streaming route. Prefix-match variant.
+    void on_stream_prefix(std::string prefix, StreamHandler handler);
 
-    // Starts the fixed worker pool and blocks in the accept loop. A Server is
-    // single-use: run() cannot be started again after it returns or after stop().
+    // Runs `task` on the same FIFO executor as serialized handlers, strictly
+    // ordered against them. Throws std::logic_error when the server is not
+    // running.
+    void enqueue_maintenance(std::function<void()> task);
+
+    // Starts the reactor and worker pool and blocks until stop(). A Server is
+    // single-use.
     void run();
 
-    // Idempotent. Safe to call from another thread; wakes the accept loop and
-    // interrupts blocked client socket I/O without closing a descriptor that
-    // the run thread may still be polling.
+    // Idempotent. Safe to call from another thread.
     void stop() noexcept;
 
     [[nodiscard]] bool is_running() const noexcept;
@@ -186,16 +204,38 @@ class Server {
     std::shared_ptr<detail::ServerState> state_;
 };
 
-// A persistent connection opened by Client::session(). Every request reuses
-// the same socket, avoiding the per-request connect/accept and teardown of the
-// one-shot Client::request() path.
-//
-// Concurrent request()/request_stream() calls on one Session are serialized
-// internally; the connection carries exactly one in-flight request at a time.
-// After an I/O error, time-out, or peer close, the session is permanently
-// unusable and every later call throws std::logic_error -- open a fresh session
-// to reconnect. Requests to serialized routes are served through the same
-// exclusive executor, ending the session connection after their response.
+// ---- Client---------------------------------------------------------------
+class Session;
+
+class Client {
+  public:
+    explicit Client(std::string socket_path, ClientOptions options = {});
+
+    // Opens one connection, sends one request, receives one response, then
+    // closes. Multiple threads may call request() concurrently.
+    [[nodiscard]] Response request(std::string_view route, std::string_view body = {}) const;
+
+    // One-shot streamed exchange over a dedicated connection.
+    [[nodiscard]] Status request_stream(std::string_view route, const StreamReader& request_body,
+                                        const std::function<void(std::string_view)>& response_chunk) const;
+
+    // Opens a persistent, multiplexed connection. Concurrent request() calls
+    // on the returned session are pipelined and correlated by request id.
+    [[nodiscard]] Session session() const;
+
+    [[nodiscard]] const std::string& socket_path() const noexcept { return socket_path_; }
+
+  private:
+    std::string socket_path_;
+    ClientOptions options_;
+};
+
+// A persistent connection opened by Client::session(). Concurrent request()
+// calls are fully multiplexed: the server may answer out of order and each
+// call returns its own response. request_stream() is exclusive per session
+// (one stream at a time, and no fixed request may be in flight while a stream
+// runs). After an I/O error, time-out, or peer close the session is
+// permanently unusable and every later call throws std::logic_error.
 class Session {
   public:
     ~Session();
@@ -206,37 +246,13 @@ class Session {
 
     [[nodiscard]] Response request(std::string_view route, std::string_view body = {});
 
-    [[nodiscard]] int request_stream(std::string_view route, const StreamReader& request_body,
-                                     const std::function<void(std::string_view)>& response_chunk);
+    [[nodiscard]] Status request_stream(std::string_view route, const StreamReader& request_body,
+                                        const std::function<void(std::string_view)>& response_chunk);
 
   private:
     friend class Client;
     Session(std::string socket_path, ClientOptions options);
     std::unique_ptr<detail::SessionState> state_;
-};
-
-class Client {
-  public:
-    explicit Client(std::string socket_path, ClientOptions options = {});
-
-    // Opens one connection, sends one request, receives one response, then closes.
-    // Multiple threads may call request() concurrently on the same Client object.
-    [[nodiscard]] Response request(std::string_view route, std::string_view body = {}) const;
-
-    // Opens a persistent connection using this client's socket path and options.
-    [[nodiscard]] Session session() const;
-
-    // Streams one request and response over a single connection. `request_body`
-    // is pulled into fixed-size buffers. `response_chunk` is called with views
-    // valid only until that callback returns. Returns the response status code.
-    [[nodiscard]] int request_stream(std::string_view route, const StreamReader& request_body,
-                                     const std::function<void(std::string_view)>& response_chunk) const;
-
-    [[nodiscard]] const std::string& socket_path() const noexcept { return socket_path_; }
-
-  private:
-    std::string socket_path_;
-    ClientOptions options_;
 };
 
 } // namespace easy_uds

@@ -1,6 +1,21 @@
 #pragma once
 
-#include "easy_uds/version.hpp"
+// Protocol version 2 wire codec.
+//
+// Framing: every message begins with a fixed 20-byte, big-endian header:
+//
+//   offset  size  field
+//   0       4     magic "EUDS"
+//   4       1     version = 2
+//   5       1     message type
+//   6       2     reserved flags (zero)
+//   8       4     request id
+//   12      4     argument 1
+//   16      4     argument 2
+//
+// The request id correlates responses with in-flight requests on a
+// multiplexed connection (responses may arrive out of order). Stream frames
+// carry the same id so concurrent streams are disambiguated.
 
 #include <algorithm>
 #include <array>
@@ -15,9 +30,12 @@
 namespace easy_uds::detail::protocol {
 
 inline constexpr std::array<unsigned char, 4> magic{'E', 'U', 'D', 'S'};
-inline constexpr std::uint8_t version = static_cast<std::uint8_t>(easy_uds::protocol_version);
-inline constexpr std::size_t header_size = 16;
-inline constexpr std::size_t max_wire_field = std::numeric_limits<std::uint32_t>::max();
+inline constexpr std::uint8_t version = 2;
+inline constexpr std::size_t header_size = 20;
+inline constexpr std::size_t header_field_offset = 8;  // request id
+inline constexpr std::size_t arg1_offset = 12;
+inline constexpr std::size_t arg2_offset = 16;
+inline constexpr std::uint32_t max_wire_field = std::numeric_limits<std::uint32_t>::max();
 
 using HeaderBytes = std::array<unsigned char, header_size>;
 
@@ -34,6 +52,7 @@ enum class WireType : std::uint8_t {
 
 struct DecodedHeader {
     WireType type = WireType::request;
+    std::uint32_t request_id = 0;
     std::uint32_t arg1 = 0;
     std::uint32_t arg2 = 0;
 };
@@ -49,13 +68,15 @@ inline std::uint32_t get_u32(const HeaderBytes& header, std::size_t offset) noex
     return ntohl(wire_value);
 }
 
-inline HeaderBytes encode_header(WireType type, std::uint32_t arg1, std::uint32_t arg2) noexcept {
+inline HeaderBytes encode_header(WireType type, std::uint32_t request_id, std::uint32_t arg1,
+                                 std::uint32_t arg2) noexcept {
     HeaderBytes header{};
     std::copy(magic.begin(), magic.end(), header.begin());
     header[4] = version;
     header[5] = static_cast<std::uint8_t>(type);
-    put_u32(header, 8, arg1);
-    put_u32(header, 12, arg2);
+    put_u32(header, header_field_offset, request_id);
+    put_u32(header, arg1_offset, arg1);
+    put_u32(header, arg2_offset, arg2);
     return header;
 }
 
@@ -74,7 +95,8 @@ inline DecodedHeader decode_header(const HeaderBytes& header) {
         raw_type > static_cast<std::uint8_t>(WireType::stream_response_end)) {
         throw std::runtime_error("unknown protocol message type");
     }
-    return {static_cast<WireType>(raw_type), get_u32(header, 8), get_u32(header, 12)};
+    return {static_cast<WireType>(raw_type), get_u32(header, header_field_offset), get_u32(header, arg1_offset),
+            get_u32(header, arg2_offset)};
 }
 
 inline DecodedHeader decode_header(const HeaderBytes& header, WireType expected_type) {

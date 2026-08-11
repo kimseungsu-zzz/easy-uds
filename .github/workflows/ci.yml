@@ -134,6 +134,14 @@ jobs:
           mkdir -p fuzz-corpus
           ./build-fuzz/easy_uds_protocol_fuzz fuzz-corpus -runs=20000 -max_len=64
 
+      - name: Build session fuzzer
+        run: cmake --build build-fuzz --target easy_uds_session_fuzz --parallel
+
+      - name: Run bounded session fuzz smoke test
+        run: |
+          mkdir -p session-fuzz-corpus
+          ./build-fuzz/easy_uds_session_fuzz session-fuzz-corpus -runs=2000 -max_len=256
+
   install-package:
     runs-on: ubuntu-latest
     timeout-minutes: 10

@@ -23,7 +23,14 @@ option(EASY_UDS_BUILD_BENCHMARKS "Build RPC and streaming throughput benchmarks"
 
 find_package(Threads REQUIRED)
 
-add_library(easy_uds src/easy_uds.cpp src/protocol_internal.hpp)
+add_library(easy_uds
+    src/server.cpp
+    src/reactor.cpp
+    src/client.cpp
+    src/server_core.hpp
+    src/protocol.hpp
+    src/internal.hpp
+)
 add_library(easy_uds::easy_uds ALIAS easy_uds)
 
 if(PROJECT_VERSION_MAJOR EQUAL 0)

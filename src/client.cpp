@@ -197,7 +197,7 @@ struct SessionState {
     std::uint32_t next_id = 1;
 
     struct Slot {
-        bool done = false;
+        std::atomic<bool> done{false};
         Response response;
         std::exception_ptr error;
     };
@@ -233,7 +233,7 @@ void session_reader_loop(detail::SessionState* state) {
                 }
                 slot = it->second;
                 slot->response = std::move(response);
-                slot->done = true;
+                slot->done.store(true, std::memory_order_release);
             }
             state->inflight_cv.notify_all();
         }
@@ -245,7 +245,7 @@ void session_reader_loop(detail::SessionState* state) {
             std::lock_guard<std::mutex> lock(state->inflight_mutex);
             for (auto& [id, slot] : state->inflight) {
                 slot->error = std::current_exception();
-                slot->done = true;
+                slot->done.store(true, std::memory_order_release);
             }
         }
         state->inflight_cv.notify_all();
@@ -313,10 +313,21 @@ Response Session::request(std::string_view route, std::string_view body) {
         throw;
     }
 
+    // The reader publishes the response before setting `done`; a short bounded
+    // spin on the atomic flag avoids the futex wake round trip for responses
+    // that land within tens of microseconds (the common high-frequency case).
+    const Deadline spin_deadline = Clock::now() + std::chrono::microseconds{100};
+    while (!slot->done.load(std::memory_order_acquire) && Clock::now() < spin_deadline &&
+           Clock::now() < deadline) {
+        std::this_thread::yield();
+    }
+
     std::unique_lock<std::mutex> lock(state_->inflight_mutex);
-    if (!state_->inflight_cv.wait_until(lock, deadline, [&slot] { return slot->done; })) {
-        state_->inflight.erase(request_id);
-        throw_system_error("request timed out", ETIMEDOUT);
+    if (!slot->done.load(std::memory_order_acquire)) {
+        if (!state_->inflight_cv.wait_until(lock, deadline, [&slot] { return slot->done.load(); })) {
+            state_->inflight.erase(request_id);
+            throw_system_error("request timed out", ETIMEDOUT);
+        }
     }
     if (slot->error) {
         std::rethrow_exception(slot->error);

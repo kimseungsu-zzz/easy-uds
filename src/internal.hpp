@@ -77,6 +77,7 @@ inline void validate_server_options(const easy_uds::ServerOptions& options) {
     validate_nonnegative_timeout(options.io_timeout, "io_timeout");
     validate_nonnegative_timeout(options.request_timeout, "request_timeout");
     validate_stream_options(options.stream_chunk_size, options.stream_timeout);
+    validate_nonnegative_timeout(options.session_idle_grace, "session_idle_grace");
     validate_nonnegative_timeout(options.stale_socket_grace_period, "stale_socket_grace_period");
     if (options.socket_permissions > 0777U) {
         throw std::invalid_argument("socket_permissions must be an octal permission mask from 0000 to 0777");

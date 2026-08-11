@@ -108,6 +108,14 @@ struct ServerOptions {
     // arrived. Zero allows a long-lived stream, bounded only by io_timeout.
     std::chrono::milliseconds stream_timeout{0};
 
+    // A worker that just served a fixed request keeps reading the connection
+    // directly (no reactor round trip per request) as long as the peer sends
+    // the next request within this grace period; after an idle gap it returns
+    // the connection to the reactor so no worker lingers. `0` disables the
+    // fast path (pure reactor dispatch). The worker serves a connection's
+    // requests serially while it is leased.
+    std::chrono::milliseconds session_idle_grace{1};
+
     // When a socket pathname exists but refuses connections, wait this long
     // before considering it stale. Zero performs no grace wait.
     std::chrono::milliseconds stale_socket_grace_period{250};

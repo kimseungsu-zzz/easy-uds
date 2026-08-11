@@ -353,7 +353,23 @@ void dispatch_request(const std::shared_ptr<ServerState>& state, const std::shar
         return;
     }
 
-    enqueue_worker_job(state, rc->conn, std::move(request), rc->deadline, std::move(handler), false, {}, 0);
+    // Lease the connection to the serving worker so it can keep reading
+    // follow-up requests directly (no reactor hop per request); the worker
+    // re-arms it with the reactor after the idle grace elapses.
+    {
+        std::lock_guard<std::mutex> lock(state->connections_mutex);
+        if (state->epoll_fd >= 0) {
+            epoll_event ev{};
+            (void)::epoll_ctl(state->epoll_fd, EPOLL_CTL_DEL, rc->conn->fd, &ev);
+        }
+        rc->conn->worker_owned = true;
+    }
+    std::string leftover = std::move(rc->pending);
+    const std::size_t leftover_offset = rc->pending_offset;
+    rc->pending.clear();
+    rc->pending_offset = 0;
+    enqueue_worker_job(state, rc->conn, std::move(request), rc->deadline, std::move(handler), false,
+                       std::move(leftover), leftover_offset);
 }
 
 void dispatch_stream(const std::shared_ptr<ServerState>& state, const std::shared_ptr<ReactorConnection>& rc) {
@@ -372,8 +388,12 @@ void dispatch_stream(const std::shared_ptr<ServerState>& state, const std::share
 
     // The stream worker takes over the fd; unread buffered bytes ride along.
     rc->conn->stream_active = true;
-    enqueue_worker_job(state, rc->conn, std::move(request), stream_deadline, {}, true, std::move(rc->pending),
-                       rc->pending_offset);
+    std::string leftover = std::move(rc->pending);
+    const std::size_t leftover_offset = rc->pending_offset;
+    rc->pending.clear();
+    rc->pending_offset = 0;
+    enqueue_worker_job(state, rc->conn, std::move(request), stream_deadline, {}, true, std::move(leftover),
+                       leftover_offset);
 }
 
 // ---- stream exchange (worker-owned lease) ----------------------------------
@@ -447,26 +467,133 @@ void run_stream_exchange(const std::shared_ptr<ServerState>& state, PendingJob&&
     }
 
     // Lease ends: hand the connection back to the reactor (or close on stop).
-    conn->stream_active = false;
-    if (state->running.load()) {
-        auto fresh = std::make_shared<ReactorConnection>();
-        fresh->conn = conn;
-        {
-            std::lock_guard<std::mutex> lock(state->connections_mutex);
-            state->connections[fd] = fresh;
-        }
-        epoll_event ev{};
-        ev.events = EPOLLIN;
-        ev.data.fd = fd;
-        if (::epoll_ctl(state->epoll_fd, EPOLL_CTL_ADD, fd, &ev) != 0) {
-            close_connection(state, fd);
-        }
-    } else {
-        // run()'s cleanup closes every remaining connection.
-    }
+    rearm_connection(state, conn);
 }
 
 // ---- worker pool -----------------------------------------------------------
+
+// Hands a leased connection back to the reactor with a fresh parse state.
+// Called by a worker; run()'s cleanup handles connections when not running.
+void rearm_connection(const std::shared_ptr<ServerState>& state, const std::shared_ptr<Connection>& conn) {
+    const int fd = conn->fd;
+    conn->stream_active = false;
+    conn->worker_owned = false;
+    if (conn->closing) {
+        close_connection(state, fd);
+        return;
+    }
+    if (!state->running.load()) {
+        return;
+    }
+    auto fresh = std::make_shared<ReactorConnection>();
+    fresh->conn = conn;
+    {
+        std::lock_guard<std::mutex> lock(state->connections_mutex);
+        state->connections[fd] = fresh;
+    }
+    epoll_event ev{};
+    ev.events = EPOLLIN;
+    ev.data.fd = fd;
+    if (::epoll_ctl(state->epoll_fd, EPOLL_CTL_ADD, fd, &ev) != 0) {
+        conn->closing = true;
+        close_connection(state, fd);
+    }
+}
+
+// Serves one parsed fixed request from the worker side: 404 / serialized
+// hand-off / inline invocation and response write.
+void serve_fixed_request(const std::shared_ptr<ServerState>& state, const std::shared_ptr<Connection>& conn,
+                         easy_uds::Request& request, Deadline deadline) {
+    easy_uds::Server::Handler handler;
+    bool serialized = false;
+    if (!find_request_handler(state, request.route, handler, serialized)) {
+        try {
+            std::lock_guard<std::mutex> lock(conn->write_mutex);
+            write_frame_with_payload(conn->fd, WireType::response, request.request_id, 404, 9, "Not Found", 9,
+                                     state->options.io_timeout, deadline);
+        } catch (...) {
+            conn->closing = true;
+        }
+        return;
+    }
+    if (serialized) {
+        if (!ensure_serialized_worker(state)) {
+            conn->closing = true;
+            return;
+        }
+        SerializedJob job;
+        job.connection = conn;
+        job.request = std::move(request);
+        job.deadline = deadline;
+        job.handler = std::move(handler);
+        {
+            std::unique_lock<std::mutex> lock(state->serialized_mutex);
+            if (state->serialized_stopping || !state->running.load()) {
+                return;
+            }
+            state->pending_serialized.push_back(std::move(job));
+        }
+        state->serialized_cv.notify_one();
+        return;
+    }
+
+    const easy_uds::Response response = invoke_request_handler(handler, request, state);
+    try {
+        write_fixed_response(state, conn, request.request_id, response, state->options.io_timeout, deadline);
+    } catch (...) {
+        conn->closing = true;
+    }
+}
+
+// A worker that just served a fixed request keeps reading the leased
+// connection directly, serving follow-up requests inline, until the peer
+// pauses longer than session_idle_grace (or closes the connection); it then
+// returns the connection to the reactor.
+void continue_connection(const std::shared_ptr<ServerState>& state, std::shared_ptr<Connection> conn,
+                         std::string buffered, std::size_t buffered_offset) {
+    const int fd = conn->fd;
+    const std::chrono::milliseconds grace = state->options.session_idle_grace;
+    if (grace.count() == 0) {
+        rearm_connection(state, conn);
+        return;
+    }
+    StreamByteSource source(buffered, buffered_offset, fd);
+    try {
+        while (state->running.load() && !conn->closing) {
+            // Wait for the next request header only within the idle grace.
+            HeaderBytes header{};
+            source.read(header.data(), header.size(), state->options.io_timeout, deadline_from_now(grace));
+            const auto decoded = protocol::decode_header(header);
+            if (decoded.type != WireType::request) {
+                throw std::runtime_error("unexpected frame on persistent connection");
+            }
+            protocol::validate_request_lengths(decoded.arg1, decoded.arg2, state->options.max_message_size);
+
+            easy_uds::Request request;
+            request.route.resize(decoded.arg1);
+            request.body.resize(decoded.arg2);
+            const Deadline req_deadline = deadline_from_now(state->options.request_timeout);
+            if (decoded.arg1 != 0) {
+                source.read(request.route.data(), request.route.size(), state->options.io_timeout, req_deadline);
+            }
+            if (decoded.arg2 != 0) {
+                source.read(request.body.data(), request.body.size(), state->options.io_timeout, req_deadline);
+            }
+            request.peer = conn->peer;
+            request.request_id = decoded.request_id;
+
+            serve_fixed_request(state, conn, request, req_deadline);
+        }
+    } catch (const std::system_error& error) {
+        if (error.code().value() != ETIMEDOUT) {
+            conn->closing = true;  // peer closed or I/O failure
+        }
+        // ETIMEDOUT: the idle grace elapsed; hand back to the reactor.
+    } catch (...) {
+        conn->closing = true;  // malformed frame or protocol error
+    }
+    rearm_connection(state, conn);
+}
 
 void worker_loop(const std::shared_ptr<ServerState>& state) {
     while (true) {
@@ -496,21 +623,29 @@ void worker_loop(const std::shared_ptr<ServerState>& state) {
                 write_error_response(state, job.connection, job.request.request_id,
                                      "request timed out before execution", state->options.io_timeout,
                                      Deadline::max(), 408);
+                rearm_connection(state, job.connection);
                 continue;
             }
             if (!state->running.load()) {
+                rearm_connection(state, job.connection);
                 continue;
             }
             const easy_uds::Response response = invoke_request_handler(job.handler, job.request, state);
             try {
                 write_fixed_response(state, job.connection, job.request.request_id, response,
                                      state->options.io_timeout, job.deadline);
+            } catch (const std::exception&) {
+                job.connection->closing = true;
             } catch (...) {
-                // Peer closed or timed out mid-write; the connection is done.
+                job.connection->closing = true;
             }
         } catch (...) {
-            // Deadline expired or the server stopped: drop the request.
+            job.connection->closing = true;
         }
+
+        // The request was served on a leased connection: keep reading
+        // follow-up requests inline, then re-arm the reactor when idle.
+        continue_connection(state, job.connection, std::move(job.buffered), job.buffered_offset);
     }
 }
 
@@ -778,7 +913,7 @@ void run_reactor(const std::shared_ptr<ServerState>& state) {
                 }
                 rc = it->second;
             }
-            if (rc->conn->stream_active || rc->conn->closing) {
+            if (rc->conn->stream_active || rc->conn->worker_owned || rc->conn->closing) {
                 continue;
             }
             if ((mask & (EPOLLERR | EPOLLHUP | EPOLLRDHUP)) != 0) {

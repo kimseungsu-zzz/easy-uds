@@ -153,7 +153,7 @@ while (true) {
 }
 ```
 
-A `Session` serializes concurrent calls internally and is permanently broken after any I/O error or peer close — open a fresh session to reconnect. A request to a serialized route ends the session connection after its response.
+A `Session` serializes concurrent calls internally and is permanently broken after any I/O error or peer close — open a fresh session to reconnect. A request to a serialized route ends the session connection after its response. The server reserves at least one worker for regular one-shot RPC: when `max_persistent_sessions` is reached, an excess session connection is closed after its last response and the client's next request fails explicitly.
 
 ## Configuration
 
@@ -188,6 +188,8 @@ server.set_max_concurrent_streams(3);
 | `io_timeout` | `5000 ms` | Maximum idle time between successful socket-I/O progress events; `0` disables it |
 | `request_timeout` | `30000 ms` | Absolute deadline from accept until response I/O completes; `0` disables it |
 | `stream_timeout` | `0` | Absolute streaming-exchange deadline after the stream header; `0` disables it |
+| `max_persistent_sessions` | `0` (auto) | Maximum connections waiting for their next request on a persistent session; auto reserves one worker (`worker_threads - 1`) for regular RPC. Explicit values must be between `1` and `worker_threads` |
+| `include_handler_error_messages` | `true` | Include handler exception messages in `500` bodies; disable to hide internal details from clients |
 | `stale_socket_grace_period` | `250 ms` | Time to keep probing a connection-refused existing socket before treating it as stale |
 | `listen_backlog` | `64` | Backlog passed to `listen()` |
 | `socket_permissions` | `0600` | Filesystem permissions applied to the socket pathname |
@@ -253,8 +255,8 @@ Each connection carries exactly one request and one response. Either body may us
 ## Error behavior
 
 - Unknown route: `404 / Not Found`
-- Handler throws: `500` with the exception's `what()` as the response body (bounded by `max_message_size`; a non-`std::exception` throw yields the generic `Internal Server Error` body)
-- Handler returns a negative status or oversized body: `500` with the rejection reason as the response body
+- Handler throws: `500` with the exception's `what()` as the response body (bounded by `max_message_size`; a non-`std::exception` throw yields the generic `Internal Server Error` body). Set `include_handler_error_messages = false` to always use the generic body
+- Handler returns a negative status or oversized body: `500` with the rejection reason as the response body (likewise gated by `include_handler_error_messages`)
 - Malformed/timed-out/disconnected peer: that connection is closed; the server continues running
 - Connection/request deadline exceeded: `std::system_error` with `ETIMEDOUT` on the side observing the timeout
 - Invalid local arguments/configuration: `std::invalid_argument` or `std::length_error`

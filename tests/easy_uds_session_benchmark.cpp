@@ -50,8 +50,10 @@ int main(int argc, char** argv) {
     }
     server_options.max_connections = std::max<std::size_t>(64, concurrency * 2);
     // A persistent session occupies one worker for its lifetime, so give the
-    // server as many workers as concurrent sessions.
+    // server as many workers as concurrent sessions and lift the automatic
+    // one-worker reservation (the benchmark saturates sessions on purpose).
     server_options.worker_threads = std::max<std::size_t>(1, concurrency);
+    server_options.max_persistent_sessions = server_options.worker_threads;
     server_options.listen_backlog = static_cast<int>(
         std::min<std::size_t>(server_options.max_connections, static_cast<std::size_t>(std::numeric_limits<int>::max())));
     server_options.stale_socket_grace_period = std::chrono::milliseconds{0};

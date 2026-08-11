@@ -130,6 +130,9 @@ void validate_server_options(const ServerOptions& options) {
     if (options.worker_threads > options.max_connections) {
         throw std::invalid_argument("worker_threads must not exceed max_connections");
     }
+    if (options.max_persistent_sessions > options.worker_threads) {
+        throw std::invalid_argument("max_persistent_sessions must not exceed worker_threads");
+    }
     if (options.listen_backlog <= 0) {
         throw std::invalid_argument("listen_backlog must be greater than zero");
     }
@@ -809,6 +812,8 @@ struct ServerState {
     std::atomic<bool> running{false};
     std::atomic<std::size_t> active_streams{0};
     std::size_t max_concurrent_streams = 1;
+    std::atomic<std::size_t> active_persistent_sessions{0};
+    std::size_t max_persistent_sessions = 1;
 
     std::mutex lifecycle_mutex;
     std::condition_variable lifecycle_cv;
@@ -884,13 +889,15 @@ bool find_request_handler(const std::shared_ptr<detail::ServerState>& state, con
 }
 
 Response invoke_request_handler(const Server::Handler& handler, const Request& request,
-                                std::size_t max_message_size) {
+                                std::size_t max_message_size, bool include_error_messages) {
     try {
         return handler(request);
     } catch (const std::exception& error) {
         // Propagate the root cause (for example "rpc: titan instance not
-        // found") to the client instead of a fixed generic body.
-        return {500, bounded_error_body(error.what(), max_message_size)};
+        // found") to the client unless the deployment opts out.
+        const std::string_view message =
+            include_error_messages ? std::string_view{error.what()} : std::string_view{"Internal Server Error"};
+        return {500, bounded_error_body(message, max_message_size)};
     } catch (...) {
         return {500, bounded_error_body("Internal Server Error", max_message_size)};
     }
@@ -948,6 +955,40 @@ class ActiveStreamGuard {
     std::shared_ptr<detail::ServerState> state_;
 };
 
+// A persistent-session slot reserves a worker for the duration of a
+// connection's wait for its next request. Limiting these slots keeps at least
+// one worker available for regular one-shot RPC traffic.
+bool try_acquire_persistent_slot(const std::shared_ptr<detail::ServerState>& state) noexcept {
+    std::size_t active = state->active_persistent_sessions.load(std::memory_order_relaxed);
+    while (active < state->max_persistent_sessions) {
+        if (state->active_persistent_sessions.compare_exchange_weak(active, active + 1,
+                                                                    std::memory_order_relaxed,
+                                                                    std::memory_order_relaxed)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+class PersistentSlotGuard {
+  public:
+    PersistentSlotGuard(std::shared_ptr<detail::ServerState> state, bool& held)
+        : state_(std::move(state)), held_(held) {}
+    ~PersistentSlotGuard() {
+        if (held_) {
+            state_->active_persistent_sessions.fetch_sub(1, std::memory_order_relaxed);
+            held_ = false;
+        }
+    }
+
+    PersistentSlotGuard(const PersistentSlotGuard&) = delete;
+    PersistentSlotGuard& operator=(const PersistentSlotGuard&) = delete;
+
+  private:
+    std::shared_ptr<detail::ServerState> state_;
+    bool& held_;
+};
+
 void write_internal_server_error(int fd, const std::shared_ptr<detail::ServerState>& state, Deadline deadline,
                                  std::string_view message = "Internal Server Error") {
     write_response(fd, {500, bounded_error_body(message, state->options.max_message_size)},
@@ -989,6 +1030,8 @@ ClientDisposition handle_client(const std::shared_ptr<detail::ServerState>& stat
                                 FileDescriptor& client) noexcept {
     const int fd = client.get();
     BufferedReader reader(fd);
+    bool holds_persistent_slot = false;
+    PersistentSlotGuard slot_guard(state, holds_persistent_slot);
     while (true) {
         if (!state->running.load()) {
             break;
@@ -1007,27 +1050,37 @@ ClientDisposition handle_client(const std::shared_ptr<detail::ServerState>& stat
                 if (!find_request_handler(state, request.route, handler, serialized)) {
                     write_response(fd, {404, bounded_error_body("Not Found", state->options.max_message_size)},
                                    state->options.max_message_size, state->options.io_timeout, deadline);
-                    continue;
-                }
-
-                if (serialized) {
+                } else if (serialized) {
                     if (enqueue_serialized_request(state, std::move(client), deadline, request,
                                                    std::move(handler))) {
                         return ClientDisposition::serialized_handoff;
                     }
-                    continue;
+                } else {
+                    const Response response = invoke_request_handler(
+                        handler, request, state->options.max_message_size,
+                        state->options.include_handler_error_messages);
+                    try {
+                        write_response(fd, response, state->options.max_message_size,
+                                       state->options.io_timeout, deadline);
+                    } catch (const std::invalid_argument& error) {
+                        write_internal_server_error(fd, state, deadline,
+                                                    state->options.include_handler_error_messages
+                                                        ? error.what()
+                                                        : "Internal Server Error");
+                    } catch (const std::length_error& error) {
+                        write_internal_server_error(fd, state, deadline,
+                                                    state->options.include_handler_error_messages
+                                                        ? error.what()
+                                                        : "Internal Server Error");
+                    }
                 }
 
-                const Response response =
-                    invoke_request_handler(handler, request, state->options.max_message_size);
-                try {
-                    write_response(fd, response, state->options.max_message_size, state->options.io_timeout,
-                                   deadline);
-                } catch (const std::invalid_argument& error) {
-                    write_internal_server_error(fd, state, deadline, error.what());
-                } catch (const std::length_error& error) {
-                    write_internal_server_error(fd, state, deadline, error.what());
+                // Reserve a worker slot for the wait that follows, so regular
+                // one-shot RPC traffic always keeps at least one worker.
+                if (!holds_persistent_slot && !try_acquire_persistent_slot(state)) {
+                    break;
                 }
+                holds_persistent_slot = true;
                 continue;
             }
 
@@ -1058,7 +1111,10 @@ ClientDisposition handle_client(const std::shared_ptr<detail::ServerState>& stat
                 try {
                     response = handler(reader_fn);
                 } catch (const std::exception& error) {
-                    response = {500, bounded_error_body_reader(error.what(), state->options.max_message_size)};
+                    response = state->options.include_handler_error_messages
+                                   ? StreamResponse{500, bounded_error_body_reader(
+                                                             error.what(), state->options.max_message_size)}
+                                   : StreamResponse{500, {}};
                 } catch (...) {
                     response = {500, {}};
                 }
@@ -1081,6 +1137,11 @@ ClientDisposition handle_client(const std::shared_ptr<detail::ServerState>& stat
             // client. A sequential request can then never race the guard cleanup.
             stream_guard.release();
             write_header(fd, WireType::stream_response_end, 0, 0, state->options.io_timeout, stream_deadline);
+
+            if (!holds_persistent_slot && !try_acquire_persistent_slot(state)) {
+                break;
+            }
+            holds_persistent_slot = true;
             continue;
         } catch (...) {
             // The peer closed the connection after its final request (recv
@@ -1132,15 +1193,20 @@ void serialized_worker_loop(const std::shared_ptr<detail::ServerState>& state) n
                 throw_system_error("server stopped before serialized request execution", ECANCELED);
             }
 
-            const Response response =
-                invoke_request_handler(job.handler, job.request, state->options.max_message_size);
+            const Response response = invoke_request_handler(
+                job.handler, job.request, state->options.max_message_size,
+                state->options.include_handler_error_messages);
             try {
                 write_response(fd, response, state->options.max_message_size,
                                state->options.io_timeout, job.deadline);
             } catch (const std::invalid_argument& error) {
-                write_internal_server_error(fd, state, job.deadline, error.what());
+                write_internal_server_error(fd, state, job.deadline,
+                                            state->options.include_handler_error_messages ? error.what()
+                                                                                          : "Internal Server Error");
             } catch (const std::length_error& error) {
-                write_internal_server_error(fd, state, job.deadline, error.what());
+                write_internal_server_error(fd, state, job.deadline,
+                                            state->options.include_handler_error_messages ? error.what()
+                                                                                          : "Internal Server Error");
             }
         } catch (...) {
             // Expired, disconnected, or shutdown queued requests are dropped.
@@ -1362,6 +1428,10 @@ Server::Server(std::string socket_path, ServerOptions options) : state_(std::mak
     state_->socket_path = std::move(socket_path);
     state_->options = options;
     state_->max_concurrent_streams = std::max<std::size_t>(1, options.worker_threads - 1);
+    // Auto mode reserves one worker for regular RPC traffic, like streams.
+    state_->max_persistent_sessions = options.max_persistent_sessions == 0
+                                          ? std::max<std::size_t>(1, options.worker_threads - 1)
+                                          : options.max_persistent_sessions;
 
     FileDescriptor instance_lock = acquire_instance_lock(state_->socket_path);
     remove_stale_socket(state_->socket_path, options.stale_socket_grace_period);
@@ -1749,7 +1819,13 @@ Session::Session(std::string socket_path, ClientOptions options)
 
 Session::~Session() = default;
 
+Session::Session(Session&&) noexcept = default;
+Session& Session::operator=(Session&&) noexcept = default;
+
 Response Session::request(std::string_view route, std::string_view body) {
+    if (!state_) {
+        throw std::logic_error("session has been moved from");
+    }
     protocol::validate_request_lengths(route.size(), body.size(), state_->options.max_message_size);
     std::lock_guard<std::mutex> lock(state_->mutex);
     if (state_->broken) {
@@ -1769,6 +1845,9 @@ Response Session::request(std::string_view route, std::string_view body) {
 
 int Session::request_stream(std::string_view route, const StreamReader& request_body,
                             const std::function<void(std::string_view)>& response_chunk) {
+    if (!state_) {
+        throw std::logic_error("session has been moved from");
+    }
     if (route.empty()) {
         throw std::invalid_argument("route must not be empty");
     }

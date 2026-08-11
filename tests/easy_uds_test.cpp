@@ -1435,6 +1435,108 @@ void test_exception_messages_reach_client() {
     cleanup_socket_artifacts(path);
 }
 
+void test_session_saturation_reserves_rpc_worker() {
+    using namespace easy_uds;
+
+    const std::string path = socket_path("session-sat");
+    ServerOptions options;
+    options.worker_threads = 2;  // automatic max_persistent_sessions = 1
+    options.max_connections = 16;
+    options.io_timeout = 500ms;
+    options.request_timeout = 5s;
+    Server server(path, options);
+    server.on("ping", [](const Request&) { return Response{200, "pong"}; });
+
+    std::thread server_thread([&] { server.run(); });
+    wait_until_running(server);
+
+    ClientOptions client_options;
+    client_options.connect_timeout = 500ms;
+    client_options.io_timeout = 500ms;
+    client_options.request_timeout = 5s;
+    Client client(path, client_options);
+
+    // Session A takes the single persistent slot and keeps polling.
+    Session session_a = client.session();
+    expect(session_a.request("ping").body == "pong", "session A first request");
+    std::this_thread::sleep_for(20ms);  // let the server settle into the slot-holding wait
+
+    // Session B is served its first request, then closed because the slot limit
+    // is reached, so its follow-up fails explicitly instead of starving RPC.
+    Session session_b = client.session();
+    expect(session_b.request("ping").body == "pong", "session B first request is still served");
+    expect_throws<std::system_error>([&] { (void)session_b.request("ping"); },
+                                     "session B follow-up must be rejected when the slot limit is reached");
+
+    // Regular one-shot RPC stays available during session saturation.
+    expect(client.request("ping").body == "pong", "one-shot RPC must stay available during session saturation");
+
+    // Session A keeps working.
+    expect(session_a.request("ping").body == "pong", "session A continues after the limit is enforced");
+
+    server.stop();
+    server_thread.join();
+    cleanup_socket_artifacts(path);
+}
+
+void test_handler_error_messages_opt_out() {
+    using namespace easy_uds;
+
+    const std::string path = socket_path("err-optout");
+    ServerOptions options;
+    options.worker_threads = 2;
+    options.include_handler_error_messages = false;
+    options.io_timeout = 500ms;
+    Server server(path, options);
+    server.on("boom", [](const Request&) -> Response { throw std::runtime_error("secret detail"); });
+    server.on_stream("boom-stream", [](const StreamReader&) -> StreamResponse { throw std::runtime_error("stream secret"); });
+
+    std::thread server_thread([&] { server.run(); });
+    wait_until_running(server);
+
+    Client client(path);
+    Response response = client.request("boom");
+    expect(response.status_code == 500 && response.body == "Internal Server Error",
+           "opt-out must hide the handler exception message");
+
+    std::string stream_body;
+    const int status = client.request_stream("boom-stream", {}, [&](std::string_view chunk) {
+        stream_body.append(chunk.data(), chunk.size());
+    });
+    expect(status == 500 && stream_body.empty(), "opt-out must hide the stream handler exception message");
+
+    server.stop();
+    server_thread.join();
+    cleanup_socket_artifacts(path);
+}
+
+void test_session_move() {
+    using namespace easy_uds;
+
+    const std::string path = socket_path("session-move");
+    ServerOptions options;
+    options.worker_threads = 2;
+    options.io_timeout = 500ms;
+    Server server(path, options);
+    server.on("ping", [](const Request&) { return Response{200, "pong"}; });
+
+    std::thread server_thread([&] { server.run(); });
+    wait_until_running(server);
+
+    Client client(path);
+    Session session = client.session();
+    expect(session.request("ping").body == "pong", "session works before being moved");
+
+    Session moved = std::move(session);
+    expect(moved.request("ping").body == "pong", "moved session keeps the connection");
+    expect_throws<std::logic_error>([&] { (void)session.request("ping"); },
+                                    "moved-from session must reject requests");
+
+    server.stop();
+    server_thread.join();
+    cleanup_socket_artifacts(path);
+}
+
 } // namespace
 
 int main() {
@@ -1458,6 +1560,9 @@ int main() {
         test_session_broken_after_shutdown();
         test_enqueue_maintenance();
         test_exception_messages_reach_client();
+        test_session_saturation_reserves_rpc_worker();
+        test_handler_error_messages_opt_out();
+        test_session_move();
     } catch (const std::exception& error) {
         std::cerr << error.what() << '\n';
         return 1;

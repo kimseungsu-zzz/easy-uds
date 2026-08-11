@@ -1,6 +1,6 @@
 # easy-uds wire protocol
 
-This document describes protocol version 1. The original fixed-size messages are used by easy-uds v0.2.x and later; easy-uds v0.4.x adds the stream frame types described below.
+This document describes protocol version 1. The original fixed-size messages are used by easy-uds v0.2.x and later; easy-uds v0.4.x adds the stream frame types described below. easy-uds v0.5.0 keeps protocol version 1 and adds persistent-connection reuse (no new frame types); the connection lifecycle section below describes it.
 
 ## Transport
 
@@ -111,9 +111,32 @@ client                        server
   |--------- close --------------|
 ```
 
-A streaming exchange has the same one-request/one-response connection lifecycle; only each body is split into explicitly framed pieces. It does not multiplex routes or interleave the response with an unfinished request.
+A streaming exchange has the same connection lifecycle; only each body is split into explicitly framed pieces. It does not multiplex routes or interleave the response with an unfinished request.
 
-The current protocol does not multiplex requests and does not keep connections alive for additional requests.
+Since v0.5.0, a connection may be kept alive for additional requests (persistent sessions, `Client::session()`):
+
+```text
+client                        server
+  |                              |
+  |--------- connect ----------->|
+  |--------- request 1 --------> |
+  |<-------- response 1 ---------|
+  |--------- request 2 --------> |
+  |<-------- response 2 ---------|
+  |--------- close --------------|
+```
+
+The protocol is strictly lockstep: the server reads the next request header only after the previous response has been written, and a client must wait for each response before sending the next request. There is no request multiplexing or pipelining. Every frame type described above (fixed request/response, or a stream request/response sequence) may appear at any exchange boundary.
+
+A connection ends when:
+
+- the client closes it (the server observes EOF on the next header read);
+- either side exceeds a configured timeout (`io_timeout`, server/client `request_timeout`, `stream_timeout`);
+- a request is sent to a serialized route — that exchange is served through the exclusive executor and the connection is closed after its response;
+- the server-side persistent-session limit (`max_persistent_sessions`) is reached — the connection is closed after its last response, so the client's next request fails explicitly;
+- the server stops.
+
+The current protocol does not multiplex requests, and no part of a response may be sent before the complete request (including its stream end frame) has been consumed.
 
 ## Compatibility
 

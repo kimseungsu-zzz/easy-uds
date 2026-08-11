@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.20)
 
-project(easy_uds VERSION 0.5.0 LANGUAGES CXX)
+project(easy_uds VERSION 0.5.1 LANGUAGES CXX)
 
 if(NOT UNIX)
     message(FATAL_ERROR "easy-uds currently requires POSIX Unix-domain socket APIs")
@@ -140,6 +140,16 @@ if(EASY_UDS_BUILD_FUZZERS)
         -fno-omit-frame-pointer
     )
     target_link_options(easy_uds_protocol_fuzz PRIVATE -fsanitize=fuzzer,address,undefined)
+
+    add_executable(easy_uds_session_fuzz tests/easy_uds_session_fuzz.cpp)
+    target_link_libraries(easy_uds_session_fuzz PRIVATE easy_uds::easy_uds)
+    target_compile_features(easy_uds_session_fuzz PRIVATE cxx_std_17)
+    target_compile_options(easy_uds_session_fuzz PRIVATE
+        -Wall -Wextra -Wpedantic -Werror
+        -fsanitize=fuzzer,address,undefined
+        -fno-omit-frame-pointer
+    )
+    target_link_options(easy_uds_session_fuzz PRIVATE -fsanitize=fuzzer,address,undefined)
 endif()
 
 install(TARGETS easy_uds

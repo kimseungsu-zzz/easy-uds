@@ -74,6 +74,21 @@ struct ServerOptions {
     // that has bound() but not yet listen()ed. Zero performs no grace wait.
     std::chrono::milliseconds stale_socket_grace_period{250};
 
+    // Maximum number of connections that may wait for their next request on a
+    // persistent session. Every such connection occupies one worker for its
+    // lifetime, so the automatic default reserves one worker for regular RPC
+    // traffic: `worker_threads - 1` (or `1` for a single-worker server). A
+    // connection whose follow-up wait would exceed the limit is closed after
+    // its response, so its client's next request fails explicitly. Zero means
+    // automatic; an explicit value must be between 1 and worker_threads.
+    std::size_t max_persistent_sessions = 0;
+
+    // Include handler exception messages (and response-rejection reasons) in
+    // 500 response bodies so clients can see the root cause. Disable when
+    // clients must not learn internal error details; a generic
+    // "Internal Server Error" body is sent instead.
+    bool include_handler_error_messages = true;
+
     // Backlog passed to listen().
     int listen_backlog = 64;
 
@@ -186,8 +201,8 @@ class Session {
     ~Session();
     Session(const Session&) = delete;
     Session& operator=(const Session&) = delete;
-    Session(Session&&) = delete;
-    Session& operator=(Session&&) = delete;
+    Session(Session&&) noexcept;
+    Session& operator=(Session&&) noexcept;
 
     [[nodiscard]] Response request(std::string_view route, std::string_view body = {});
 

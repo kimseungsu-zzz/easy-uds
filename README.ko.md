@@ -261,6 +261,8 @@ server.set_max_concurrent_streams(3);
 | `io_timeout` | `5 s` | 성공적인 socket I/O 진행 사이의 최대 idle 시간 |
 | `request_timeout` | `30 s` | 일반 RPC의 accept부터 response 완료까지 absolute deadline. serialized queue 대기도 포함 |
 | `stream_timeout` | `0` | stream 전체 absolute deadline. `0`은 비활성 |
+| `max_persistent_sessions` | `0` (자동) | 다음 요청을 기다리는 persistent session 연결 수 상한. 자동 모드는 일반 RPC용 worker 1개를 예약(`worker_threads - 1`). 명시값은 `1`~`worker_threads` |
+| `include_handler_error_messages` | `true` | `500` body에 handler 예외 메시지 포함. 내부 정보 노출을 피하려면 `false` |
 | `stale_socket_grace_period` | `250 ms` | refused socket을 stale로 판단하기 전 대기 시간 |
 | `listen_backlog` | `64` | `listen()` backlog |
 | `socket_permissions` | `0600` | Unix socket pathname 권한 |

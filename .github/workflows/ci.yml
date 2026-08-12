@@ -3,11 +3,25 @@ name: CI
 on:
   push:
   pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
+  arm64-smoke:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Run ARM64 release smoke workload
+        run: ./scripts/arm64_smoke.sh
+
   build-and-test:
     runs-on: ubuntu-latest
     timeout-minutes: 10

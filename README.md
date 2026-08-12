@@ -26,7 +26,7 @@
 - Owner-only socket permissions (`0600`) by default, configurable when group access is needed
 - Per-socket instance lock to serialize startup/stale cleanup between easy-uds servers
 - Grace period before removing a connection-refused socket pathname as stale
-- Thread-safe `stop()` using a wakeup pipe
+- Thread-safe `stop()` using a single Linux `eventfd` wakeup counter
 - Handler exceptions converted to `500` with the exception message in the body (opt-out via `include_handler_error_messages`)
 - `std::system_error` for socket failures, preserving the underlying `errno`
 - Static or shared library builds through `BUILD_SHARED_LIBS`
@@ -248,7 +248,7 @@ Applications should place sockets in a directory whose permissions match their t
 
 During shutdown:
 
-1. `running` is cleared and a non-blocking wakeup pipe interrupts `epoll_wait()`;
+1. `running` is cleared and a non-blocking `eventfd` counter interrupts `epoll_wait()`;
 2. the owned socket pathname is removed only if its device/inode still match;
 3. every accepted client socket is `shutdown()` so blocked I/O exits;
 4. the regular and serialized executors are signaled to stop, discarding work that has not started;

@@ -31,8 +31,8 @@ void wake_reactor(const std::shared_ptr<ServerState>& state) noexcept {
     if (state->wake_write_fd < 0) {
         return;
     }
-    const unsigned char byte = 1;
-    const ssize_t ignored = ::write(state->wake_write_fd, &byte, sizeof(byte));
+    const std::uint64_t increment = 1;
+    const ssize_t ignored = ::write(state->wake_write_fd, &increment, sizeof(increment));
     (void)ignored;
 }
 

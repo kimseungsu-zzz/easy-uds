@@ -330,7 +330,7 @@ socket timeout은 `std::system_error`로 전달되며 timeout의 error code는 `
 
 종료 시에는 다음 순서로 정리됩니다.
 
-1. `running` 해제 및 wakeup pipe로 `epoll_wait()` 중단
+1. `running` 해제 및 단일 `eventfd` counter로 `epoll_wait()` 중단
 2. 소유 중인 socket pathname을 inode 확인 후 제거
 3. accept된 모든 client socket을 `shutdown()`하여 blocked I/O 중단
 4. 일반·serialized executor에 종료를 알리고 아직 실행되지 않은 작업 폐기

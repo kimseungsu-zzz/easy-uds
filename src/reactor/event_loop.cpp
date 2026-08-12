@@ -11,6 +11,7 @@
 #include <vector>
 
 #include <sys/epoll.h>
+#include <sys/eventfd.h>
 #include <sys/socket.h>
 #include <unistd.h>
 
@@ -186,8 +187,8 @@ void run_reactor(const std::shared_ptr<ServerState>& state) {
             }
 
             if (token == wake_token) {
-                std::array<unsigned char, 64> drain{};
-                while (::read(wake_read, drain.data(), drain.size()) > 0) {
+                std::uint64_t counter = 0;
+                while (::read(wake_read, &counter, sizeof(counter)) > 0) {
                 }
                 index = count;
                 break;

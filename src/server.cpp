@@ -13,6 +13,7 @@
 #include <vector>
 
 #include <sys/epoll.h>
+#include <sys/eventfd.h>
 #include <sys/file.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
@@ -142,17 +143,12 @@ void remove_stale_socket(const std::string& socket_path, std::chrono::millisecon
     }
 }
 
-std::array<FileDescriptor, 2> make_wakeup_pipe() {
-    int fds[2] = {-1, -1};
-    if (::pipe(fds) != 0) {
-        throw_system_error("pipe failed");
+FileDescriptor make_wakeup_eventfd() {
+    const int fd = ::eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK);
+    if (fd < 0) {
+        throw_system_error("eventfd failed");
     }
-    std::array<FileDescriptor, 2> result{FileDescriptor(fds[0]), FileDescriptor(fds[1])};
-    set_close_on_exec(result[0].get());
-    set_close_on_exec(result[1].get());
-    set_nonblocking(result[0].get());
-    set_nonblocking(result[1].get());
-    return result;
+    return FileDescriptor(fd);
 }
 
 void unlink_owned_socket(const std::shared_ptr<detail::ServerState>& state) noexcept {
@@ -169,14 +165,16 @@ void close_lifecycle_fds_locked(const std::shared_ptr<detail::ServerState>& stat
         (void)::close(state->listener_fd);
         state->listener_fd = -1;
     }
-    if (state->wake_read_fd >= 0) {
-        (void)::close(state->wake_read_fd);
-        state->wake_read_fd = -1;
+    const int wake_read = state->wake_read_fd;
+    const int wake_write = state->wake_write_fd;
+    if (wake_read >= 0) {
+        (void)::close(wake_read);
     }
-    if (state->wake_write_fd >= 0) {
-        (void)::close(state->wake_write_fd);
-        state->wake_write_fd = -1;
+    if (wake_write >= 0 && wake_write != wake_read) {
+        (void)::close(wake_write);
     }
+    state->wake_read_fd = -1;
+    state->wake_write_fd = -1;
     if (state->instance_lock_fd >= 0) {
         (void)::close(state->instance_lock_fd);
         state->instance_lock_fd = -1;
@@ -199,8 +197,8 @@ void stop_state(const std::shared_ptr<detail::ServerState>& state) noexcept {
         state->stopped = true;
         close_without_run = !state->run_active;
         if (state->wake_write_fd >= 0) {
-            const unsigned char byte = 1;
-            const ssize_t result = ::write(state->wake_write_fd, &byte, sizeof(byte));
+            const std::uint64_t increment = 1;
+            const ssize_t result = ::write(state->wake_write_fd, &increment, sizeof(increment));
             (void)result;
         }
     }
@@ -332,9 +330,9 @@ Server::Server(std::string socket_path, ServerOptions options) : state_(std::mak
         throw_system_error("listen failed", error);
     }
 
-    std::array<FileDescriptor, 2> wake_pipe;
+    FileDescriptor wake_event;
     try {
-        wake_pipe = make_wakeup_pipe();
+        wake_event = make_wakeup_eventfd();
     } catch (...) {
         unlink_owned_socket(state_);
         throw;
@@ -342,8 +340,8 @@ Server::Server(std::string socket_path, ServerOptions options) : state_(std::mak
 
     std::lock_guard<std::mutex> lock(state_->lifecycle_mutex);
     state_->listener_fd = listener.release();
-    state_->wake_read_fd = wake_pipe[0].release();
-    state_->wake_write_fd = wake_pipe[1].release();
+    state_->wake_read_fd = wake_event.get();
+    state_->wake_write_fd = wake_event.release();
     state_->instance_lock_fd = instance_lock.release();
 }
 

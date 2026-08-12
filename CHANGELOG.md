@@ -8,6 +8,8 @@ All notable changes to this project are documented here.
   the defaults preserve the existing 64-request/4 MiB backpressure policy.
 - Configurable per-connection fixed-response queue high-water mark for
   workload-specific stalled-peer experiments.
+- Replaced the reactor's two-descriptor wakeup pipe with one nonblocking
+  Linux `eventfd` counter, reducing wakeup descriptor and kernel-object cost.
 - Added optional aggregate server budgets for queued fixed-request input and
   fixed-response output across all connections.
 - Global input budgets participate in reactor pause/resume watermarks; global

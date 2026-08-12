@@ -25,12 +25,18 @@ find_package(Threads REQUIRED)
 
 add_library(easy_uds
     src/server.cpp
-    src/server_dispatch.cpp
-    src/reactor.cpp
-    src/server_flow.cpp
-    src/server_output.cpp
     src/client.cpp
-    src/server_core.hpp
+    src/reactor/dispatch.cpp
+    src/reactor/event_loop.cpp
+    src/reactor/flow_control.cpp
+    src/reactor/output.cpp
+    src/reactor/parser.cpp
+    src/reactor/stream.cpp
+    src/reactor/workers.cpp
+    src/reactor/common.hpp
+    src/reactor/core.hpp
+    src/reactor/parser.hpp
+    src/reactor/stream_io.hpp
     src/protocol.hpp
     src/internal.hpp
 )
@@ -79,7 +85,17 @@ endif()
 if(EASY_UDS_BUILD_TESTS)
     include(CTest)
     if(BUILD_TESTING)
-        add_executable(easy_uds_test tests/easy_uds_test.cpp)
+        add_executable(easy_uds_test
+            tests/easy_uds_test/main.cpp
+            tests/easy_uds_test/common.cpp
+            tests/easy_uds_test/server_lifecycle.cpp
+            tests/easy_uds_test/session.cpp
+            tests/easy_uds_test/streaming.cpp
+            tests/easy_uds_test/serialized.cpp
+            tests/easy_uds_test/timeouts_concurrency.cpp
+            tests/easy_uds_test/backpressure.cpp
+            tests/easy_uds_test/shutdown.cpp
+        )
         target_link_libraries(easy_uds_test PRIVATE easy_uds::easy_uds)
         target_compile_options(easy_uds_test PRIVATE
             $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Wall;-Wextra;-Wpedantic>

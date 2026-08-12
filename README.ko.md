@@ -535,9 +535,12 @@ instance lock은 같은 pathname을 사용하는 easy-uds server끼리 startup/s
 
 ```text
 include/easy_uds/       공개 header
-src/                    라이브러리 구현 및 내부 protocol codec
+src/                    client/server facade와 내부 protocol codec
+src/reactor/            reactor core, parser, dispatch, flow control, output,
+                        streaming, worker executor
 examples/               최소 server/client 예제
-tests/                  unit, stress, fuzz, package-consumer 테스트
+tests/easy_uds_test/     기능별로 나눈 unit 테스트
+tests/                  stress, fuzz, benchmark, package-consumer 테스트
 cmake/                  설치용 CMake config
 docs/                   protocol 문서
 .github/workflows/      GitHub Actions CI

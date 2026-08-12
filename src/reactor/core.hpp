@@ -4,7 +4,7 @@
 // public Server implementation.
 
 #include "easy_uds/easy_uds.hpp"
-#include "internal.hpp"
+#include "../internal.hpp"
 
 #include <atomic>
 #include <condition_variable>
@@ -180,7 +180,7 @@ struct ServerState {
     std::deque<std::shared_ptr<ReactorConnection>> resumed_connections;
 };
 
-// ---- shared helpers implemented in reactor.cpp ----------------------------
+// ---- reactor subsystem boundaries ----------------------------------------
 
 // Exact match wins; otherwise the longest registered prefix. `serialized`
 // reports the executor class of the matched route.
@@ -199,6 +199,9 @@ void dispatch_stream(const std::shared_ptr<ServerState>& state,
 
 // Runs the reactor loop (accept, frame parsing, dispatch) until stopped.
 void run_reactor(const std::shared_ptr<ServerState>& state);
+
+// Owns one streaming transaction after the reactor has leased its connection.
+void run_stream_exchange(const std::shared_ptr<ServerState>& state, PendingJob&& job);
 
 // Worker-pool loop: executes handler jobs (fixed and stream exchanges).
 void worker_loop(const std::shared_ptr<ServerState>& state);

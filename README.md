@@ -470,9 +470,12 @@ The instance lock coordinates easy-uds servers using the same path. It cannot fo
 
 ```text
 include/easy_uds/       Public headers
-src/                    Library implementation and internal protocol codec
+src/                    Client/server facade and internal protocol codec
+src/reactor/            Reactor core, parser, dispatch, flow control, output,
+                        streaming, and worker executors
 examples/               Minimal server/client examples
-tests/                  Unit, stress, fuzz, and package-consumer tests
+tests/easy_uds_test/     Unit tests grouped by subsystem
+tests/                  Stress, fuzz, benchmark, and package-consumer tests
 cmake/                  Installed-package CMake config
 docs/                   Protocol documentation
 .github/workflows/      GitHub Actions CI

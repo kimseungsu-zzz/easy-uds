@@ -39,6 +39,7 @@ jobs:
           cmake -S . -B build
           -DCMAKE_BUILD_TYPE=Release
           -DBUILD_SHARED_LIBS=${{ matrix.shared }}
+          -DEASY_UDS_BUILD_BENCHMARKS=ON
           -DEASY_UDS_WARNINGS_AS_ERRORS=ON
 
       - name: Build

@@ -19,7 +19,7 @@ option(EASY_UDS_BUILD_EXAMPLES "Build easy-uds examples" ${EASY_UDS_TOP_LEVEL})
 option(EASY_UDS_BUILD_TESTS "Build easy-uds tests" ${EASY_UDS_TOP_LEVEL})
 option(EASY_UDS_WARNINGS_AS_ERRORS "Treat easy-uds compiler warnings as errors" OFF)
 option(EASY_UDS_BUILD_FUZZERS "Build libFuzzer protocol targets (Clang only)" OFF)
-option(EASY_UDS_BUILD_BENCHMARKS "Build RPC and streaming throughput benchmarks" OFF)
+option(EASY_UDS_BUILD_BENCHMARKS "Build RPC, allocation, and streaming benchmarks" OFF)
 
 find_package(Threads REQUIRED)
 
@@ -111,6 +111,8 @@ if(EASY_UDS_BUILD_BENCHMARKS)
     target_link_libraries(easy_uds_rpc_benchmark PRIVATE easy_uds::easy_uds)
     add_executable(easy_uds_session_benchmark tests/easy_uds_session_benchmark.cpp)
     target_link_libraries(easy_uds_session_benchmark PRIVATE easy_uds::easy_uds)
+    add_executable(easy_uds_allocation_benchmark tests/easy_uds_allocation_benchmark.cpp)
+    target_link_libraries(easy_uds_allocation_benchmark PRIVATE easy_uds::easy_uds)
     target_compile_options(easy_uds_stream_benchmark PRIVATE
         $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Wall;-Wextra;-Wpedantic>
     )
@@ -118,6 +120,9 @@ if(EASY_UDS_BUILD_BENCHMARKS)
         $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Wall;-Wextra;-Wpedantic>
     )
     target_compile_options(easy_uds_session_benchmark PRIVATE
+        $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Wall;-Wextra;-Wpedantic>
+    )
+    target_compile_options(easy_uds_allocation_benchmark PRIVATE
         $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Wall;-Wextra;-Wpedantic>
     )
     if(EASY_UDS_WARNINGS_AS_ERRORS)
@@ -128,6 +133,9 @@ if(EASY_UDS_BUILD_BENCHMARKS)
             $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Werror>
         )
         target_compile_options(easy_uds_session_benchmark PRIVATE
+            $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Werror>
+        )
+        target_compile_options(easy_uds_allocation_benchmark PRIVATE
             $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Werror>
         )
     endif()

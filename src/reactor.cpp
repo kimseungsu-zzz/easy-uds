@@ -27,6 +27,14 @@ constexpr int kMaxAcceptBatch = 64;
 constexpr std::uint64_t kListenerToken = std::numeric_limits<std::uint64_t>::max();
 constexpr std::uint64_t kWakeToken = kListenerToken - 1;
 
+void clear_reusable_buffer(std::string& buffer) {
+    if (buffer.capacity() > kReadScratch) {
+        std::string{}.swap(buffer);
+    } else {
+        buffer.clear();
+    }
+}
+
 void mark_io_progress(const std::shared_ptr<Connection>& connection) noexcept {
     connection->last_io_progress.store(Clock::now().time_since_epoch().count(), std::memory_order_relaxed);
 }
@@ -547,15 +555,47 @@ void rearm_connection(const std::shared_ptr<ServerState>& state, const std::shar
     if (!state->running.load()) {
         return;
     }
-    auto fresh = std::make_shared<ReactorConnection>();
-    fresh->conn = conn;
-    fresh->generation = allocate_connection_generation(state);
-    fresh->pending = std::move(buffered);
-    fresh->pending_offset = buffered_offset;
+    // A fixed-request continuation lease was acquired only after reactor_busy
+    // became false, so its existing parser state can be reset in place. Stream
+    // workers may finish while the dispatching reactor frame is still active;
+    // they keep the replace-with-fresh-state path to avoid racing that frame.
+    const bool may_reuse = conn->worker_owned.load(std::memory_order_acquire) &&
+                           !conn->stream_active.load(std::memory_order_acquire);
+    std::shared_ptr<ReactorConnection> fresh;
+    if (!may_reuse) {
+        fresh = std::make_shared<ReactorConnection>();
+    }
     mark_io_progress(conn);
     bool rearm_failed = false;
     {
         std::lock_guard<std::mutex> lock(state->connections_mutex);
+        const auto existing = state->connections.find(fd);
+        if (may_reuse && existing != state->connections.end() && existing->second->conn == conn &&
+            !existing->second->reactor_busy) {
+            fresh = existing->second;
+        } else if (!fresh) {
+            fresh = std::make_shared<ReactorConnection>();
+        }
+
+        fresh->conn = conn;
+        fresh->generation = allocate_connection_generation(state);
+        fresh->phase = ParsePhase::header;
+        fresh->header.fill(0);
+        fresh->header_received = 0;
+        clear_reusable_buffer(fresh->route_buffer);
+        clear_reusable_buffer(fresh->body_buffer);
+        fresh->payload_received = 0;
+        fresh->payload_total = 0;
+        fresh->request_id = 0;
+        fresh->arg1 = 0;
+        fresh->arg2 = 0;
+        fresh->deadline = Deadline::max();
+        fresh->reactor_busy = false;
+        clear_reusable_buffer(fresh->pending);
+        if (buffered_offset < buffered.size()) {
+            fresh->pending.append(buffered.data() + buffered_offset, buffered.size() - buffered_offset);
+        }
+        fresh->pending_offset = 0;
         state->connections[fd] = fresh;
         // Publish reactor ownership while the connection map is locked, then
         // register the fd before the reactor can observe that transition. This

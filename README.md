@@ -339,6 +339,8 @@ cmake --build build-bench --parallel
 ./build-bench/easy_uds_session_benchmark 200000 8
 # Tiny RPC multiplexing: total requests, concurrent callers on one shared session
 ./build-bench/easy_uds_session_benchmark 200000 8 shared
+# Warmed-up tiny session RPC: total ordinary heap allocations
+./build-bench/easy_uds_allocation_benchmark 20000
 ```
 
 The streaming benchmark generates bytes on demand and discards them at the receiver, so it measures the library and local socket path without disk-I/O effects. The RPC benchmarks measure client-side latency on the one-connection-per-request API and on the persistent `Client::session()` API respectively, reporting aggregate throughput plus average, p50, p95, and p99 request latency. The session benchmark gives each caller its own session by default; pass `shared` to measure request-id multiplexing and client-side contention on one session.
@@ -349,6 +351,7 @@ Reference numbers (WSL2 on an i7-1260P, g++ 15, `-O3`):
 one-shot request()    p50 ~56–68 µs            ~13k req/s @ c1
 session request()     p50 ~38 µs (1 in-flight) ~67k req/s @ c8 independent sessions
 shared Session        p50 ~0.5 ms              ~25k req/s @ c16
+tiny session RPC      ~0 ordinary heap allocations/request after warm-up
 stream (64 KiB chunks)  upload ~5.7 GiB/s, download ~9.5 GiB/s
 ```
 

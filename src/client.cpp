@@ -189,7 +189,10 @@ namespace detail {
 
 struct SessionState {
     explicit SessionState(std::string socket_path, ClientOptions options)
-        : socket_path(std::move(socket_path)), options(options) {}
+        : socket_path(std::move(socket_path)), options(options) {
+        inflight.reserve(cached_inflight_slots);
+        free_inflight_nodes.reserve(cached_inflight_slots);
+    }
 
     const std::string socket_path;
     ClientOptions options;
@@ -213,7 +216,35 @@ struct SessionState {
         Response response;
         std::exception_ptr error;
     };
-    std::unordered_map<std::uint32_t, Slot*> inflight;
+    using InflightMap = std::unordered_map<std::uint32_t, Slot*>;
+    static constexpr std::size_t cached_inflight_slots = 64;
+    InflightMap inflight;
+    std::vector<InflightMap::node_type> free_inflight_nodes;
+
+    // Callers hold inflight_mutex. Reusing extracted C++17 map nodes removes
+    // steady-state allocator traffic while preserving O(1) request-id lookup.
+    void insert_inflight(std::uint32_t request_id, Slot* slot) {
+        if (free_inflight_nodes.empty()) {
+            inflight.emplace(request_id, slot);
+            return;
+        }
+        auto node = std::move(free_inflight_nodes.back());
+        free_inflight_nodes.pop_back();
+        node.key() = request_id;
+        node.mapped() = slot;
+        const auto result = inflight.insert(std::move(node));
+        if (!result.inserted) {
+            throw std::logic_error("duplicate session request_id");
+        }
+    }
+
+    void erase_inflight(std::uint32_t request_id) {
+        auto node = inflight.extract(request_id);
+        if (!node.empty() && free_inflight_nodes.size() < cached_inflight_slots) {
+            node.mapped() = nullptr;
+            free_inflight_nodes.push_back(std::move(node));
+        }
+    }
 
     std::thread reader_thread;
 };
@@ -328,7 +359,7 @@ Response Session::request(std::string_view route, std::string_view body) {
         do {
             request_id = state_->next_id++;
         } while (request_id == 0 || state_->inflight.find(request_id) != state_->inflight.end());
-        state_->inflight.emplace(request_id, &slot);
+        state_->insert_inflight(request_id, &slot);
     }
 
     const Deadline deadline = deadline_from_now(state_->options.request_timeout);
@@ -339,7 +370,7 @@ Response Session::request(std::string_view route, std::string_view body) {
         state_->broken.store(true, std::memory_order_release);
         {
             std::lock_guard<std::mutex> lock(state_->inflight_mutex);
-            state_->inflight.erase(request_id);
+            state_->erase_inflight(request_id);
         }
         (void)::shutdown(state_->fd.get(), SHUT_RDWR);
         throw;
@@ -367,7 +398,7 @@ Response Session::request(std::string_view route, std::string_view body) {
         // Erasing under the table lock waits for any reader that already
         // resolved this pointer, so the stack slot cannot be destroyed early.
         std::lock_guard<std::mutex> lock(state_->inflight_mutex);
-        state_->inflight.erase(request_id);
+        state_->erase_inflight(request_id);
     }
     if (timed_out) {
         state_->broken.store(true, std::memory_order_release);

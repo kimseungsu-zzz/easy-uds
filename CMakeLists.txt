@@ -20,6 +20,7 @@ option(EASY_UDS_BUILD_TESTS "Build easy-uds tests" ${EASY_UDS_TOP_LEVEL})
 option(EASY_UDS_WARNINGS_AS_ERRORS "Treat easy-uds compiler warnings as errors" OFF)
 option(EASY_UDS_BUILD_FUZZERS "Build libFuzzer protocol targets (Clang only)" OFF)
 option(EASY_UDS_BUILD_BENCHMARKS "Build RPC, allocation, and streaming benchmarks" OFF)
+option(EASY_UDS_BUILD_EXPERIMENTS "Build standalone UDS/io_uring experiment probes" OFF)
 set(EASY_UDS_SESSION_SPIN_US "100" CACHE STRING
     "Build-time Session response spin window in microseconds (0 disables spinning)")
 if(NOT EASY_UDS_SESSION_SPIN_US MATCHES "^[0-9]+$")
@@ -167,6 +168,22 @@ if(EASY_UDS_BUILD_BENCHMARKS)
             $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Werror>
         )
     endif()
+endif()
+
+if(EASY_UDS_BUILD_EXPERIMENTS)
+    add_executable(easy_uds_fd_passing_probe tests/easy_uds_fd_passing_probe.cpp)
+    add_executable(easy_uds_io_uring_probe tests/easy_uds_io_uring_probe.cpp)
+    foreach(experiment_target easy_uds_fd_passing_probe easy_uds_io_uring_probe)
+        target_compile_features(${experiment_target} PRIVATE cxx_std_17)
+        target_compile_options(${experiment_target} PRIVATE
+            $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Wall;-Wextra;-Wpedantic>
+        )
+        if(EASY_UDS_WARNINGS_AS_ERRORS)
+            target_compile_options(${experiment_target} PRIVATE
+                $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Werror>
+            )
+        endif()
+    endforeach()
 endif()
 
 if(EASY_UDS_BUILD_FUZZERS)

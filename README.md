@@ -352,7 +352,7 @@ cmake --build build-bench --parallel
 
 The streaming benchmark generates bytes on demand and discards them at the receiver, so it measures the library and local socket path without disk-I/O effects. The RPC benchmarks measure client-side latency on the one-connection-per-request API and on the persistent `Client::session()` API respectively, reporting aggregate throughput plus average, p50, p95, and p99 request latency. The session benchmark gives each caller its own session by default; pass `shared` to measure request-id multiplexing and client-side contention on one session.
 
-The session spin window is a build-time tuning knob for latency experiments; the default is `100` microseconds. Build benchmark variants with `-DEASY_UDS_SESSION_SPIN_US=0`, `10`, `25`, `50`, or `100` and compare p50/p95/p99, throughput, CPU, and context switches. It is intentionally not a public runtime option until measurements show a stable policy.
+The session spin window is a build-time tuning knob for latency experiments; the default is `100` microseconds. Build benchmark variants with `-DEASY_UDS_SESSION_SPIN_US=0`, `10`, `25`, `50`, or `100` and compare p50/p95/p99, throughput, CPU, and context switches. The session benchmark reports user/system CPU time and voluntary/involuntary context switches through `getrusage()`. It is intentionally not a public runtime option until measurements show a stable policy. On hosts with `perf` or `strace`, wrap the same benchmark to collect syscall/request, cache-miss, and branch-miss counters.
 
 Reference numbers (WSL2 on an i7-1260P, g++ 15, `-O3`):
 
@@ -483,6 +483,7 @@ tests/                  Stress, fuzz, benchmark, and package-consumer tests
 cmake/                  Installed-package CMake config
 docs/                   Protocol documentation
 docs/ROADMAP_0.6.md     0.6.x technical experiment and release boundaries
+docs/EXPERIMENTS_0.6.md  Standalone UDS capability probes
 .github/workflows/      GitHub Actions CI
 ```
 

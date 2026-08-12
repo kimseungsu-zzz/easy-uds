@@ -26,7 +26,7 @@ reactor, worker, multiplexing, backpressure, streaming, lifetime을 실제로
   - [x] budget validation과 shutdown 회귀 테스트
 - [ ] 성능 계측 기준선
   - [x] one-shot/session/stream benchmark 고정 workload
-  - [ ] p50/p95/p99, throughput, CPU, context switch 기록
+  - [x] p50/p95/p99, throughput, CPU, context switch 기록 (`getrusage`)
   - [x] syscall/request, allocation/request 기록
   - [ ] spin 0/10/25/50/100µs 비교 (build-time knob 추가)
 - [ ] ARM64 smoke/stress 검증
@@ -37,8 +37,8 @@ reactor, worker, multiplexing, backpressure, streaming, lifetime을 실제로
 
 #### P1: 별도 실험으로 검증
 
-- [ ] io_uring backend prototype — epoll backend와 병렬 유지
-- [ ] `SCM_RIGHTS`/`memfd_create` FD passing prototype
+- [x] `io_uring_setup` capability probe — backend는 epoll 유지
+- [x] `SCM_RIGHTS`/`memfd_create` FD passing standalone prototype
 - [ ] file-backed stream의 `sendfile`/`splice` zero-copy 비교
 - [ ] false sharing 및 allocator 측정 (`alignas`, queue/map allocation)
 

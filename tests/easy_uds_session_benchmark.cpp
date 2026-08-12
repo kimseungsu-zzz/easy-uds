@@ -15,6 +15,7 @@
 #include <vector>
 
 #include <unistd.h>
+#include <sys/resource.h>
 
 namespace {
 
@@ -117,12 +118,22 @@ int main(int argc, char** argv) {
     while (ready.load(std::memory_order_relaxed) != concurrency) {
         std::this_thread::yield();
     }
+    rusage usage_before{};
+    if (::getrusage(RUSAGE_SELF, &usage_before) != 0) {
+        std::cerr << "getrusage failed\n";
+        return 1;
+    }
     const auto start = Clock::now();
     start_workers.store(true, std::memory_order_release);
     for (auto& worker : workers) {
         worker.join();
     }
     const auto elapsed = Clock::now() - start;
+    rusage usage_after{};
+    if (::getrusage(RUSAGE_SELF, &usage_after) != 0) {
+        std::cerr << "getrusage failed\n";
+        return 1;
+    }
 
     server.stop();
     server_thread.join();
@@ -137,6 +148,12 @@ int main(int argc, char** argv) {
 
     const double seconds = std::chrono::duration<double>(elapsed).count();
     const double requests_per_second = static_cast<double>(iterations) / seconds;
+    const auto user_microseconds =
+        (usage_after.ru_utime.tv_sec - usage_before.ru_utime.tv_sec) * 1000000LL +
+        usage_after.ru_utime.tv_usec - usage_before.ru_utime.tv_usec;
+    const auto system_microseconds =
+        (usage_after.ru_stime.tv_sec - usage_before.ru_stime.tv_sec) * 1000000LL +
+        usage_after.ru_stime.tv_usec - usage_before.ru_stime.tv_usec;
     std::vector<double> samples;
     samples.reserve(iterations);
     for (auto& worker_samples : latency_samples) {
@@ -152,6 +169,9 @@ int main(int argc, char** argv) {
               << "throughput: " << requests_per_second << " requests/s\n"
               << "latency:    avg=" << latency_sum / static_cast<double>(samples.size())
               << " us, p50=" << percentile(samples, 0.50) << " us, p95=" << percentile(samples, 0.95)
-              << " us, p99=" << percentile(samples, 0.99) << " us\n";
+              << " us, p99=" << percentile(samples, 0.99) << " us\n"
+              << "resources:  user=" << user_microseconds << " us, system=" << system_microseconds
+              << " us, voluntary_cs=" << usage_after.ru_nvcsw - usage_before.ru_nvcsw
+              << ", involuntary_cs=" << usage_after.ru_nivcsw - usage_before.ru_nivcsw << '\n';
     return 0;
 }

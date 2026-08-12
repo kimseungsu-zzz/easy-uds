@@ -12,6 +12,8 @@ All notable changes to this project are documented here.
 - Added a build-time `EASY_UDS_SESSION_SPIN_US` knob for controlled latency
   experiments without expanding the public runtime API; the default remains
   `100` microseconds.
+- Added `getrusage()` CPU/context-switch reporting to the session benchmark and
+  standalone `SCM_RIGHTS`/`memfd_create` and `io_uring_setup` capability probes.
 
 ## 0.6.1 — Reactor Hardening
 

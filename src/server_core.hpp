@@ -190,6 +190,13 @@ bool find_request_handler(const std::shared_ptr<ServerState>& state, const std::
 bool find_stream_handler(const std::shared_ptr<ServerState>& state, const std::string& route,
                          std::shared_ptr<const StreamHandlerEntry>& handler);
 
+// Moves a complete reactor-parsed frame to its executor. Fixed dispatch
+// returns true when per-connection input reached its high-water mark.
+bool dispatch_request(const std::shared_ptr<ServerState>& state,
+                      const std::shared_ptr<ReactorConnection>& connection);
+void dispatch_stream(const std::shared_ptr<ServerState>& state,
+                     const std::shared_ptr<ReactorConnection>& connection);
+
 // Runs the reactor loop (accept, frame parsing, dispatch) until stopped.
 void run_reactor(const std::shared_ptr<ServerState>& state);
 

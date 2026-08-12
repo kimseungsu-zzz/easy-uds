@@ -543,6 +543,7 @@ tests/easy_uds_test/     기능별로 나눈 unit 테스트
 tests/                  stress, fuzz, benchmark, package-consumer 테스트
 cmake/                  설치용 CMake config
 docs/                   protocol 문서
+docs/ROADMAP_0.6.md     0.6.x 기술 실험 및 릴리즈 경계
 .github/workflows/      GitHub Actions CI
 ```
 

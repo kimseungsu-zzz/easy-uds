@@ -478,6 +478,7 @@ tests/easy_uds_test/     Unit tests grouped by subsystem
 tests/                  Stress, fuzz, benchmark, and package-consumer tests
 cmake/                  Installed-package CMake config
 docs/                   Protocol documentation
+docs/ROADMAP_0.6.md     0.6.x technical experiment and release boundaries
 .github/workflows/      GitHub Actions CI
 ```
 

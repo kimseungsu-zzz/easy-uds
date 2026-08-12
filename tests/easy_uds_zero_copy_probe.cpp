@@ -64,8 +64,9 @@ int main(int argc, char** argv) {
     int sockets[2] = {-1, -1};
     if (::socketpair(AF_UNIX, SOCK_STREAM, 0, sockets) != 0) fail("socketpair");
     const int source_fd = make_payload(bytes);
-    const int copy_fd = ::dup(source_fd);
-    if (copy_fd < 0 || ::lseek(source_fd, 0, SEEK_SET) < 0 || ::lseek(copy_fd, 0, SEEK_SET) < 0) {
+    const int copy_fd = make_payload(bytes);
+    const int splice_fd = make_payload(bytes);
+    if (::lseek(copy_fd, 0, SEEK_SET) < 0 || ::lseek(splice_fd, 0, SEEK_SET) < 0) {
         fail("prepare payload");
     }
     const double sendfile_seconds = measure_send([&] {
@@ -76,6 +77,29 @@ int main(int argc, char** argv) {
             if (count <= 0) fail("sendfile");
             sent += static_cast<std::size_t>(count);
         }
+    }, sockets[1], bytes);
+    const double splice_seconds = measure_send([&] {
+        int pipe_fds[2] = {-1, -1};
+        if (::pipe2(pipe_fds, O_CLOEXEC) != 0) fail("pipe2");
+        for (std::size_t sent = 0; sent < bytes;) {
+            const ssize_t moved = ::splice(splice_fd, nullptr, pipe_fds[1], nullptr,
+                                           std::min<std::size_t>(64U * 1024U, bytes - sent),
+                                           SPLICE_F_MOVE | SPLICE_F_MORE);
+            if (moved < 0 && errno == EINTR) continue;
+            if (moved <= 0) fail("splice file-to-pipe");
+            std::size_t drained = 0;
+            while (drained < static_cast<std::size_t>(moved)) {
+                const ssize_t count = ::splice(pipe_fds[0], nullptr, sockets[0], nullptr,
+                                               static_cast<std::size_t>(moved) - drained,
+                                               SPLICE_F_MOVE | SPLICE_F_MORE);
+                if (count < 0 && errno == EINTR) continue;
+                if (count <= 0) fail("splice pipe-to-socket");
+                drained += static_cast<std::size_t>(count);
+            }
+            sent += static_cast<std::size_t>(moved);
+        }
+        (void)::close(pipe_fds[0]);
+        (void)::close(pipe_fds[1]);
     }, sockets[1], bytes);
     const double copied_seconds = measure_send([&] {
         std::vector<char> buffer(64U * 1024U);
@@ -91,9 +115,11 @@ int main(int argc, char** argv) {
             sent += static_cast<std::size_t>(loaded);
         }
     }, sockets[1], bytes);
-    (void)::close(source_fd); (void)::close(copy_fd); (void)::close(sockets[0]); (void)::close(sockets[1]);
+    (void)::close(source_fd); (void)::close(copy_fd); (void)::close(splice_fd);
+    (void)::close(sockets[0]); (void)::close(sockets[1]);
     std::cout << "bytes=" << bytes << ", sendfile=" << sendfile_seconds
-              << " s, read_write=" << copied_seconds << " s, speedup="
-              << copied_seconds / sendfile_seconds << "x\n";
+              << " s, splice=" << splice_seconds << " s, read_write=" << copied_seconds
+              << " s, sendfile_speedup=" << copied_seconds / sendfile_seconds
+              << "x, splice_speedup=" << copied_seconds / splice_seconds << "x\n";
     return 0;
 }

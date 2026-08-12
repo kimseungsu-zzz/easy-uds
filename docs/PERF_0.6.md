@@ -28,6 +28,9 @@ false-sharing probe measured `5.31x` speedup from 64-byte padding on this WSL2
 host (20 million relaxed increments per counter). That result is diagnostic only;
 production state will be padded only after a workload-specific measurement.
 
-The file-backed zero-copy probe measured `sendfile()` at `1.02x` the speed of a
-read/write copy for an 8 MiB payload over a Unix socketpair on this WSL2 host.
-That marginal result does not justify adding a file-source public API in 0.6.x.
+The file-backed zero-copy probe compares `sendfile()` and `splice()` with a
+read/write copy for an 8 MiB payload over a Unix socketpair. Repeated WSL2
+runs observed roughly `1.26x–2.59x` for `sendfile()` and `1.58x–2.88x` for
+`splice()`; the result is host-sensitive. This is enough to keep the probe,
+but not enough to add a public file-source API without an end-to-end framed
+stream measurement.

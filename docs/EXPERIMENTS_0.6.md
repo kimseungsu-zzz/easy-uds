@@ -28,8 +28,8 @@ complete io_uring implementation demonstrates a measurable benefit.
 64-byte-aligned atomics. It is a hardware-sensitive diagnostic; it does not
 justify padding production state unless the target workload reproduces the gap.
 
-`easy_uds_zero_copy_probe` compares file-backed `sendfile()` with a read/write
-copy over a Unix socketpair. This is a transport experiment only; the existing
+`easy_uds_zero_copy_probe` compares file-backed `sendfile()` and `splice()` with
+a read/write copy over a Unix socketpair. This is a transport experiment only; the existing
 callback-based `StreamReader` contract remains unchanged. A production file-source
 API would need separate framing, size limits, deadlines, and fallback behavior.
 

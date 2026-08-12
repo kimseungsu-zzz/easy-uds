@@ -18,9 +18,9 @@ All notable changes to this project are documented here.
   `100` microseconds.
 - Added `getrusage()` CPU/context-switch reporting to the session benchmark and
   standalone `SCM_RIGHTS`/`memfd_create` and `io_uring_setup` capability probes.
-- Added a standalone file-backed `sendfile()` comparison probe; the public
-  callback streaming API remains unchanged because this host measured only a
-  marginal improvement.
+- Added a standalone file-backed `sendfile()`/`splice()` comparison probe; the
+  callback streaming API remains unchanged until an end-to-end framed stream
+  measurement justifies a file-source API.
 
 ## 0.6.1 — Reactor Hardening
 

@@ -396,8 +396,11 @@ Response Session::request(std::string_view route, std::string_view body) {
     // spin on the atomic flag avoids the futex wake round trip for responses
     // that land within tens of microseconds (the common high-frequency case).
     const Deadline spin_deadline = Clock::now() + session_spin_duration;
-    while (!slot.done.load(std::memory_order_acquire) && Clock::now() < spin_deadline &&
-           Clock::now() < deadline) {
+    while (!slot.done.load(std::memory_order_acquire)) {
+        const Deadline now = Clock::now();
+        if (now >= spin_deadline || now >= deadline) {
+            break;
+        }
         std::this_thread::yield();
     }
 

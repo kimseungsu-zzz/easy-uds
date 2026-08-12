@@ -18,6 +18,8 @@ All notable changes to this project are documented here.
   the first matching prefix instead of scanning all longer candidates.
 - Added a bounded 256 KiB reactor read-ahead batch to reduce epoll wakeups for
   large frames without allowing unbounded parser buffering.
+- Reduced session spin-loop clock reads to one timestamp per iteration while
+  preserving the same spin/deadline semantics.
 - Added optional aggregate server budgets for queued fixed-request input and
   fixed-response output across all connections.
 - Global input budgets participate in reactor pause/resume watermarks; global

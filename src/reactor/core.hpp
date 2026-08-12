@@ -87,6 +87,7 @@ enum class ParsePhase { header, request_payload, stream_route };
 struct ReactorConnection {
     std::shared_ptr<Connection> conn;
     std::uint32_t generation = 0;
+    std::uint32_t registered_events = 0;
     ParsePhase phase = ParsePhase::header;
     protocol::HeaderBytes header{};
     std::size_t header_received = 0;

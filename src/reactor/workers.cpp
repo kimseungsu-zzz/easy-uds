@@ -259,6 +259,7 @@ void rearm_connection(const std::shared_ptr<ServerState>& state,
 
         fresh->conn = connection;
         fresh->generation = allocate_connection_generation(state);
+        fresh->registered_events = EPOLLIN;
         fresh->phase = ParsePhase::header;
         fresh->header.fill(0);
         fresh->header_received = 0;
@@ -283,7 +284,7 @@ void rearm_connection(const std::shared_ptr<ServerState>& state,
         connection->worker_owned.store(false, std::memory_order_release);
 
         epoll_event event{};
-        event.events = EPOLLIN;
+        event.events = fresh->registered_events;
         event.data.u64 = connection_token(fd, fresh->generation);
         if (::epoll_ctl(state->epoll_fd, EPOLL_CTL_ADD, fd, &event) != 0) {
             const int add_error = errno;

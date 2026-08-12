@@ -128,12 +128,16 @@ bool refresh_connection_events(const std::shared_ptr<ServerState>& state,
     if (connection->queued_output_bytes.load(std::memory_order_acquire) != 0) {
         event.events |= EPOLLOUT;
     }
+    if (it->second->registered_events == event.events) {
+        return true;
+    }
     event.data.u64 = connection_token(connection->fd, it->second->generation);
     if (::epoll_ctl(state->epoll_fd, EPOLL_CTL_MOD, connection->fd, &event) != 0) {
         connection->closing.store(true, std::memory_order_release);
         (void)::shutdown(connection->fd, SHUT_RDWR);
         return false;
     }
+    it->second->registered_events = event.events;
     return true;
 }
 

@@ -172,9 +172,10 @@ void run_reactor(const std::shared_ptr<ServerState>& state) {
                         reactor_connection->conn = connection;
                         reactor_connection->generation =
                             allocate_connection_generation(state);
+                        reactor_connection->registered_events = EPOLLIN;
                         state->connections[client_fd] = reactor_connection;
                         epoll_event event{};
-                        event.events = EPOLLIN;
+                        event.events = reactor_connection->registered_events;
                         event.data.u64 = connection_token(
                             client_fd, reactor_connection->generation);
                         if (::epoll_ctl(epoll_fd, EPOLL_CTL_ADD, client_fd,

@@ -12,6 +12,8 @@ All notable changes to this project are documented here.
   Linux `eventfd` counter, reducing wakeup descriptor and kernel-object cost.
 - Coalesced concurrent worker-to-reactor wakeups with an atomic pending flag,
   reducing duplicate eventfd writes during backpressure and output bursts.
+- Cached per-connection epoll interest masks so unchanged output/read state does
+  not issue redundant `EPOLL_CTL_MOD` syscalls.
 - Added optional aggregate server budgets for queued fixed-request input and
   fixed-response output across all connections.
 - Global input budgets participate in reactor pause/resume watermarks; global

@@ -17,6 +17,7 @@ reactor, worker, multiplexing, backpressure, streaming, lifetime을 실제로
 - worker wakeup 중복 write를 atomic coalescing
 - connection별 epoll interest mask 캐시로 불필요한 MOD syscall 제거
 - prefix route registry를 longest-first로 정렬해 dispatch 조기 종료
+- reactor bounded read-ahead batch로 대형 frame epoll 왕복 감소
 - reactor와 unit test 모듈 분리
 
 ### 0.6.3 — Experimental Closure (진행 목표)

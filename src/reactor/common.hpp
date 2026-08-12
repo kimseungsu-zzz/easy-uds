@@ -13,6 +13,7 @@
 namespace easy_uds::detail {
 
 inline constexpr std::size_t reactor_read_scratch_size = 64U * 1024U;
+inline constexpr std::size_t reactor_read_batch_size = 256U * 1024U;
 inline constexpr int max_accept_batch = 64;
 inline constexpr std::uint64_t listener_token = std::numeric_limits<std::uint64_t>::max();
 inline constexpr std::uint64_t wake_token = listener_token - 1;

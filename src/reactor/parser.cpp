@@ -19,8 +19,11 @@ void consume(const std::shared_ptr<ServerState>& state,
     const int fd = rc->conn->fd;
     std::array<char, reactor_read_scratch_size> scratch{};
 
-    while (true) {
-        const ssize_t size = ::recv(fd, scratch.data(), scratch.size(), 0);
+    std::size_t read_ahead = 0;
+    while (read_ahead < reactor_read_batch_size) {
+        const std::size_t request_size =
+            std::min(scratch.size(), reactor_read_batch_size - read_ahead);
+        const ssize_t size = ::recv(fd, scratch.data(), request_size, 0);
         if (size > 0) {
             mark_io_progress(rc->conn);
             if (rc->pending_offset != 0 && rc->pending_offset == rc->pending.size()) {
@@ -28,7 +31,8 @@ void consume(const std::shared_ptr<ServerState>& state,
                 rc->pending_offset = 0;
             }
             rc->pending.append(scratch.data(), static_cast<std::size_t>(size));
-            break;
+            read_ahead += static_cast<std::size_t>(size);
+            continue;
         }
         if (size == 0) {
             rc->conn->closing.store(true, std::memory_order_release);

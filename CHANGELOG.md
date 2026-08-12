@@ -16,6 +16,8 @@ All notable changes to this project are documented here.
   not issue redundant `EPOLL_CTL_MOD` syscalls.
 - Prefix route registries are kept longest-first, allowing dispatch to stop at
   the first matching prefix instead of scanning all longer candidates.
+- Added a bounded 256 KiB reactor read-ahead batch to reduce epoll wakeups for
+  large frames without allowing unbounded parser buffering.
 - Added optional aggregate server budgets for queued fixed-request input and
   fixed-response output across all connections.
 - Global input budgets participate in reactor pause/resume watermarks; global

@@ -409,7 +409,13 @@ cmake --build build-bench --parallel
 
 ./build-bench/easy_uds_stream_benchmark 1024 65536
 ./build-bench/easy_uds_rpc_benchmark 100000 8
+# 호출자마다 독립 세션
+./build-bench/easy_uds_session_benchmark 200000 8
+# 하나의 세션을 여러 호출자가 공유
+./build-bench/easy_uds_session_benchmark 200000 8 shared
 ```
+
+세션 벤치마크는 기본적으로 호출자마다 독립 세션을 사용합니다. 마지막 인수로 `shared`를 주면 하나의 세션에서 request-id 멀티플렉싱과 클라이언트 내부 경합을 측정합니다.
 
 ## 예제 실행
 

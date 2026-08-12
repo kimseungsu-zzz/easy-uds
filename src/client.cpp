@@ -199,19 +199,21 @@ struct SessionState {
     std::atomic<bool> broken{false};
     std::atomic<bool> reader_stop{false};
 
-    // Single mutex + CV pair guards the in-flight table and serves every
-    // pending request, so multiplexing costs one lock/unlock per response
-    // instead of a per-slot mutex/CV round trip.
+    // The table owns no slots: each request keeps its slot alive on its own
+    // stack until it erases the entry while holding inflight_mutex. Per-slot
+    // notification wakes only the matching caller instead of every in-flight
+    // request on the session.
     std::mutex inflight_mutex;
-    std::condition_variable inflight_cv;
     std::uint32_t next_id = 1;
 
     struct Slot {
         std::atomic<bool> done{false};
+        std::mutex mutex;
+        std::condition_variable cv;
         Response response;
         std::exception_ptr error;
     };
-    std::unordered_map<std::uint32_t, std::shared_ptr<Slot>> inflight;
+    std::unordered_map<std::uint32_t, Slot*> inflight;
 
     std::thread reader_thread;
 };
@@ -234,34 +236,39 @@ void session_reader_loop(detail::SessionState* state) {
             response.body.resize(decoded.arg2);
             reader.read(response.body.data(), response.body.size(), state->options.io_timeout, Deadline::max());
 
-            std::shared_ptr<detail::SessionState::Slot> slot;
             {
                 std::lock_guard<std::mutex> lock(state->inflight_mutex);
                 const auto it = state->inflight.find(decoded.request_id);
                 if (it == state->inflight.end()) {
                     throw std::runtime_error("unexpected response request_id");
                 }
-                slot = it->second;
+                auto* const slot = it->second;
+                std::lock_guard<std::mutex> slot_lock(slot->mutex);
+                if (slot->done.load(std::memory_order_acquire)) {
+                    throw std::runtime_error("duplicate response request_id");
+                }
                 slot->response = std::move(response);
                 slot->done.store(true, std::memory_order_release);
+                slot->cv.notify_one();
             }
-            state->inflight_cv.notify_all();
         }
     } catch (...) {
         // Connection failed: break every pending request and mark the session
         // permanently unusable.
+        const std::exception_ptr error = std::current_exception();
         state->broken.store(true, std::memory_order_release);
         {
             std::lock_guard<std::mutex> lock(state->inflight_mutex);
             for (auto& entry : state->inflight) {
-                auto& slot = entry.second;
+                auto* const slot = entry.second;
+                std::lock_guard<std::mutex> slot_lock(slot->mutex);
                 if (!slot->done.load(std::memory_order_acquire)) {
-                    slot->error = std::current_exception();
+                    slot->error = error;
                     slot->done.store(true, std::memory_order_release);
+                    slot->cv.notify_one();
                 }
             }
         }
-        state->inflight_cv.notify_all();
     }
 }
 
@@ -314,14 +321,14 @@ Response Session::request(std::string_view route, std::string_view body) {
         throw std::logic_error("session connection is no longer usable");
     }
 
-    auto slot = std::make_shared<detail::SessionState::Slot>();
+    detail::SessionState::Slot slot;
     std::uint32_t request_id = 0;
     {
         std::lock_guard<std::mutex> lock(state_->inflight_mutex);
         do {
             request_id = state_->next_id++;
         } while (request_id == 0 || state_->inflight.find(request_id) != state_->inflight.end());
-        state_->inflight.emplace(request_id, slot);
+        state_->inflight.emplace(request_id, &slot);
     }
 
     const Deadline deadline = deadline_from_now(state_->options.request_timeout);
@@ -342,25 +349,33 @@ Response Session::request(std::string_view route, std::string_view body) {
     // spin on the atomic flag avoids the futex wake round trip for responses
     // that land within tens of microseconds (the common high-frequency case).
     const Deadline spin_deadline = Clock::now() + std::chrono::microseconds{100};
-    while (!slot->done.load(std::memory_order_acquire) && Clock::now() < spin_deadline &&
+    while (!slot.done.load(std::memory_order_acquire) && Clock::now() < spin_deadline &&
            Clock::now() < deadline) {
         std::this_thread::yield();
     }
 
-    std::unique_lock<std::mutex> lock(state_->inflight_mutex);
-    if (!slot->done.load(std::memory_order_acquire)) {
-        if (!state_->inflight_cv.wait_until(lock, deadline, [&slot] { return slot->done.load(); })) {
-            state_->inflight.erase(request_id);
-            state_->broken.store(true, std::memory_order_release);
-            lock.unlock();
-            (void)::shutdown(state_->fd.get(), SHUT_RDWR);
-            throw_system_error("request timed out", ETIMEDOUT);
+    bool timed_out = false;
+    {
+        std::unique_lock<std::mutex> slot_lock(slot.mutex);
+        if (!slot.done.load(std::memory_order_acquire)) {
+            timed_out = !slot.cv.wait_until(slot_lock, deadline, [&slot] {
+                return slot.done.load(std::memory_order_acquire);
+            });
         }
     }
-    const std::exception_ptr error = slot->error;
-    Response response = std::move(slot->response);
-    state_->inflight.erase(request_id);
-    lock.unlock();
+    {
+        // Erasing under the table lock waits for any reader that already
+        // resolved this pointer, so the stack slot cannot be destroyed early.
+        std::lock_guard<std::mutex> lock(state_->inflight_mutex);
+        state_->inflight.erase(request_id);
+    }
+    if (timed_out) {
+        state_->broken.store(true, std::memory_order_release);
+        (void)::shutdown(state_->fd.get(), SHUT_RDWR);
+        throw_system_error("request timed out", ETIMEDOUT);
+    }
+    const std::exception_ptr error = slot.error;
+    Response response = std::move(slot.response);
     if (error) {
         std::rethrow_exception(error);
     }

@@ -8,7 +8,9 @@
 #include <exception>
 #include <iostream>
 #include <limits>
+#include <memory>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <vector>
 
@@ -36,8 +38,9 @@ int main(int argc, char** argv) {
         argc > 1 ? static_cast<std::size_t>(std::strtoull(argv[1], nullptr, 10)) : 100000U;
     const std::size_t concurrency =
         argc > 2 ? static_cast<std::size_t>(std::strtoull(argv[2], nullptr, 10)) : 1U;
-    if (iterations == 0 || concurrency == 0) {
-        std::cerr << "iterations and concurrency must be greater than zero\n";
+    const bool shared_session = argc > 3 && std::string_view(argv[3]) == "shared";
+    if (iterations == 0 || concurrency == 0 || argc > 4 || (argc == 4 && !shared_session)) {
+        std::cerr << "usage: easy_uds_session_benchmark [iterations] [concurrency] [shared]\n";
         return 2;
     }
     const std::string path =
@@ -67,6 +70,10 @@ int main(int argc, char** argv) {
     wait_until_running(server);
 
     easy_uds::Client client(path);
+    std::unique_ptr<easy_uds::Session> shared;
+    if (shared_session) {
+        shared = std::make_unique<easy_uds::Session>(client.session());
+    }
 
     std::atomic<std::size_t> ready{0};
     std::atomic<bool> start_workers{false};
@@ -79,9 +86,14 @@ int main(int argc, char** argv) {
         workers.emplace_back([&, worker, worker_iterations] {
             auto& samples = latency_samples[worker];
             samples.reserve(worker_iterations);
-            // Each worker opens its persistent multiplexed session before the
-            // start barrier so connection setup is not measured.
-            easy_uds::Session session = client.session();
+            // Connection setup happens before the start barrier. By default
+            // each worker owns a session; `shared` benchmarks multiplexing
+            // contention on one session instead.
+            std::unique_ptr<easy_uds::Session> local;
+            if (!shared_session) {
+                local = std::make_unique<easy_uds::Session>(client.session());
+            }
+            easy_uds::Session& session = shared_session ? *shared : *local;
             ready.fetch_add(1, std::memory_order_relaxed);
             while (!start_workers.load(std::memory_order_acquire)) {
                 std::this_thread::yield();
@@ -135,7 +147,8 @@ int main(int argc, char** argv) {
     for (const double sample : samples) {
         latency_sum += sample;
     }
-    std::cout << "requests=" << iterations << ", concurrency=" << concurrency << " (persistent sessions)\n"
+    std::cout << "requests=" << iterations << ", concurrency=" << concurrency
+              << (shared_session ? " (one shared session)\n" : " (independent persistent sessions)\n")
               << "throughput: " << requests_per_second << " requests/s\n"
               << "latency:    avg=" << latency_sum / static_cast<double>(samples.size())
               << " us, p50=" << percentile(samples, 0.50) << " us, p95=" << percentile(samples, 0.95)

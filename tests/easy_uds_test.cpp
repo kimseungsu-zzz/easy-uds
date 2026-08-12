@@ -567,6 +567,45 @@ void test_multiplexed_session() {
         }
     }
 
+    // Repeatedly publish responses to distinct waiters on one shared session.
+    // This catches missed targeted notifications and stale in-flight slot
+    // pointers that a single request per caller would rarely expose.
+    constexpr std::size_t repeated_callers = 8;
+    constexpr std::size_t requests_per_caller = 64;
+    std::atomic<std::size_t> ready{0};
+    std::atomic<bool> start{false};
+    std::vector<std::exception_ptr> repeated_errors(repeated_callers);
+    callers.clear();
+    for (std::size_t caller_index = 0; caller_index < repeated_callers; ++caller_index) {
+        callers.emplace_back([&, caller_index] {
+            ready.fetch_add(1, std::memory_order_release);
+            while (!start.load(std::memory_order_acquire)) {
+                std::this_thread::yield();
+            }
+            try {
+                for (std::size_t request_index = 0; request_index < requests_per_caller; ++request_index) {
+                    const std::string body = std::to_string(caller_index) + ":" + std::to_string(request_index);
+                    const Response response = session.request("echo", body);
+                    expect(response.status == 200 && response.body == body, "repeated multiplexed round-trip");
+                }
+            } catch (...) {
+                repeated_errors[caller_index] = std::current_exception();
+            }
+        });
+    }
+    while (ready.load(std::memory_order_acquire) != repeated_callers) {
+        std::this_thread::yield();
+    }
+    start.store(true, std::memory_order_release);
+    for (auto& caller : callers) {
+        caller.join();
+    }
+    for (const auto& error : repeated_errors) {
+        if (error) {
+            std::rethrow_exception(error);
+        }
+    }
+
     // Raw pipelining: two requests sent back-to-back on one connection are
     // both answered (reactor parses sequentially, multiplex id correlates).
     const int raw_fd = connect_raw(path);

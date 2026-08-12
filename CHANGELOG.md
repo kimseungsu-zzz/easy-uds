@@ -2,6 +2,42 @@
 
 All notable changes to this project are documented here.
 
+## 0.6.1 — Reactor Hardening
+
+Patch release focused on bounded resource use, persistent-session reliability,
+and lower hot-path overhead. The public API and protocol remain unchanged from
+0.6.0.
+
+### Reliability and backpressure
+
+- Idle sessions no longer expire merely because no request is in flight; response
+  deadlines still apply once a transaction starts.
+- Fixed-response writes use a bounded per-connection output queue drained by the
+  reactor, so non-reading peers cannot occupy the worker pool.
+- Pipelined fixed requests are bounded per connection by request count and queued
+  bytes. The reactor pauses and resumes `EPOLLIN` at high/low watermarks, applying
+  Unix-socket backpressure instead of growing an unbounded worker queue.
+- Added regression coverage for idle sessions, stalled readers, bounded output,
+  pipelined input backpressure, and low-watermark resumption.
+
+### Performance
+
+- Session completion wakes only the waiter for the completed request rather than
+  broadcasting to every in-flight request.
+- Session in-flight map nodes and reactor connection state are reused on hot paths.
+- Immutable copy-on-write handler snapshots remove handler-table locking and
+  `std::function` copies from request dispatch.
+
+### Internals and validation
+
+- Split the reactor into parser, event loop, dispatch, flow-control, output,
+  streaming, and worker-executor modules under `src/reactor/`.
+- Split the unit suite by subsystem under `tests/easy_uds_test/`; all C/C++ source
+  files are now below 600 lines.
+- Validated with GCC and Clang static/shared builds, 37 unit tests, stress tests,
+  ASan/UBSan, TSan, protocol/session fuzz smoke tests, and installed-package
+  consumers.
+
 ## 0.6.0
 
 Breaking rewrite that reshapes the protocol, server internals, and public API before 1.0.

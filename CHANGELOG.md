@@ -30,6 +30,26 @@ All notable changes to this project are documented here.
 - Added a build-time `EASY_UDS_SESSION_SPIN_US` knob for controlled latency
   experiments without expanding the public runtime API; the default remains
   `100` microseconds.
+- Fixed a spurious "excess stream" rejection of back-to-back single streams:
+  the concurrent-stream slot is now released as soon as the response is fully
+  written (before the connection rearm), removing the window in which a client's
+  next stream could be closed while the previous exchange still did reactor
+  bookkeeping. Regression coverage: `test_back_to_back_streams`.
+- Closed the 0.6.4 file-stream gate: an in-library `sendfile`-backed stream is
+  a 4–7x regression against the gathered-`sendmsg` callback path on the dev
+  host, so no file-source public API is added; the zero-copy goal defers to the
+  io_uring backend. Measurements in `docs/PERF_0.6.md`.
+- Added descriptor passing: `Client::request_fd()` sends a request with a
+  descriptor as `SCM_RIGHTS` ancillary data, delivered to the handler as
+  `Request::fd`. The wire frame marks the descriptor with the reserved-flags
+  bit `carries_fd_flag` (header layout unchanged, so this is a v2-compatible
+  extension; unknown flag combinations are rejected rather than silently
+  dropping the descriptor). The reactor parse path now reads via `recvmsg` with
+  a control buffer and keeps received descriptors in arrival order, so a
+  descriptor on a frame inside a read-ahead batch survives; the server closes
+  the descriptor after the handler returns. Measured no session hot-path
+  regression. Coverage: `test_fd_passing` and the extended
+  `easy_uds_fd_passing_probe` (delivery, read-ahead survival, plain-read drop).
 - Added `getrusage()` CPU/context-switch reporting to the session benchmark and
   standalone `SCM_RIGHTS`/`memfd_create` and `io_uring_setup` capability probes.
 - Added a standalone file-backed `sendfile()`/`splice()` comparison probe; the

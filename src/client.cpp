@@ -57,6 +57,22 @@ void write_request_frame(int fd, std::uint32_t request_id, std::string_view rout
     write_iovecs_exact(fd, parts.data(), parts.size(), io_timeout, deadline);
 }
 
+// Like write_request_frame, but the frame header marks the request as carrying
+// a descriptor and the descriptor rides as SCM_RIGHTS on the first sendmsg.
+void write_request_frame_with_fd(int fd, std::uint32_t request_id, int passed_fd, std::string_view route,
+                                 std::string_view body, std::chrono::milliseconds io_timeout,
+                                 Deadline deadline) {
+    const HeaderBytes header = protocol::encode_header(
+        WireType::request, request_id, static_cast<std::uint32_t>(route.size()),
+        static_cast<std::uint32_t>(body.size()), protocol::carries_fd_flag);
+    std::array<iovec, 3> parts{{
+        {const_cast<unsigned char*>(header.data()), header.size()},
+        {const_cast<char*>(route.data()), route.size()},
+        {const_cast<char*>(body.data()), body.size()},
+    }};
+    write_iovecs_exact_with_fd(fd, parts.data(), parts.size(), passed_fd, io_timeout, deadline);
+}
+
 Response read_response(BufferedReader& reader, std::size_t max_message_size, std::chrono::milliseconds io_timeout,
                        Deadline deadline) {
     HeaderBytes header{};
@@ -191,6 +207,22 @@ Response Client::request(std::string_view route, std::string_view body) const {
     return read_response(reader, options_.max_message_size, options_.io_timeout, deadline);
 }
 
+Response Client::request_fd(std::string_view route, int fd, std::string_view body) const {
+    if (fd < 0) {
+        throw std::invalid_argument("request_fd requires a valid descriptor");
+    }
+    validate_request_lengths(route, body, options_.max_message_size);
+
+    const Deadline deadline = deadline_from_now(options_.request_timeout);
+    FileDescriptor socket_fd = make_socket();
+    const sockaddr_un address = make_address(socket_path_);
+    connect_nonblocking(socket_fd.get(), address, options_.connect_timeout, deadline);
+
+    write_request_frame_with_fd(socket_fd.get(), 0, fd, route, body, options_.io_timeout, deadline);
+    BufferedReader reader(socket_fd.get());
+    return read_response(reader, options_.max_message_size, options_.io_timeout, deadline);
+}
+
 Status Client::request_stream(std::string_view route, const StreamReader& request_body,
                               const std::function<void(std::string_view)>& response_chunk) const {
     return run_oneshot_stream(socket_path_, options_, route, request_body, response_chunk);
@@ -203,6 +235,14 @@ Session Client::session() const {
 // ---- Session ---------------------------------------------------------------
 
 namespace detail {
+
+#ifdef EASY_UDS_TRACE_SPIN_MISS
+// Diagnostic (experimental): number of session requests whose spin window
+// expired before the response landed, forcing the caller to fall through to
+// the condition-variable wait. Compiled only when EASY_UDS_TRACE_SPIN_MISS is
+// defined; the default build has no such counter.
+std::atomic<std::size_t> session_spin_miss_count{0};
+#endif
 
 struct SessionState {
     explicit SessionState(std::string socket_path, ClientOptions options)
@@ -418,6 +458,9 @@ Response Session::request(std::string_view route, std::string_view body) {
     {
         std::unique_lock<std::mutex> slot_lock(slot.mutex);
         if (!slot.done.load(std::memory_order_acquire)) {
+#ifdef EASY_UDS_TRACE_SPIN_MISS
+            detail::session_spin_miss_count.fetch_add(1, std::memory_order_relaxed);
+#endif
             timed_out = !slot.cv.wait_until(slot_lock, deadline, [&slot] {
                 return slot.done.load(std::memory_order_acquire);
             });

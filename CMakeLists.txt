@@ -21,6 +21,7 @@ option(EASY_UDS_WARNINGS_AS_ERRORS "Treat easy-uds compiler warnings as errors" 
 option(EASY_UDS_BUILD_FUZZERS "Build libFuzzer protocol targets (Clang only)" OFF)
 option(EASY_UDS_BUILD_BENCHMARKS "Build RPC, allocation, and streaming benchmarks" OFF)
 option(EASY_UDS_BUILD_EXPERIMENTS "Build standalone UDS/io_uring experiment probes" OFF)
+option(EASY_UDS_TRACE_SPIN_MISS "Count client session spin-window misses (diagnostic)" OFF)
 set(EASY_UDS_SESSION_SPIN_US "100" CACHE STRING
     "Build-time Session response spin window in microseconds (0 disables spinning)")
 if(NOT EASY_UDS_SESSION_SPIN_US MATCHES "^[0-9]+$")
@@ -72,6 +73,7 @@ target_include_directories(easy_uds
 target_link_libraries(easy_uds PUBLIC Threads::Threads)
 target_compile_definitions(easy_uds PRIVATE
     EASY_UDS_SESSION_SPIN_US=${EASY_UDS_SESSION_SPIN_US}
+    $<$<BOOL:${EASY_UDS_TRACE_SPIN_MISS}>:EASY_UDS_TRACE_SPIN_MISS>
 )
 
 target_compile_options(easy_uds PRIVATE
@@ -105,6 +107,7 @@ if(EASY_UDS_BUILD_TESTS)
             tests/easy_uds_test/backpressure.cpp
             tests/easy_uds_test/shutdown.cpp
             tests/easy_uds_test/budgets.cpp
+            tests/easy_uds_test/fd_passing.cpp
         )
         target_link_libraries(easy_uds_test PRIVATE easy_uds::easy_uds)
         target_compile_options(easy_uds_test PRIVATE
@@ -140,6 +143,9 @@ if(EASY_UDS_BUILD_BENCHMARKS)
     target_link_libraries(easy_uds_rpc_benchmark PRIVATE easy_uds::easy_uds)
     add_executable(easy_uds_session_benchmark tests/easy_uds_session_benchmark.cpp)
     target_link_libraries(easy_uds_session_benchmark PRIVATE easy_uds::easy_uds)
+    target_compile_definitions(easy_uds_session_benchmark PRIVATE
+        $<$<BOOL:${EASY_UDS_TRACE_SPIN_MISS}>:EASY_UDS_TRACE_SPIN_MISS>
+    )
     add_executable(easy_uds_allocation_benchmark tests/easy_uds_allocation_benchmark.cpp)
     target_link_libraries(easy_uds_allocation_benchmark PRIVATE easy_uds::easy_uds)
     target_compile_options(easy_uds_stream_benchmark PRIVATE
@@ -171,11 +177,33 @@ if(EASY_UDS_BUILD_BENCHMARKS)
 endif()
 
 if(EASY_UDS_BUILD_EXPERIMENTS)
+    set(EASY_UDS_EXPERIMENT_TARGETS
+        easy_uds_fd_passing_probe
+        easy_uds_io_uring_probe
+        easy_uds_false_sharing_probe
+        easy_uds_zero_copy_probe
+    )
     add_executable(easy_uds_fd_passing_probe tests/easy_uds_fd_passing_probe.cpp)
     add_executable(easy_uds_io_uring_probe tests/easy_uds_io_uring_probe.cpp)
     add_executable(easy_uds_false_sharing_probe tests/easy_uds_false_sharing_probe.cpp)
     add_executable(easy_uds_zero_copy_probe tests/easy_uds_zero_copy_probe.cpp)
-    foreach(experiment_target easy_uds_fd_passing_probe easy_uds_io_uring_probe easy_uds_false_sharing_probe easy_uds_zero_copy_probe)
+    find_library(EASY_UDS_LIBURING uring)
+    find_path(EASY_UDS_LIBURING_INCLUDE_DIR liburing.h)
+    if(EASY_UDS_LIBURING AND EASY_UDS_LIBURING_INCLUDE_DIR)
+        add_executable(easy_uds_io_uring_echo_probe tests/easy_uds_io_uring_echo_probe.cpp)
+        target_include_directories(easy_uds_io_uring_echo_probe PRIVATE
+            ${EASY_UDS_LIBURING_INCLUDE_DIR}
+        )
+        target_compile_features(easy_uds_io_uring_echo_probe PRIVATE cxx_std_17)
+        target_compile_options(easy_uds_io_uring_echo_probe PRIVATE
+            $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Wall;-Wextra;-Wpedantic>
+        )
+        target_link_libraries(easy_uds_io_uring_echo_probe PRIVATE ${EASY_UDS_LIBURING})
+        list(APPEND EASY_UDS_EXPERIMENT_TARGETS easy_uds_io_uring_echo_probe)
+    else()
+        message(STATUS "liburing library/header not found; easy_uds_io_uring_echo_probe disabled")
+    endif()
+    foreach(experiment_target IN LISTS EASY_UDS_EXPERIMENT_TARGETS)
         target_compile_features(${experiment_target} PRIVATE cxx_std_17)
         target_compile_options(${experiment_target} PRIVATE
             $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Wall;-Wextra;-Wpedantic>

@@ -15,6 +15,7 @@
 
 #include <poll.h>
 #include <sys/epoll.h>
+#include <unistd.h>
 
 namespace easy_uds::detail {
 namespace {
@@ -56,21 +57,32 @@ bool serve_fixed_request(const std::shared_ptr<ServerState>& state,
     }
     if (handler->serialized) {
         if (!ensure_serialized_worker(state)) {
+            close_request_fd(request);
             connection->closing.store(true, std::memory_order_release);
             return true;
         }
         SerializedJob job;
         job.connection = connection;
         job.request = std::move(request);
+        request.fd = -1;
         job.deadline = deadline;
         job.handler = std::move(handler);
         job.request_bytes = job.request.route.size() + job.request.body.size();
         {
             std::unique_lock<std::mutex> lock(state->serialized_mutex);
             if (state->serialized_stopping || !state->running.load()) {
+                close_request_fd(job.request);
+                request.fd = -1;
+                connection->closing.store(true, std::memory_order_release);
                 return true;
             }
-            state->pending_serialized.push_back(std::move(job));
+            try {
+                state->pending_serialized.push_back(std::move(job));
+            } catch (...) {
+                close_request_fd(job.request);
+                request.fd = -1;
+                throw;
+            }
             connection->pending_serialized.fetch_add(1, std::memory_order_relaxed);
         }
         state->serialized_cv.notify_one();
@@ -165,6 +177,9 @@ void continue_connection(const std::shared_ptr<ServerState>& state,
             source.read(header.data(), header.size(), state->options.io_timeout,
                         request_deadline);
             const auto decoded = protocol::decode_header(header);
+            if (decoded.flags & protocol::carries_fd_flag) {
+                throw std::runtime_error("fd flag is not supported on persistent-session requests");
+            }
             if (decoded.type == WireType::stream_request) {
                 std::string replay(reinterpret_cast<const char*>(header.data()),
                                    header.size());
@@ -204,6 +219,9 @@ void continue_connection(const std::shared_ptr<ServerState>& state,
             rearm_connection(state, connection, std::move(buffered), buffered_offset);
             const bool completed_inline =
                 serve_fixed_request(state, connection, request, request_deadline);
+            if (completed_inline) {
+                close_request_fd(request);
+            }
             if (!complete_regular_request(state, connection, request_bytes,
                                           completed_inline)) {
                 return;
@@ -255,6 +273,19 @@ void rearm_connection(const std::shared_ptr<ServerState>& state,
             fresh = existing->second;
         } else if (!fresh) {
             fresh = std::make_shared<ReactorConnection>();
+        }
+
+        // Replacing a parse state must not leak descriptors that were received
+        // but never delivered to a handler.
+        if (existing != state->connections.end() && fresh != existing->second) {
+            for (const int leftover : existing->second->received_fds) {
+                (void)::close(leftover);
+            }
+            existing->second->received_fds.clear();
+            if (existing->second->request_fd >= 0) {
+                (void)::close(existing->second->request_fd);
+                existing->second->request_fd = -1;
+            }
         }
 
         fresh->conn = connection;
@@ -342,6 +373,7 @@ void worker_loop(const std::shared_ptr<ServerState>& state) {
         } catch (...) {
             job.connection->closing.store(true, std::memory_order_release);
         }
+        close_request_fd(job.request);
 
         if (complete_regular_request(state, job.connection, job.request_bytes)) {
             continue_connection(state, job.connection, std::move(job.buffered),
@@ -388,6 +420,13 @@ void serialized_worker_loop(const std::shared_ptr<ServerState>& state) {
                 wake_reactor(state);
             }
         } completion{state, job.connection, job.request_bytes};
+
+        // Serialized requests own any descriptor passed with them until the
+        // handler (or the expiry path) is done with it.
+        struct RequestFdCloser {
+            easy_uds::Request& request;
+            ~RequestFdCloser() { close_request_fd(request); }
+        } request_fd_closer{job.request};
 
         try {
             if (Clock::now() >= job.deadline) {

@@ -97,9 +97,17 @@ class IncomingStream {
 class ActiveStreamGuard {
   public:
     explicit ActiveStreamGuard(std::shared_ptr<ServerState> state) : state_(std::move(state)) {}
-    ~ActiveStreamGuard() {
+    ~ActiveStreamGuard() { release(); }
+
+    // The stream slot bounds concurrent streams. Release it as soon as the
+    // response is fully written — before the connection is rearmed — so a
+    // client firing the next stream immediately after reading the end frame
+    // is not spuriously rejected while the previous exchange still does its
+    // reactor bookkeeping.
+    void release() noexcept {
         if (state_) {
             state_->active_streams.fetch_sub(1, std::memory_order_relaxed);
+            state_.reset();
         }
     }
     ActiveStreamGuard(const ActiveStreamGuard&) = delete;
@@ -169,6 +177,10 @@ void run_stream_exchange(const std::shared_ptr<ServerState>& state, PendingJob&&
             write_header_frame(fd, WireType::stream_response_end, job.request.request_id, 0, 0,
                                state->options.io_timeout, job.deadline);
         }
+        // The response is fully written; admit the next stream now rather than
+        // after the connection rearm, avoiding a spurious excess-stream close
+        // for back-to-back single streams.
+        stream_guard.release();
     } catch (...) {
         connection->closing.store(true, std::memory_order_release);
     }

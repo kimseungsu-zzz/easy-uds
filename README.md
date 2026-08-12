@@ -10,6 +10,7 @@
 
 - C++17 with no third-party runtime dependencies
 - Named request handlers with arbitrary binary request/response bodies
+- Optional one-descriptor request passing with `SCM_RIGHTS` (`Client::request_fd()` → `Request::fd`)
 - Multiplexed persistent sessions: concurrent `request()` calls on one connection, correlated by request id and answered in any order
 - Peer credentials (`pid`/`uid`/`gid`) via Linux `SO_PEERCRED`
 - Exact and longest-prefix route registration (`on()` / `on_prefix()`)
@@ -428,6 +429,7 @@ For pre-1.0 shared builds, the ELF `SOVERSION` tracks the major and minor releas
 
 - `Client(std::string socket_path, ClientOptions options = {})`
 - `request(std::string_view route, std::string_view body = {})`
+- `request_fd(std::string_view route, int fd, std::string_view body = {})` — sends a duplicate of `fd` via `SCM_RIGHTS`
 - `request_stream(std::string_view route, const StreamReader&, response_chunk)`
 - `session()`
 - `socket_path()`
@@ -452,6 +454,7 @@ struct Request {
     std::string body;
     PeerCredentials peer;
     std::uint32_t request_id;
+    int fd = -1;  // received descriptor; server closes it after the handler
 };
 
 struct Response {

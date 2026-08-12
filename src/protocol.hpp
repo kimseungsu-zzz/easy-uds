@@ -50,11 +50,17 @@ enum class WireType : std::uint8_t {
     stream_response_end = 8,
 };
 
+// Reserved-flags bits (header bytes 6-7, big-endian). Bit 0 marks a frame that
+// carries one descriptor as SCM_RIGHTS ancillary data, delivered with the
+// frame's bytes. Only this bit is understood; any other bit is rejected.
+inline constexpr std::uint16_t carries_fd_flag = 0x0001U;
+
 struct DecodedHeader {
     WireType type = WireType::request;
     std::uint32_t request_id = 0;
     std::uint32_t arg1 = 0;
     std::uint32_t arg2 = 0;
+    std::uint16_t flags = 0;
 };
 
 inline void put_u32(HeaderBytes& header, std::size_t offset, std::uint32_t value) noexcept {
@@ -69,11 +75,13 @@ inline std::uint32_t get_u32(const HeaderBytes& header, std::size_t offset) noex
 }
 
 inline HeaderBytes encode_header(WireType type, std::uint32_t request_id, std::uint32_t arg1,
-                                 std::uint32_t arg2) noexcept {
+                                 std::uint32_t arg2, std::uint16_t flags = 0) noexcept {
     HeaderBytes header{};
     std::copy(magic.begin(), magic.end(), header.begin());
     header[4] = version;
     header[5] = static_cast<std::uint8_t>(type);
+    header[6] = static_cast<unsigned char>((flags >> 8) & 0xFFU);
+    header[7] = static_cast<unsigned char>(flags & 0xFFU);
     put_u32(header, header_field_offset, request_id);
     put_u32(header, arg1_offset, arg1);
     put_u32(header, arg2_offset, arg2);
@@ -87,7 +95,9 @@ inline DecodedHeader decode_header(const HeaderBytes& header) {
     if (header[4] != version) {
         throw std::runtime_error("unsupported protocol version");
     }
-    if (header[6] != 0 || header[7] != 0) {
+    const std::uint16_t flags =
+        (static_cast<std::uint16_t>(header[6]) << 8) | static_cast<std::uint16_t>(header[7]);
+    if ((flags & ~carries_fd_flag) != 0) {
         throw std::runtime_error("unsupported protocol flags");
     }
     const auto raw_type = header[5];
@@ -95,8 +105,11 @@ inline DecodedHeader decode_header(const HeaderBytes& header) {
         raw_type > static_cast<std::uint8_t>(WireType::stream_response_end)) {
         throw std::runtime_error("unknown protocol message type");
     }
+    if ((flags & carries_fd_flag) != 0 && raw_type != static_cast<std::uint8_t>(WireType::request)) {
+        throw std::runtime_error("descriptor flag is only valid on fixed requests");
+    }
     return {static_cast<WireType>(raw_type), get_u32(header, header_field_offset), get_u32(header, arg1_offset),
-            get_u32(header, arg2_offset)};
+            get_u32(header, arg2_offset), flags};
 }
 
 inline DecodedHeader decode_header(const HeaderBytes& header, WireType expected_type) {

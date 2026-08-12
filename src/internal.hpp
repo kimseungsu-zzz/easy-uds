@@ -143,6 +143,17 @@ class FileDescriptor {
     int fd_;
 };
 
+// Request::fd is an owned descriptor once it has crossed the public API
+// boundary.  Keep the cleanup operation in shared infrastructure so every
+// queue/enqueue failure path can release it without duplicating ownership
+// rules.
+inline void close_request_fd(easy_uds::Request& request) noexcept {
+    if (request.fd >= 0) {
+        (void)::close(request.fd);
+        request.fd = -1;
+    }
+}
+
 inline void set_close_on_exec(int fd) {
     const int flags = ::fcntl(fd, F_GETFD);
     if (flags < 0) {
@@ -410,6 +421,69 @@ inline void write_iovecs_exact(int fd, iovec* parts, std::size_t part_count,
         const ssize_t result = ::sendmsg(fd, &message, 0);
 #endif
         if (result > 0) {
+            std::size_t consumed = static_cast<std::size_t>(result);
+            while (first < part_count && consumed >= parts[first].iov_len) {
+                consumed -= parts[first].iov_len;
+                ++first;
+            }
+            if (consumed != 0 && first < part_count) {
+                auto* base = static_cast<unsigned char*>(parts[first].iov_base);
+                parts[first].iov_base = base + consumed;
+                parts[first].iov_len -= consumed;
+            }
+            continue;
+        }
+        if (result == 0) {
+            throw_system_error("send failed", EPIPE);
+        }
+        if (errno == EINTR) {
+            continue;
+        }
+        if (errno == EAGAIN || errno == EWOULDBLOCK) {
+            wait_for_io(fd, POLLOUT, inactivity_timeout, absolute_deadline, "send timed out");
+            continue;
+        }
+        throw_system_error("send failed");
+    }
+}
+
+// Variant of write_iovecs_exact that attaches `passed_fd` as SCM_RIGHTS on the
+// FIRST sendmsg only, so partial-send retries never duplicate the descriptor
+// (the kernel delivers the fd with the bytes of that first successful write).
+inline void write_iovecs_exact_with_fd(int fd, iovec* parts, std::size_t part_count, int passed_fd,
+                                       std::chrono::milliseconds inactivity_timeout,
+                                       Deadline absolute_deadline) {
+    std::size_t first = 0;
+    bool fd_attached = false;
+    while (first < part_count) {
+        while (first < part_count && parts[first].iov_len == 0) {
+            ++first;
+        }
+        if (first == part_count) {
+            return;
+        }
+
+        check_absolute_deadline(absolute_deadline, "send timed out");
+        msghdr message{};
+        message.msg_iov = parts + first;
+        message.msg_iovlen = part_count - first;
+        char control[CMSG_SPACE(sizeof(int))]{};
+        if (!fd_attached) {
+            message.msg_control = control;
+            message.msg_controllen = sizeof(control);
+            cmsghdr* cmsg = CMSG_FIRSTHDR(&message);
+            cmsg->cmsg_level = SOL_SOCKET;
+            cmsg->cmsg_type = SCM_RIGHTS;
+            cmsg->cmsg_len = CMSG_LEN(sizeof(int));
+            std::memcpy(CMSG_DATA(cmsg), &passed_fd, sizeof(passed_fd));
+        }
+#ifdef MSG_NOSIGNAL
+        const ssize_t result = ::sendmsg(fd, &message, MSG_NOSIGNAL);
+#else
+        const ssize_t result = ::sendmsg(fd, &message, 0);
+#endif
+        if (result > 0) {
+            fd_attached = true;
             std::size_t consumed = static_cast<std::size_t>(result);
             while (first < part_count && consumed >= parts[first].iov_len) {
                 consumed -= parts[first].iov_len;

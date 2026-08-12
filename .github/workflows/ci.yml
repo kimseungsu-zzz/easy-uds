@@ -62,6 +62,45 @@ jobs:
       - name: Test
         run: ctest --test-dir build --output-on-failure
 
+  experiments:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Install optional Linux probe dependency
+        run: sudo apt-get update && sudo apt-get install -y liburing-dev
+
+      - name: Configure standalone probes
+        run: >-
+          cmake -S . -B build-experiments
+          -DCMAKE_BUILD_TYPE=Release
+          -DEASY_UDS_BUILD_EXAMPLES=OFF
+          -DEASY_UDS_BUILD_TESTS=OFF
+          -DEASY_UDS_BUILD_EXPERIMENTS=ON
+          -DEASY_UDS_WARNINGS_AS_ERRORS=ON
+
+      - name: Build standalone probes
+        run: cmake --build build-experiments --parallel
+
+      - name: Run portable probes
+        run: |
+          ./build-experiments/easy_uds_fd_passing_probe
+          ./build-experiments/easy_uds_false_sharing_probe 100000
+          ./build-experiments/easy_uds_zero_copy_probe 1048576
+
+      - name: Run io_uring probe when the runner permits it
+        run: |
+          ./build-experiments/easy_uds_io_uring_probe
+          if ./build-experiments/easy_uds_io_uring_probe | grep -q 'supported'; then
+            ./build-experiments/easy_uds_io_uring_echo_probe 2 2000
+          else
+            echo 'io_uring unavailable in this runner; echo probe skipped'
+          fi
+
   sanitizers:
     runs-on: ubuntu-latest
     timeout-minutes: 10

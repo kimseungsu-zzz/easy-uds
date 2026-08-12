@@ -1,7 +1,15 @@
 #include "easy_uds/easy_uds.hpp"
 
-#include <algorithm>
 #include <atomic>
+
+#ifdef EASY_UDS_TRACE_SPIN_MISS
+// Defined by the easy_uds library when built with EASY_UDS_TRACE_SPIN_MISS.
+namespace easy_uds::detail {
+extern std::atomic<std::size_t> session_spin_miss_count;
+}
+#endif
+
+#include <algorithm>
 #include <chrono>
 #include <cstddef>
 #include <cstdlib>
@@ -40,8 +48,12 @@ int main(int argc, char** argv) {
     const std::size_t concurrency =
         argc > 2 ? static_cast<std::size_t>(std::strtoull(argv[2], nullptr, 10)) : 1U;
     const bool shared_session = argc > 3 && std::string_view(argv[3]) == "shared";
-    if (iterations == 0 || concurrency == 0 || argc > 4 || (argc == 4 && !shared_session)) {
-        std::cerr << "usage: easy_uds_session_benchmark [iterations] [concurrency] [shared]\n";
+    // Optional server continuation grace in milliseconds (0 disables the
+    // worker-lease continuation fast path; an A/B for hot-path attribution).
+    const long long grace_ms = argc > 4 ? std::strtoll(argv[4], nullptr, 10) : 1;
+    if (iterations == 0 || concurrency == 0 || argc > 5 || (argc == 4 && !shared_session) ||
+        grace_ms < 0) {
+        std::cerr << "usage: easy_uds_session_benchmark [iterations] [concurrency] [shared] [grace_ms]\n";
         return 2;
     }
     const std::string path =
@@ -57,6 +69,7 @@ int main(int argc, char** argv) {
     server_options.listen_backlog = static_cast<int>(
         std::min<std::size_t>(server_options.max_connections, static_cast<std::size_t>(std::numeric_limits<int>::max())));
     server_options.stale_socket_grace_period = std::chrono::milliseconds{0};
+    server_options.session_idle_grace = std::chrono::milliseconds{grace_ms};
     easy_uds::Server server(path, server_options);
     server.on("ping", [](const easy_uds::Request&) { return easy_uds::Response{200, "pong"}; });
 
@@ -173,5 +186,12 @@ int main(int argc, char** argv) {
               << "resources:  user=" << user_microseconds << " us, system=" << system_microseconds
               << " us, voluntary_cs=" << usage_after.ru_nvcsw - usage_before.ru_nvcsw
               << ", involuntary_cs=" << usage_after.ru_nivcsw - usage_before.ru_nivcsw << '\n';
+#ifdef EASY_UDS_TRACE_SPIN_MISS
+    const std::size_t spin_misses =
+        easy_uds::detail::session_spin_miss_count.load(std::memory_order_relaxed);
+    std::cout << "spin:       misses=" << spin_misses << "/" << iterations << " ("
+              << 100.0 * static_cast<double>(spin_misses) / static_cast<double>(iterations)
+              << "% condvar fallback)\n";
+#endif
     return 0;
 }

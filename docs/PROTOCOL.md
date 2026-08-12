@@ -19,12 +19,14 @@ Every message begins with exactly 20 bytes:
 | 0 | 4 | Magic | ASCII `EUDS` |
 | 4 | 1 | Version | `2` |
 | 5 | 1 | Message type | See message types below |
-| 6 | 2 | Reserved flags | `0` |
+| 6 | 2 | Flags | bit 0 = one `SCM_RIGHTS` descriptor on a fixed request; all other bits `0` |
 | 8 | 4 | Request id | Unsigned 32-bit |
 | 12 | 4 | Argument 1 | Type-specific, unsigned 32-bit |
 | 16 | 4 | Argument 2 | Type-specific, unsigned 32-bit |
 
-Reserved bytes must be zero. A peer may close the connection when the magic, version, type, or flags are invalid. A v1 header (version byte `1`) is rejected.
+Only bit 0 is currently defined, and it is valid only on a fixed request. All
+other flag bits must be zero. A peer may close the connection when the magic,
+version, type, or flags are invalid. A v1 header (version byte `1`) is rejected.
 
 | Type | Value |
 | --- | ---: |
@@ -67,6 +69,15 @@ route bytes | body bytes
 ```
 
 The route must contain at least one byte. Route and body are length-delimited and may contain NUL (`0x00`) or newline bytes. The configured `max_message_size` limits `route_length + body_length`.
+
+### Passing one file descriptor
+
+`Client::request_fd()` sets flag bit 0 and attaches one descriptor with
+`SCM_RIGHTS` to the fixed request. The server exposes the received duplicate as
+`Request::fd` and closes it after the handler returns. The caller retains
+ownership of its original descriptor. Descriptor passing is not supported on
+sessions or stream frames; malformed, truncated, or mismatched ancillary data
+is a protocol error.
 
 ## Fixed response
 

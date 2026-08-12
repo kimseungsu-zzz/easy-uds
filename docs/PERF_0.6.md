@@ -1,26 +1,36 @@
 # 0.6 performance measurements
 
-These are development measurements, not portable guarantees. Each run uses
-the existing session benchmark on WSL2 with g++ `-O3`, one persistent session,
-and the configured build-time spin window.
+These are development measurements, not portable guarantees. The spin sweep
+below uses the session benchmark on WSL2 with g++ `-O3`, one persistent session,
+50,000 requests, and each build-time spin window rebuilt separately
+(2026-08-12). `EASY_UDS_TRACE_SPIN_MISS=ON` (a build-time diagnostic, default
+OFF) reports how many requests fell through the spin window to the condvar wait.
 
-| Spin window | Requests | p50 | p95 | p99 | Throughput |
+| Spin window | p50 | p95 | p99 | Throughput | condvar fallback |
 |---:|---:|---:|---:|---:|---:|
-| 0 µs | 30,000 | 68.1 µs | 183.5 µs | 256.4 µs | 11.6k req/s |
-| 10 µs | 12,000 | 70.6 µs | 149.7 µs | 235.1 µs | 11.9k req/s |
-| 25 µs | 12,000 | 88.6 µs | 178.1 µs | 254.6 µs | 9.9k req/s |
-| 50 µs | 12,000 | 41.6 µs | 112.9 µs | 187.7 µs | 18.4k req/s |
-| 100 µs | 30,000 | 47.0 µs | 124.4 µs | 257.5 µs | 16.2k req/s |
+| 0 µs | 49.3 µs | 76.8 µs | 127.6 µs | 18.4k req/s | 99.99 % |
+| 25 µs | 34.0 µs | 71.9 µs | 132.4 µs | 24.4k req/s | 16.42 % |
+| 50 µs | 34.9 µs | 90.2 µs | 174.3 µs | 23.0k req/s | 5.24 % |
+| 100 µs | 34.5 µs | 55.8 µs | 121.8 µs | 25.9k req/s | 0.58 % |
+| 200 µs | 34.5 µs | 62.0 µs | 127.1 µs | 25.1k req/s | 0.074 % |
+| 500 µs | 34.2 µs | 58.8 µs | 127.0 µs | 25.6k req/s | 0.026 % |
 
-The samples are noisy on a shared WSL2 host, but zero spin consistently loses the
-low-latency path. The default remains 100 µs because it is a conservative choice
-under tail-latency variation; 50 µs is a candidate for a future platform-specific
-profile, not a public API change.
+On this development host 100 µs is the sweet spot: p50 reaches the raw WSL
+round-trip floor (~34 µs), p95/p99/throughput are the best of the sweep, and
+the spin covers 99.42 % of responses (only 0.58 % fall through to the condvar).
+Dropping to 50 µs raises fallback to 5.24 % and worsens the p95/p99 tail even
+though p50 stays at the floor; raising to 200/500 µs buys little (0.07 % → 0.03 %)
+at the cost of a worse p99. Zero spin falls through on essentially every request.
+The residual ~2 futex calls and ~2 voluntary context switches per request at
+100 µs are server-side (worker-pool queueing, reactor dispatch, reader-thread
+scheduling), not the client response wait — the client spin is already near
+optimal, so the next latency lever is server-side. This is x86-WSL evidence only;
+the `ROADMAP_0.6.md` decision is finalized with an ARM64 run.
 
 The benchmark also reports `getrusage()` user/system CPU time and voluntary /
-involuntary context switches. `perf stat` and `strace -c` should be used on a
-host where those tools are available for syscall, cache-miss, and branch-miss
-counts. They are not available in the current WSL image.
+involuntary context switches. `strace -c` is used for syscall counts on the
+development WSL2 image (the roadmap Phase 0 strace baseline below). `perf stat`
+still needs a host where perf is available for cache-miss and branch-miss counts.
 
 The warmed-up allocation benchmark reports `0` ordinary heap allocations per
 request in the current session fast path (5,000 requests). The standalone
@@ -34,3 +44,172 @@ runs observed roughly `1.26x–2.59x` for `sendfile()` and `1.58x–2.88x` for
 `splice()`; the result is host-sensitive. This is enough to keep the probe,
 but not enough to add a public file-source API without an end-to-end framed
 stream measurement.
+
+## WSL reference baseline (2026-08-12)
+
+Development station: i7-1260P, WSL2 (kernel 6.18.33-microsoft-standard), g++ 15.2,
+CMake 4.2.3, `Release`, ninja. These are a shared-host validation and A/B
+reference, not the canonical baseline; `ROADMAP_0.6.md` Phase 0 calls for a
+re-run on a native Linux host before absolute numbers are used.
+
+| Benchmark | Run | Throughput | p50 | p95 | p99 |
+|---|---:|---:|---:|---:|---:|
+| session (independent, c8) | 200,000 | 47.7k req/s | 125.6 µs | 396.2 µs | 620.4 µs |
+| session (shared, c8) | 200,000 | 25.1k req/s | 278.6 µs | 697.2 µs | 997.6 µs |
+| one-shot RPC (c8) | 100,000 | 41.5k req/s | 179.2 µs | 301.4 µs | 428.1 µs |
+| warm session allocation | 20,000 | — | 1 heap alloc total (5e-05/req) | | |
+| stream (64 KiB chunks, 1 GiB) | 1024 MiB | upload 10.0 GiB/s, download 10.3 GiB/s | | | |
+
+Session resources (independent c8): user 19.3 s, system 19.6 s, voluntary
+context switches 567 k, involuntary 25 k. Shared c8: voluntary 641 k, involuntary 76.
+
+### Read-ahead batch size sweep (2026-08-12)
+
+`reactor_read_batch_size` (256 KiB default) caps how much the reactor parses
+per connection per readiness event. The RPC benchmark gained an optional
+payload-size argument (`iterations concurrency payload_bytes`, handler echoes
+the payload) to exercise large frames. One-shot RPC, 300 requests:
+
+| Batch | 1 MiB p50 | 1 MiB p99 | 1 MiB throughput | tiny c8 p50 | tiny c8 throughput |
+|---:|---:|---:|---:|---:|---:|
+| 64 KiB | 648.6 µs | 1714.9 µs | 1297 req/s | 195.8 µs | 37.2k req/s |
+| 256 KiB (default) | 675.6 µs | 1608.7 µs | 1427 req/s | 179.3 µs | 40.3k req/s |
+| 1 MiB | 1358.2 µs | 2455.8 µs | 706 req/s | 177.6 µs | 39.5k req/s |
+
+The 1 MiB cap is a clear regression on large frames (~2x): a large batch
+balloons the per-connection `pending` buffer and its copy/retention cost per
+event. 64 KiB costs ~9 % of large-frame throughput. Tiny RPCs are unaffected.
+Decision: keep the 256 KiB default; no change.
+
+### False-sharing padding A/B (2026-08-12)
+
+`Connection` carries adjacent atomics written by both the reactor and the
+worker pool (`last_io_progress`, `last_output_progress`, `inflight_requests`,
+`inflight_request_bytes`, `queued_output_bytes`). A variant with `alignas(64)`
+on all five was compared with the packed layout on the shared-session benchmark,
+200,000 requests, 16 concurrent callers on one session, three runs each:
+
+| Layout | throughput (median) | p50 | p99 |
+|---|---:|---:|---:|
+| packed (current) | 26.6k req/s | 504.6 µs | 2021 µs |
+| 5 × `alignas(64)` | 26.7k req/s | 505.3 µs | 2016 µs |
+
+No measurable difference; run-to-run variance (~5 %) exceeds any padding
+effect on this host. Decision: do not adopt padding — production state stays
+packed until a workload-specific measurement shows the gap. This A/B is
+WSL-only evidence; the standalone synthetic probe's 5.31x does not reproduce
+under real multiplexed traffic on this host.
+
+### Allocation by path (2026-08-12)
+
+The allocation benchmark gained `stream` and `serialized` modes in addition to
+the original warm session fast path (operator-new override counting both
+in-process client and server). WSL2, `-O3`:
+
+| Path | Workload | Allocations |
+|---|---:|---:|
+| session fixed RPC | 20,000 requests | 8 total (0.0004/req) |
+| serialized route | 20,000 requests | 2.33/req |
+| streamed 1 MiB exchange | 100 exchanges | 15.76/MiB (~1 per 64 KiB chunk) |
+
+The fixed fast path is arbitrarily close to zero. Stream allocation scales with
+transferred bytes (~1 heap alloc per 64 KiB chunk) and is not a bottleneck at
+the measured 10 GiB/s. Serialized requests pay a small per-request constant
+(the serialized-job enqueue copies request strings) on a low-frequency,
+exclusive-executor path by design. Decision: no object pool or custom allocator
+is warranted; nothing adopts.
+
+### Continuation fast path: ON vs OFF (2026-08-12)
+
+The session benchmark gained an optional `grace_ms` argument to disable the
+worker-lease continuation (`session_idle_grace = 0`). `strace -f -c`, 3,000
+sequential requests on one session:
+
+| Metric | Continuation ON (1 ms) | Continuation OFF (0) |
+|---|---:|---:|
+| futex | 3.05 /req | **6.06 /req (2x)** |
+| epoll_wait | ~0 /req | 1.00 /req |
+| poll | 2.00 /req | 1.00 /req |
+| epoll_ctl | 2.00 /req | 2.00 /req |
+| recvfrom | 3.00 /req | 3.00 /req (3000 EAGAIN) |
+| sendmsg | 2.00 /req | 2.00 /req |
+| p50 / p99 (30k) | 37.7 / 158.6 µs | 75.6 / 525.7 µs |
+
+The continuation fast path is already sustained multi-followup (the worker
+re-acquires the lease and loops across consecutive requests) and is worth a
+2x latency / 2x futex saving plus a near-zero `epoll_wait`. The residual
+per-request costs (2 `epoll_ctl`, the `connections_mutex` in lease+rearm, 1
+`poll` grace wait) sum to a small share of syscall time; skipping the rearm
+for the strictly-sequential case would save ~2 % of syscall time at the risk
+of serializing pipelined bursts. Decision: no continuation redesign — the
+sequential path is already at the raw round-trip floor. The remaining latency
+headroom is the multiplexed/shared-session path (measured p50 ~500 µs vs
+~35 µs sequential), not sequential RPC.
+
+### Framed zero-copy gate (2026-08-12)
+
+`easy_uds_zero_copy_probe` gained a `framed` pass that mirrors the real wire
+protocol (20-byte header + 64 KiB payload per frame) on top of the three raw
+transports. This asks whether the socketpair-only speedups carry through a
+framed end-to-end stream.
+
+| Payload | Pass | sendfile vs read/write | splice vs read/write |
+|---|---:|---:|---:|
+| 8 MiB | raw | 1.80x | 1.92x |
+| 8 MiB | framed | 1.10x | 1.48x |
+| 64 MiB | raw | 1.68x | 2.21x |
+| 64 MiB | framed | 1.72x | 1.82x |
+
+The 20-byte header adds ~0.03 % of wire bytes, so the loss is not framing
+overhead: capping each payload chunk at 64 KiB forces many small `sendfile` /
+`splice` calls and shrinks the raw-mode win. Crucially, this probe compares
+`sendfile`/`splice` only against a plain `read`+`write()` copy baseline
+(~2.6–3 GiB/s on this host) — not against the library's gathered `sendmsg()`
+path. That baseline is what makes the probe show a "win".
+
+An in-library `sendfile`-backed file-stream (the 0.6.4 candidate) was then
+measured through the real non-blocking stream path and **rejected**:
+
+| Path (512 MiB stream) | Download |
+|---|---:|
+| callback `StreamReader` + gathered `sendmsg` | ~9.8 GiB/s |
+| `sendfile`, non-blocking socket (1 MiB frames) | ~1.3–1.6 GiB/s |
+| `sendfile`, temporarily blocking socket | ~2.3 GiB/s |
+| forced read/loop fallback | ~1.5–2.2 GiB/s |
+
+Standalone on this host a memfd read is ~5.5 GiB/s and blocking `sendfile`
+~4.2 GiB/s, so the file→socket path is slower than the user-space gather path
+before any non-blocking penalty is added. A file-source API is a 4–7x
+regression here. Decision: the 0.6.4 file-stream API is **rejected**; the
+zero-copy goal moves to the io_uring backend (0.6.5), where
+`IORING_OP_SENDFILE` handles non-blocking targets efficiently. The framed and
+raw probe passes remain as documentation of the naive transport result.
+
+### recvmsg-with-control read path (2026-08-12)
+
+The reactor read-ahead switched from `recv` to `recvmsg` with a one-descriptor
+control buffer so SCM_RIGHTS descriptors survive read-ahead batches. Session
+A/B on this host (200k, c8, 3 runs each): `recvmsg` 44.7k / 42.9k / 43.7k vs
+plain `recv` 41.6k / 42.8k / 42.3k req/s — no measurable regression; the earlier
+single-run 14% gap was shared-host noise.
+
+### Syscalls per session request
+
+`strace -f -c -S calls` on the session benchmark, 3,000 requests, concurrency 1.
+Startup/setup syscalls excluded; per-request steady-state counts:
+
+| syscall | calls / 3k req | /req | share of syscall time |
+|---|---:|---:|---:|
+| futex | 9,107 | ~3.0 | 50.7 % (biggest cost) |
+| recvfrom | 9,002 | ~3.0 | 6.6 % |
+| poll | 6,001 | ~2.0 | 18.8 % |
+| epoll_ctl | 6,003 | ~2.0 | 1.8 % |
+| sendmsg | 6,000 | ~2.0 | 2.5 % |
+| epoll_wait | 3 | ~0.001 | 19.5 % |
+
+~12 syscalls/request. `futex` dominates syscall time (the client spin window is
+not eliminating the session lock/condvar waits; the server worker-pool and
+per-connection queues also touch futex). `poll` at 2/request and `epoll_ctl` at
+2/request are reduction candidates on the reader wait and connection rearm
+paths. `epoll_wait` at ~0/request confirms the continuation fast path keeps the
+reactor mostly dormant for a single sequential session.

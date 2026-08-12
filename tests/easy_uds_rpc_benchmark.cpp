@@ -36,13 +36,24 @@ int main(int argc, char** argv) {
         argc > 1 ? static_cast<std::size_t>(std::strtoull(argv[1], nullptr, 10)) : 100000U;
     const std::size_t concurrency =
         argc > 2 ? static_cast<std::size_t>(std::strtoull(argv[2], nullptr, 10)) : 1U;
+    const std::size_t payload =
+        argc > 3 ? static_cast<std::size_t>(std::strtoull(argv[3], nullptr, 10)) : 0U;
     if (iterations == 0 || concurrency == 0) {
         std::cerr << "iterations and concurrency must be greater than zero\n";
+        return 2;
+    }
+    if (argc > 4) {
+        std::cerr << "usage: easy_uds_rpc_benchmark [iterations] [concurrency] [payload_bytes]\n";
         return 2;
     }
     const std::string path =
         "/tmp/easy-uds-rpc-benchmark-" + std::to_string(static_cast<long long>(::getpid())) + ".sock";
 
+    // The route + body must fit max_message_size, so a large payload raises
+    // the cap above the default 1 MiB. The handler echoes the payload so both
+    // request and response frames exercise large-body parsing.
+    const std::size_t message_limit =
+        std::max<std::size_t>(easy_uds::default_max_message_size, payload + 8);
     easy_uds::ServerOptions server_options;
     if (concurrency > std::numeric_limits<std::size_t>::max() / 2) {
         std::cerr << "concurrency is too large\n";
@@ -53,8 +64,11 @@ int main(int argc, char** argv) {
     server_options.listen_backlog = static_cast<int>(
         std::min<std::size_t>(server_options.max_connections, static_cast<std::size_t>(std::numeric_limits<int>::max())));
     server_options.stale_socket_grace_period = std::chrono::milliseconds{0};
+    server_options.max_message_size = message_limit;
     easy_uds::Server server(path, server_options);
-    server.on("ping", [](const easy_uds::Request&) { return easy_uds::Response{200, "pong"}; });
+    server.on("echo", [payload](const easy_uds::Request&) {
+        return easy_uds::Response{200, std::string(payload, 'y')};
+    });
 
     std::exception_ptr server_error;
     std::thread server_thread([&] {
@@ -66,9 +80,13 @@ int main(int argc, char** argv) {
     });
     wait_until_running(server);
 
-    easy_uds::Client client(path);
-    for (std::size_t index = 0; index < 1000; ++index) {
-        (void)client.request("ping");
+    easy_uds::ClientOptions client_options;
+    client_options.max_message_size = message_limit;
+    easy_uds::Client client(path, client_options);
+    const std::string request_body(payload, 'x');
+    const std::size_t warmup = payload == 0 ? 1000U : 10U;
+    for (std::size_t index = 0; index < warmup; ++index) {
+        (void)client.request("echo", request_body);
     }
 
     std::atomic<std::size_t> ready{0};
@@ -89,10 +107,10 @@ int main(int argc, char** argv) {
             try {
                 for (std::size_t index = 0; index < worker_iterations; ++index) {
                     const auto request_started = Clock::now();
-                    const auto response = client.request("ping");
+                    const auto response = client.request("echo", request_body);
                     samples.push_back(
                         std::chrono::duration<double, std::micro>(Clock::now() - request_started).count());
-                    if (response.status != 200 || response.body != "pong") {
+                    if (response.status != 200 || response.body.size() != payload) {
                         failed.store(true, std::memory_order_relaxed);
                         return;
                     }

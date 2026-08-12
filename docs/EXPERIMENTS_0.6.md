@@ -1,8 +1,10 @@
 # 0.6 experimental probes
 
-These targets deliberately do not change the `easy_uds` public API or default
-epoll backend. They answer whether Linux/UDS capabilities are available before
-we consider a production design.
+The standalone probe targets do not change the default epoll backend. They
+answer whether Linux/UDS capabilities are available before we consider a
+production design. The separately documented `request_fd()` API is an
+experimental protocol-v2 feature; the probes themselves are not required by
+the library's normal build.
 
 Build them with:
 
@@ -29,9 +31,15 @@ complete io_uring implementation demonstrates a measurable benefit.
 justify padding production state unless the target workload reproduces the gap.
 
 `easy_uds_zero_copy_probe` compares file-backed `sendfile()` and `splice()` with
-a read/write copy over a Unix socketpair. This is a transport experiment only; the existing
-callback-based `StreamReader` contract remains unchanged. A production file-source
-API would need separate framing, size limits, deadlines, and fallback behavior.
+a read/write copy over a Unix socketpair. It runs two passes: `raw` and
+`framed` (20-byte header + 64 KiB payload per frame, mirroring the real wire
+protocol). Caution: this probe's baseline is a plain `read`+`write()` copy
+(~2.6–3 GiB/s on the dev host), not the library's gathered `sendmsg` path. An
+in-library `sendfile` file-stream measured through the real non-blocking stream
+path was a 4–7x regression against the callback path and the 0.6.4 file-source
+API was **rejected**; zero-copy is deferred to the io_uring backend
+(`IORING_OP_SENDFILE`). See `PERF_0.6.md`. The probe remains a documentation of
+the naive transport result.
 
 ## ARM64 validation
 

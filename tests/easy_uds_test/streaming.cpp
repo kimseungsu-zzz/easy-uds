@@ -257,4 +257,81 @@ void test_stream_timeout_is_independent() {
     cleanup_socket_artifacts(path);
 }
 
+// Back-to-back one-shot streams must not be spuriously rejected as "excess
+// streams" while the previous exchange still performs its reactor bookkeeping.
+// Regression for the stream-slot early-release fix: the slot is released as
+// soon as the response is written, before the connection rearm.
+void test_back_to_back_streams() {
+    using namespace easy_uds;
+
+    constexpr std::size_t exchanges = 300;
+    constexpr std::size_t body_size = 4096;
+    const std::string path = socket_path("stream-back-to-back");
+
+    ServerOptions server_options;
+    server_options.worker_threads = 2;
+    server_options.max_connections = 16;
+    server_options.stream_chunk_size = 4093;
+    server_options.max_stream_size = 8U * 1024U * 1024U;
+    server_options.io_timeout = 2s;
+    server_options.request_timeout = 5s;
+    server_options.stale_socket_grace_period = 0ms;
+    Server server(path, server_options);
+    server.on_stream("data", [](const StreamReader&, const Request&) -> StreamResponse {
+        return StreamResponse{200, [offset = std::size_t{0}, remaining = body_size](char* buffer,
+                                                                                    std::size_t capacity) mutable {
+                                    const std::size_t take = std::min(capacity, remaining);
+                                    if (take == 0) {
+                                        return std::size_t{0};
+                                    }
+                                    for (std::size_t index = 0; index < take; ++index) {
+                                        buffer[index] =
+                                            static_cast<char>(pattern_byte(offset + index));
+                                    }
+                                    offset += take;
+                                    remaining -= take;
+                                    return take;
+                                }};
+    });
+
+    std::thread server_thread([&] { server.run(); });
+    wait_until_running(server);
+
+    ClientOptions client_options;
+    client_options.stream_chunk_size = 8191;
+    client_options.max_stream_size = 8U * 1024U * 1024U;
+    client_options.connect_timeout = 500ms;
+    client_options.io_timeout = 2s;
+    client_options.request_timeout = 5s;
+    Client client(path, client_options);
+
+    // A failing expectation must stop and join the server first, or the
+    // joinable thread destructor would std::terminate before the message is
+    // reported; the wrapper keeps failures diagnosable.
+    try {
+        for (std::size_t iteration = 0; iteration < exchanges; ++iteration) {
+            std::size_t received = 0;
+            bool bytes_match = true;
+            const Status status = client.request_stream("data", {}, [&](std::string_view chunk) {
+                for (const char byte : chunk) {
+                    if (static_cast<unsigned char>(byte) != pattern_byte(received)) {
+                        bytes_match = false;
+                    }
+                    ++received;
+                }
+            });
+            expect(status == 200 && received == body_size && bytes_match,
+                   "back-to-back stream should not be spuriously rejected");
+        }
+        server.stop();
+        server_thread.join();
+        cleanup_socket_artifacts(path);
+    } catch (...) {
+        server.stop();
+        server_thread.join();
+        cleanup_socket_artifacts(path);
+        throw;
+    }
+}
+
 } // namespace easy_uds::test

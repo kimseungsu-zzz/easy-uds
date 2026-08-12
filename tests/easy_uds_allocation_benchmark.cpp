@@ -1,9 +1,11 @@
 #include "easy_uds/easy_uds.hpp"
 
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <cstddef>
 #include <cstdlib>
+#include <cstring>
 #include <exception>
 #include <iostream>
 #include <new>
@@ -40,8 +42,13 @@ void operator delete[](void* pointer, std::size_t) noexcept { std::free(pointer)
 int main(int argc, char** argv) {
     const std::size_t iterations =
         argc > 1 ? static_cast<std::size_t>(std::strtoull(argv[1], nullptr, 10)) : 20000U;
-    if (iterations == 0 || argc > 2) {
-        std::cerr << "usage: easy_uds_allocation_benchmark [iterations]\n";
+    const std::string mode = argc > 2 ? argv[2] : "";
+    const std::size_t payload_bytes =
+        argc > 3 ? static_cast<std::size_t>(std::strtoull(argv[3], nullptr, 10)) : 1024U * 1024U;
+    const bool stream_mode = mode == "stream";
+    const bool serialized_mode = mode == "serialized";
+    if (iterations == 0 || (!mode.empty() && !stream_mode && !serialized_mode) || argc > 4) {
+        std::cerr << "usage: easy_uds_allocation_benchmark [iterations] [stream|serialized] [payload_bytes]\n";
         return 2;
     }
 
@@ -53,6 +60,15 @@ int main(int argc, char** argv) {
     const std::array<char, 256> handler_state{};
     server.on("ping", [handler_state](const easy_uds::Request&) {
         return easy_uds::Response{handler_state[0] == 0 ? 200 : 500, "pong"};
+    });
+    server.on_serialized("serial", [](const easy_uds::Request&) {
+        return easy_uds::Response{200, "ok"};
+    });
+    server.on_stream("upload", [](const easy_uds::StreamReader& body, const easy_uds::Request&) {
+        std::array<char, 64U * 1024U> buffer{};
+        while (body(buffer.data(), buffer.size())) {
+        }
+        return easy_uds::StreamResponse{200, {}};
     });
 
     std::exception_ptr server_error;
@@ -67,19 +83,62 @@ int main(int argc, char** argv) {
         std::this_thread::yield();
     }
 
-    easy_uds::Session session = easy_uds::Client(path).session();
-    for (std::size_t index = 0; index < 1000; ++index) {
-        (void)session.request("ping");
+    easy_uds::Client client(path);
+    easy_uds::Session session = client.session();
+    const std::string request_body(payload_bytes, 'x');
+
+    // Warm allocator bins, route lookup, and server state so the counted
+    // region measures only steady-state allocation.
+    if (stream_mode) {
+        for (std::size_t index = 0; index < 10; ++index) {
+            std::size_t offset = 0;
+            easy_uds::StreamReader upload =
+                [&request_body, &offset](char* buffer, std::size_t capacity) -> std::size_t {
+                const std::size_t take = std::min(capacity, request_body.size() - offset);
+                if (take != 0) {
+                    std::memcpy(buffer, request_body.data() + offset, take);
+                    offset += take;
+                }
+                return take;
+            };
+            (void)client.request_stream("upload", upload, [](std::string_view) {});
+        }
+    } else {
+        const std::string route = serialized_mode ? "serial" : "ping";
+        for (std::size_t index = 0; index < 2000; ++index) {
+            (void)session.request(route);
+        }
     }
 
     allocation_count.store(0, std::memory_order_relaxed);
     track_allocations.store(true, std::memory_order_relaxed);
     bool response_mismatch = false;
-    for (std::size_t index = 0; index < iterations; ++index) {
-        const auto response = session.request("ping");
-        if (response.status != 200 || response.body != "pong") {
-            response_mismatch = true;
-            break;
+    if (stream_mode) {
+        for (std::size_t index = 0; index < iterations; ++index) {
+            std::size_t offset = 0;
+            easy_uds::StreamReader upload =
+                [&request_body, &offset](char* buffer, std::size_t capacity) -> std::size_t {
+                const std::size_t take = std::min(capacity, request_body.size() - offset);
+                if (take != 0) {
+                    std::memcpy(buffer, request_body.data() + offset, take);
+                    offset += take;
+                }
+                return take;
+            };
+            const int status = client.request_stream("upload", upload, [](std::string_view) {});
+            if (status != 200) {
+                response_mismatch = true;
+                break;
+            }
+        }
+    } else {
+        const std::string route = serialized_mode ? "serial" : "ping";
+        for (std::size_t index = 0; index < iterations; ++index) {
+            const auto response = session.request(route);
+            if (response.status != 200) {
+                response_mismatch = true;
+                break;
+            }
         }
     }
     track_allocations.store(false, std::memory_order_relaxed);
@@ -95,7 +154,17 @@ int main(int argc, char** argv) {
     }
 
     const std::size_t allocations = allocation_count.load(std::memory_order_relaxed);
-    std::cout << "requests=" << iterations << ", ordinary_heap_allocations=" << allocations
-              << ", allocations_per_request="
-              << static_cast<double>(allocations) / static_cast<double>(iterations) << '\n';
+    const double per_exchange = static_cast<double>(allocations) / static_cast<double>(iterations);
+    std::cout << "mode=" << (stream_mode ? "stream" : serialized_mode ? "serialized" : "session") << ", ";
+    if (stream_mode) {
+        const double exchange_mib = static_cast<double>(payload_bytes) / (1024.0 * 1024.0);
+        std::cout << "exchanges=" << iterations << ", payload=" << payload_bytes
+                  << ", allocations=" << allocations
+                  << ", allocations_per_exchange=" << per_exchange
+                  << ", allocations_per_MiB="
+                  << allocations / (static_cast<double>(iterations) * exchange_mib) << '\n';
+    } else {
+        std::cout << "requests=" << iterations << ", allocations=" << allocations
+                  << ", allocations_per_request=" << per_exchange << '\n';
+    }
 }

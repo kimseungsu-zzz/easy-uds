@@ -28,7 +28,7 @@ reactor, worker, multiplexing, backpressure, streaming, lifetime을 실제로
   - [x] one-shot/session/stream benchmark 고정 workload
   - [x] p50/p95/p99, throughput, CPU, context switch 기록 (`getrusage`)
   - [x] syscall/request, allocation/request 기록
-  - [ ] spin 0/10/25/50/100µs 비교 (build-time knob 추가)
+  - [x] spin 0/10/25/50/100µs 비교 (WSL 기준선, 기본값 100µs 유지)
 - [ ] ARM64 smoke/stress 검증
   - [ ] 1KiB/64KiB/1MiB RPC
   - [ ] stream과 session concurrency

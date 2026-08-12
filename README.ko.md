@@ -549,6 +549,7 @@ cmake/                  설치용 CMake config
 docs/                   protocol 문서
 docs/ROADMAP_0.6.md     0.6.x 기술 실험 및 릴리즈 경계
 docs/EXPERIMENTS_0.6.md  독립 UDS 기술 capability probe
+docs/PERF_0.6.md         0.6 benchmark 측정 결과와 해석
 .github/workflows/      GitHub Actions CI
 ```
 

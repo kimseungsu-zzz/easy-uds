@@ -484,6 +484,7 @@ cmake/                  Installed-package CMake config
 docs/                   Protocol documentation
 docs/ROADMAP_0.6.md     0.6.x technical experiment and release boundaries
 docs/EXPERIMENTS_0.6.md  Standalone UDS capability probes
+docs/PERF_0.6.md         0.6 benchmark measurements and interpretation
 .github/workflows/      GitHub Actions CI
 ```
 

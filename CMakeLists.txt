@@ -20,6 +20,11 @@ option(EASY_UDS_BUILD_TESTS "Build easy-uds tests" ${EASY_UDS_TOP_LEVEL})
 option(EASY_UDS_WARNINGS_AS_ERRORS "Treat easy-uds compiler warnings as errors" OFF)
 option(EASY_UDS_BUILD_FUZZERS "Build libFuzzer protocol targets (Clang only)" OFF)
 option(EASY_UDS_BUILD_BENCHMARKS "Build RPC, allocation, and streaming benchmarks" OFF)
+set(EASY_UDS_SESSION_SPIN_US "100" CACHE STRING
+    "Build-time Session response spin window in microseconds (0 disables spinning)")
+if(NOT EASY_UDS_SESSION_SPIN_US MATCHES "^[0-9]+$")
+    message(FATAL_ERROR "EASY_UDS_SESSION_SPIN_US must be a non-negative integer")
+endif()
 
 find_package(Threads REQUIRED)
 
@@ -64,6 +69,9 @@ target_include_directories(easy_uds
         $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
 )
 target_link_libraries(easy_uds PUBLIC Threads::Threads)
+target_compile_definitions(easy_uds PRIVATE
+    EASY_UDS_SESSION_SPIN_US=${EASY_UDS_SESSION_SPIN_US}
+)
 
 target_compile_options(easy_uds PRIVATE
     $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Wall;-Wextra;-Wpedantic>

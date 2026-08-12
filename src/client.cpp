@@ -23,6 +23,13 @@ using namespace detail;
 using protocol::HeaderBytes;
 using protocol::WireType;
 
+#ifndef EASY_UDS_SESSION_SPIN_US
+#define EASY_UDS_SESSION_SPIN_US 100
+#endif
+
+static_assert(EASY_UDS_SESSION_SPIN_US >= 0, "session spin duration must not be negative");
+constexpr auto session_spin_duration = std::chrono::microseconds{EASY_UDS_SESSION_SPIN_US};
+
 void validate_request_lengths(std::string_view route, std::string_view body, std::size_t max_message_size) {
     protocol::validate_request_lengths(route.size(), body.size(), max_message_size);
 }
@@ -388,7 +395,7 @@ Response Session::request(std::string_view route, std::string_view body) {
     // The reader publishes the response before setting `done`; a short bounded
     // spin on the atomic flag avoids the futex wake round trip for responses
     // that land within tens of microseconds (the common high-frequency case).
-    const Deadline spin_deadline = Clock::now() + std::chrono::microseconds{100};
+    const Deadline spin_deadline = Clock::now() + session_spin_duration;
     while (!slot.done.load(std::memory_order_acquire) && Clock::now() < spin_deadline &&
            Clock::now() < deadline) {
         std::this_thread::yield();

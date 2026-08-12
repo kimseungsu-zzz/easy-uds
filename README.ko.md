@@ -427,6 +427,8 @@ cmake --build build-bench --parallel
 
 세션 벤치마크는 기본적으로 호출자마다 독립 세션을 사용합니다. 마지막 인수로 `shared`를 주면 하나의 세션에서 request-id 멀티플렉싱과 클라이언트 내부 경합을 측정합니다.
 
+session spin window는 latency 실험을 위한 build-time 조정값이며 기본값은 `100` microseconds입니다. `-DEASY_UDS_SESSION_SPIN_US=0`, `10`, `25`, `50`, `100`으로 benchmark 변형을 빌드해 p50/p95/p99, throughput, CPU, context switch를 비교합니다. 측정으로 안정적인 정책이 확인되기 전에는 public runtime 옵션으로 노출하지 않습니다.
+
 ## 예제 실행
 
 Server:

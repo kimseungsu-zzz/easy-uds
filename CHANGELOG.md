@@ -9,6 +9,9 @@ All notable changes to this project are documented here.
 - Global input budgets participate in reactor pause/resume watermarks; global
   output budgets are released on flush or connection cleanup.
 - Added validation and regression coverage for configured memory budgets.
+- Added a build-time `EASY_UDS_SESSION_SPIN_US` knob for controlled latency
+  experiments without expanding the public runtime API; the default remains
+  `100` microseconds.
 
 ## 0.6.1 — Reactor Hardening
 

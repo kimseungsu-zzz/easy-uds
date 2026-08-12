@@ -14,6 +14,7 @@ reactor, worker, multiplexing, backpressure, streaming, lifetime을 실제로
 - stalled peer 격리
 - session wakeup/in-flight/reactor state hot-path 최적화
 - reactor wakeup pipe를 단일 `eventfd` counter로 교체
+- worker wakeup 중복 write를 atomic coalescing
 - reactor와 unit test 모듈 분리
 
 ### 0.6.3 — Experimental Closure (진행 목표)

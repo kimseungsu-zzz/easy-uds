@@ -187,6 +187,10 @@ void run_reactor(const std::shared_ptr<ServerState>& state) {
             }
 
             if (token == wake_token) {
+                // Clear before draining: a concurrent producer that observes
+                // false will enqueue another eventfd count, while producers
+                // that observed true are covered by the count being drained.
+                state->wake_pending.store(false, std::memory_order_release);
                 std::uint64_t counter = 0;
                 while (::read(wake_read, &counter, sizeof(counter)) > 0) {
                 }

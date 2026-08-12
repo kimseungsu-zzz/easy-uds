@@ -142,6 +142,7 @@ struct ServerState {
     int listener_fd = -1;
     int wake_read_fd = -1;
     int wake_write_fd = -1;
+    std::atomic<bool> wake_pending{false};
     int instance_lock_fd = -1;
     int epoll_fd = -1;
     dev_t socket_device = 0;

@@ -45,6 +45,11 @@ inline void wake_reactor(const std::shared_ptr<ServerState>& state) noexcept {
     if (state->wake_write_fd < 0) {
         return;
     }
+    bool expected = false;
+    if (!state->wake_pending.compare_exchange_strong(expected, true, std::memory_order_acq_rel,
+                                                     std::memory_order_relaxed)) {
+        return;
+    }
     const std::uint64_t increment = 1;
     const ssize_t ignored = ::write(state->wake_write_fd, &increment, sizeof(increment));
     (void)ignored;

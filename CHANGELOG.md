@@ -20,6 +20,8 @@ All notable changes to this project are documented here.
   large frames without allowing unbounded parser buffering.
 - Reduced session spin-loop clock reads to one timestamp per iteration while
   preserving the same spin/deadline semantics.
+- Replaced scheduler-yield calls inside the bounded session spin window with
+  x86 `pause` / ARM `yield` CPU hints, retaining a portable fallback.
 - Added optional aggregate server budgets for queued fixed-request input and
   fixed-response output across all connections.
 - Global input budgets participate in reactor pause/resume watermarks; global

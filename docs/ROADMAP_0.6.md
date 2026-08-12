@@ -19,6 +19,7 @@ reactor, worker, multiplexing, backpressure, streaming, lifetime을 실제로
 - prefix route registry를 longest-first로 정렬해 dispatch 조기 종료
 - reactor bounded read-ahead batch로 대형 frame epoll 왕복 감소
 - session spin loop의 중복 clock read 제거
+- session spin window에서 architecture CPU hint 사용
 - reactor와 unit test 모듈 분리
 
 ### 0.6.3 — Experimental Closure (진행 목표)

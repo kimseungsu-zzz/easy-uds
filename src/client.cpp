@@ -23,6 +23,16 @@ using namespace detail;
 using protocol::HeaderBytes;
 using protocol::WireType;
 
+inline void session_spin_hint() noexcept {
+#if defined(__x86_64__) || defined(__i386__)
+    __builtin_ia32_pause();
+#elif defined(__aarch64__) || defined(__arm__)
+    __asm__ __volatile__("yield" ::: "memory");
+#else
+    std::this_thread::yield();
+#endif
+}
+
 #ifndef EASY_UDS_SESSION_SPIN_US
 #define EASY_UDS_SESSION_SPIN_US 100
 #endif
@@ -401,7 +411,7 @@ Response Session::request(std::string_view route, std::string_view body) {
         if (now >= spin_deadline || now >= deadline) {
             break;
         }
-        std::this_thread::yield();
+        session_spin_hint();
     }
 
     bool timed_out = false;

@@ -4,6 +4,8 @@ All notable changes to this project are documented here.
 
 ## Unreleased — 0.6.3 Experimental Closure
 
+- Configurable per-connection fixed-request count and byte high-water marks;
+  the defaults preserve the existing 64-request/4 MiB backpressure policy.
 - Added optional aggregate server budgets for queued fixed-request input and
   fixed-response output across all connections.
 - Global input budgets participate in reactor pause/resume watermarks; global

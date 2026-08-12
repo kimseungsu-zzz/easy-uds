@@ -262,6 +262,8 @@ options.max_concurrent_streams = 3;
 | `max_stream_size` | `1 GiB` | 한 request/response stream의 최대 총 byte 수. `0`은 제한 없음 |
 | `max_total_inflight_bytes` | `0` | 전체 connection의 fixed request payload 합산 예산. `0`은 전역 제한 없음 |
 | `max_total_output_bytes` | `0` | 전체 connection의 fixed response queue 합산 예산. `0`은 전역 제한 없음 |
+| `max_inflight_requests_per_connection` | `64` | connection별 queued/executing fixed request 개수 high-water mark |
+| `max_inflight_request_bytes_per_connection` | `4 MiB` | connection별 queued/executing route+body 바이트 high-water mark |
 | `io_timeout` | `5 s` | 성공적인 socket I/O 진행 사이의 최대 idle 시간 |
 | `request_timeout` | `30 s` | 일반 RPC의 첫 header byte부터 response 완료까지 absolute deadline. serialized queue 대기도 포함 |
 | `stream_timeout` | `0` | stream 전체 absolute deadline. `0`은 비활성 |
@@ -272,7 +274,7 @@ options.max_concurrent_streams = 3;
 | `listen_backlog` | `64` | `listen()` backlog |
 | `socket_permissions` | `0600` | Unix socket pathname 권한 |
 
-일반 RPC 입력은 connection마다 자동으로 제한되며, `max_total_inflight_bytes`로 서버 전체 예산도 제한할 수 있습니다. in-flight 요청 64개, queued request payload 최소 4 MiB, 또는 전역 예산의 고수위에 도달하면 해당 peer의 `EPOLLIN`만 일시 중지하고 저수위에서 다시 시작합니다. fixed response queue도 `max_total_output_bytes`로 전체 예산을 제한할 수 있습니다. 따라서 kernel이 받은 나머지 byte에는 Unix socket backpressure가 걸리며 worker queue가 무제한으로 커지지 않습니다.
+일반 RPC 입력은 connection마다 `max_inflight_requests_per_connection`과 `max_inflight_request_bytes_per_connection`으로 제한되며, `max_total_inflight_bytes`로 서버 전체 예산도 제한할 수 있습니다. 어느 high-water mark에 도달하면 해당 peer의 `EPOLLIN`만 일시 중지하고 저수위에서 다시 시작합니다. fixed response queue도 `max_total_output_bytes`로 전체 예산을 제한할 수 있습니다. 따라서 kernel이 받은 나머지 byte에는 Unix socket backpressure가 걸리며 worker queue가 무제한으로 커지지 않습니다.
 
 고정 응답은 worker가 non-blocking fast path로 한 번 전송한 뒤, 남은 byte만 connection별 `EPOLLOUT` 큐에 넘깁니다. 큐 상한은 4 MiB와 최대 응답 하나의 크기 중 큰 값이며, 이를 넘기는 peer만 닫습니다. 응답을 읽지 않는 client가 일반 worker pool을 점유하지 않습니다. Stream은 기존의 전용 worker lease와 `max_concurrent_streams` 제한을 사용합니다.
 

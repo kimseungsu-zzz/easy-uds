@@ -8,12 +8,8 @@
 namespace easy_uds::detail {
 namespace {
 
-constexpr std::size_t kMaxInflightRequests = 64;
-constexpr std::size_t kResumeInflightRequests = kMaxInflightRequests / 2;
-constexpr std::size_t kMinimumInflightBytes = 4U * 1024U * 1024U;
-
 std::size_t inflight_byte_limit(const std::shared_ptr<ServerState>& state) noexcept {
-    return std::max(kMinimumInflightBytes, state->options.max_message_size);
+    return state->options.max_inflight_request_bytes_per_connection;
 }
 
 bool below_resume_watermark(const std::shared_ptr<ServerState>& state,
@@ -22,7 +18,8 @@ bool below_resume_watermark(const std::shared_ptr<ServerState>& state,
         state->total_inflight_request_bytes.load(std::memory_order_acquire) <=
             state->options.max_total_inflight_bytes / 2;
     return global_below &&
-           connection->inflight_requests.load(std::memory_order_acquire) <= kResumeInflightRequests &&
+           connection->inflight_requests.load(std::memory_order_acquire) <=
+               state->options.max_inflight_requests_per_connection / 2 &&
            connection->inflight_request_bytes.load(std::memory_order_acquire) <=
                inflight_byte_limit(state) / 2;
 }
@@ -33,7 +30,8 @@ bool above_pause_watermark(const std::shared_ptr<ServerState>& state,
         state->total_inflight_request_bytes.load(std::memory_order_acquire) >=
             state->options.max_total_inflight_bytes;
     return global_above ||
-           connection->inflight_requests.load(std::memory_order_acquire) >= kMaxInflightRequests ||
+           connection->inflight_requests.load(std::memory_order_acquire) >=
+               state->options.max_inflight_requests_per_connection ||
            connection->inflight_request_bytes.load(std::memory_order_acquire) >= inflight_byte_limit(state);
 }
 

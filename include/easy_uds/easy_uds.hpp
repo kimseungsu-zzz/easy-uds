@@ -32,6 +32,8 @@ inline constexpr Status status_unavailable = 503;
 inline constexpr std::size_t default_max_message_size = 1024U * 1024U;
 inline constexpr std::size_t default_stream_chunk_size = 64U * 1024U;
 inline constexpr std::size_t default_max_stream_size = 1024U * 1024U * 1024U;
+inline constexpr std::size_t default_max_inflight_requests_per_connection = 64;
+inline constexpr std::size_t default_max_inflight_request_bytes_per_connection = 4U * 1024U * 1024U;
 
 // ---- Request / response ---------------------------------------------------
 // Peer identity of the connecting client, captured with SO_PEERCRED on Linux.
@@ -95,6 +97,15 @@ struct ServerOptions {
     // Aggregate queued fixed-response payload budget across all connections.
     // Zero disables the global limit; per-connection output limits remain.
     std::size_t max_total_output_bytes = 0;
+
+    // Maximum number of queued or executing fixed requests per connection.
+    // This is the primary per-peer memory/backpressure guard.
+    std::size_t max_inflight_requests_per_connection = default_max_inflight_requests_per_connection;
+
+    // Maximum aggregate route+body bytes retained for queued or executing
+    // fixed requests on one connection. Must fit at least one max_message.
+    std::size_t max_inflight_request_bytes_per_connection =
+        default_max_inflight_request_bytes_per_connection;
 
     // Maximum simultaneous streams. Zero means automatic: reserve one worker
     // for regular RPC (`worker_threads - 1`, at least 1). Explicit values must

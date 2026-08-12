@@ -22,6 +22,7 @@ reactor, worker, multiplexing, backpressure, streaming, lifetime을 실제로
 - [x] 서버 전체 메모리 예산
   - [x] `max_total_inflight_bytes` 내부 accounting
   - [x] `max_total_output_bytes` 내부 accounting
+  - [x] connection별 fixed request 개수/바이트 high-water mark를 옵션화
   - [x] connection별 intake 정지/재개 정책
   - [x] budget validation과 shutdown 회귀 테스트
 - [ ] 성능 계측 기준선

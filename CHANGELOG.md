@@ -14,6 +14,8 @@ All notable changes to this project are documented here.
   reducing duplicate eventfd writes during backpressure and output bursts.
 - Cached per-connection epoll interest masks so unchanged output/read state does
   not issue redundant `EPOLL_CTL_MOD` syscalls.
+- Prefix route registries are kept longest-first, allowing dispatch to stop at
+  the first matching prefix instead of scanning all longer candidates.
 - Added optional aggregate server budgets for queued fixed-request input and
   fixed-response output across all connections.
 - Global input budgets participate in reactor pause/resume watermarks; global

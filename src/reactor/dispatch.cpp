@@ -34,16 +34,11 @@ bool find_request_handler(const std::shared_ptr<ServerState>& state, const std::
         handler = it->second;
         return true;
     }
-    const std::pair<std::string, std::shared_ptr<const HandlerEntry>>* best = nullptr;
     for (const auto& entry : registry->handler_prefixes) {
-        if (route.size() >= entry.first.size() && route.compare(0, entry.first.size(), entry.first) == 0 &&
-            (best == nullptr || entry.first.size() > best->first.size())) {
-            best = &entry;
+        if (route.size() >= entry.first.size() && route.compare(0, entry.first.size(), entry.first) == 0) {
+            handler = entry.second;
+            return true;
         }
-    }
-    if (best != nullptr) {
-        handler = best->second;
-        return true;
     }
     return false;
 }
@@ -56,16 +51,11 @@ bool find_stream_handler(const std::shared_ptr<ServerState>& state, const std::s
         handler = it->second;
         return true;
     }
-    const std::pair<std::string, std::shared_ptr<const StreamHandlerEntry>>* best = nullptr;
     for (const auto& entry : registry->stream_prefixes) {
-        if (route.size() >= entry.first.size() && route.compare(0, entry.first.size(), entry.first) == 0 &&
-            (best == nullptr || entry.first.size() > best->first.size())) {
-            best = &entry;
+        if (route.size() >= entry.first.size() && route.compare(0, entry.first.size(), entry.first) == 0) {
+            handler = entry.second;
+            return true;
         }
-    }
-    if (best != nullptr) {
-        handler = best->second;
-        return true;
     }
     return false;
 }

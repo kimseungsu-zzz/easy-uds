@@ -382,6 +382,10 @@ void Server::on_prefix(std::string prefix, Handler handler) {
         registry.handler_prefixes.emplace_back(
             std::move(prefix),
             std::make_shared<const detail::HandlerEntry>(detail::HandlerEntry{std::move(handler), false}));
+        std::sort(registry.handler_prefixes.begin(), registry.handler_prefixes.end(),
+                  [](const auto& left, const auto& right) {
+                      return left.first.size() > right.first.size();
+                  });
     });
 }
 
@@ -429,6 +433,10 @@ void Server::on_stream_prefix(std::string prefix, StreamHandler handler) {
         registry.stream_prefixes.emplace_back(
             std::move(prefix),
             std::make_shared<const detail::StreamHandlerEntry>(detail::StreamHandlerEntry{std::move(handler)}));
+        std::sort(registry.stream_prefixes.begin(), registry.stream_prefixes.end(),
+                  [](const auto& left, const auto& right) {
+                      return left.first.size() > right.first.size();
+                  });
     });
 }
 

@@ -71,6 +71,11 @@ inline void validate_server_options(const easy_uds::ServerOptions& options) {
         throw std::invalid_argument(
             "max_inflight_request_bytes_per_connection must be at least max_message_size");
     }
+    if (options.max_message_size > std::numeric_limits<std::size_t>::max() - protocol::header_size ||
+        options.max_output_bytes_per_connection < options.max_message_size + protocol::header_size) {
+        throw std::invalid_argument(
+            "max_output_bytes_per_connection must fit one maximum response frame");
+    }
     if (options.max_total_inflight_bytes != 0 &&
         options.max_total_inflight_bytes < options.max_message_size) {
         throw std::invalid_argument("max_total_inflight_bytes must be zero or at least max_message_size");

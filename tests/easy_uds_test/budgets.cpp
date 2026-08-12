@@ -29,6 +29,12 @@ void test_global_memory_budgets() {
         [&] { Server server(socket_path("bad-inflight-bytes"), invalid); },
         "per-connection in-flight byte budget must fit one message");
 
+    invalid = {};
+    invalid.max_output_bytes_per_connection = invalid.max_message_size;
+    expect_throws<std::invalid_argument>(
+        [&] { Server server(socket_path("bad-output-bytes"), invalid); },
+        "per-connection output budget must fit one response frame");
+
     const std::string path = socket_path("global-budget");
     ServerOptions options;
     options.worker_threads = 2;

@@ -15,7 +15,6 @@
 namespace easy_uds::detail {
 namespace {
 
-constexpr std::size_t kMinimumOutputQueueLimit = 4U * 1024U * 1024U;
 constexpr std::size_t kMaxFlushBytes = 256U * 1024U;
 
 std::uint64_t connection_token(int fd, std::uint32_t generation) noexcept {
@@ -38,12 +37,7 @@ void wake_reactor(const std::shared_ptr<ServerState>& state) noexcept {
 }
 
 std::size_t output_queue_limit(const std::shared_ptr<ServerState>& state) noexcept {
-    constexpr std::size_t header_size = protocol::header_size;
-    const std::size_t one_max_response =
-        state->options.max_message_size > std::numeric_limits<std::size_t>::max() - header_size
-            ? std::numeric_limits<std::size_t>::max()
-            : state->options.max_message_size + header_size;
-    return std::max(kMinimumOutputQueueLimit, one_max_response);
+    return state->options.max_output_bytes_per_connection;
 }
 
 bool reserve_global_output(const std::shared_ptr<ServerState>& state, std::size_t bytes) noexcept {

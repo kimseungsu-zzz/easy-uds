@@ -955,6 +955,32 @@ void test_session_broken_after_timeout() {
     cleanup_socket_artifacts(path);
 }
 
+void test_idle_session_survives_io_timeout() {
+    using namespace easy_uds;
+
+    const std::string path = socket_path("session-idle");
+    ServerOptions server_options;
+    server_options.worker_threads = 2;
+    server_options.io_timeout = 0ms;
+    Server server(path, server_options);
+    server.on("ping", [](const Request&) { return Response{200, "pong"}; });
+
+    std::thread server_thread([&] { server.run(); });
+    wait_until_running(server);
+
+    ClientOptions client_options;
+    client_options.io_timeout = 50ms;
+    client_options.request_timeout = 1s;
+    Session session = Client(path, client_options).session();
+    expect(session.request("ping").body == "pong", "session works before idle period");
+    std::this_thread::sleep_for(150ms);
+    expect(session.request("ping").body == "pong", "idle session must outlive client io_timeout");
+
+    server.stop();
+    server_thread.join();
+    cleanup_socket_artifacts(path);
+}
+
 void test_session_move() {
     using namespace easy_uds;
 
@@ -1908,6 +1934,7 @@ int main() {
         RUN(test_client_rejects_mismatched_response_ids);
         RUN(test_session_broken_after_shutdown);
         RUN(test_session_broken_after_timeout);
+        RUN(test_idle_session_survives_io_timeout);
         RUN(test_session_move);
         RUN(test_reactor_request_timeouts);
         RUN(test_streams);

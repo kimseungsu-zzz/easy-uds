@@ -254,6 +254,15 @@ void session_reader_loop(detail::SessionState* state) {
         BufferedReader reader(state->fd.get());
         while (!state->reader_stop.load(std::memory_order_relaxed)) {
             HeaderBytes header{};
+            // An idle persistent session is not an I/O operation in progress.
+            // Wait indefinitely for the first response byte; once the socket
+            // becomes readable, BufferedReader applies io_timeout to a partial
+            // header and the payload. Pending requests retain their independent
+            // absolute request_timeout and shut this socket down on expiry.
+            if (!reader.buffered()) {
+                wait_for_io(state->fd.get(), POLLIN, std::chrono::milliseconds{0}, Deadline::max(),
+                            "receive timed out");
+            }
             reader.read(header.data(), header.size(), state->options.io_timeout, Deadline::max());
             const auto decoded = protocol::decode_header(header, WireType::response);
             if (decoded.arg1 > static_cast<std::uint32_t>(INT32_MAX)) {

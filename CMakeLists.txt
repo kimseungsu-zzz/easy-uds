@@ -174,7 +174,8 @@ if(EASY_UDS_BUILD_EXPERIMENTS)
     add_executable(easy_uds_fd_passing_probe tests/easy_uds_fd_passing_probe.cpp)
     add_executable(easy_uds_io_uring_probe tests/easy_uds_io_uring_probe.cpp)
     add_executable(easy_uds_false_sharing_probe tests/easy_uds_false_sharing_probe.cpp)
-    foreach(experiment_target easy_uds_fd_passing_probe easy_uds_io_uring_probe easy_uds_false_sharing_probe)
+    add_executable(easy_uds_zero_copy_probe tests/easy_uds_zero_copy_probe.cpp)
+    foreach(experiment_target easy_uds_fd_passing_probe easy_uds_io_uring_probe easy_uds_false_sharing_probe easy_uds_zero_copy_probe)
         target_compile_features(${experiment_target} PRIVATE cxx_std_17)
         target_compile_options(${experiment_target} PRIVATE
             $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Wall;-Wextra;-Wpedantic>

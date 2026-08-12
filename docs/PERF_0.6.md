@@ -27,3 +27,7 @@ request in the current session fast path (5,000 requests). The standalone
 false-sharing probe measured `5.31x` speedup from 64-byte padding on this WSL2
 host (20 million relaxed increments per counter). That result is diagnostic only;
 production state will be padded only after a workload-specific measurement.
+
+The file-backed zero-copy probe measured `sendfile()` at `1.02x` the speed of a
+read/write copy for an 8 MiB payload over a Unix socketpair on this WSL2 host.
+That marginal result does not justify adding a file-source public API in 0.6.x.

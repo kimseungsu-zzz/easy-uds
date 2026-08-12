@@ -15,6 +15,7 @@ cmake --build build-experiments --parallel
 ./build-experiments/easy_uds_fd_passing_probe
 ./build-experiments/easy_uds_io_uring_probe
 ./build-experiments/easy_uds_false_sharing_probe 100000000
+./build-experiments/easy_uds_zero_copy_probe 16777216
 ```
 
 `easy_uds_fd_passing_probe` transfers a `memfd_create()` descriptor with
@@ -27,10 +28,10 @@ complete io_uring implementation demonstrates a measurable benefit.
 64-byte-aligned atomics. It is a hardware-sensitive diagnostic; it does not
 justify padding production state unless the target workload reproduces the gap.
 
-File-backed zero-copy (`sendfile`/`splice`) remains unimplemented because the
-current callback-based `StreamReader` contract does not expose a file descriptor.
-It should be evaluated as a separate file-source API experiment, not by changing
-the existing stream callback semantics.
+`easy_uds_zero_copy_probe` compares file-backed `sendfile()` with a read/write
+copy over a Unix socketpair. This is a transport experiment only; the existing
+callback-based `StreamReader` contract remains unchanged. A production file-source
+API would need separate framing, size limits, deadlines, and fallback behavior.
 
 ## ARM64 validation
 

@@ -36,8 +36,13 @@ API would need separate framing, size limits, deadlines, and fallback behavior.
 ## ARM64 validation
 
 The repository has no hosted ARM64 runner configured. On an ARM64 SBC or
-self-hosted runner, run the normal release build plus the stress target at
+self-hosted runner, run `scripts/arm64_smoke.sh` for the normal release build,
+unit tests, and stress target, then extend the run at
 1 KiB, 64 KiB, and 1 MiB payloads with connection counts 1/8/32/64, then repeat
 the session and streaming benchmarks. Record p50/p95/p99, throughput, CPU,
 context switches, and a shutdown/timeout soak before marking the ARM64 roadmap
 items complete.
+
+The script exits with status 2 on non-ARM64 hosts so an x86 build cannot be
+mistaken for ARM coverage. Set `EASY_UDS_ALLOW_NON_ARM64=1` only for a local
+dry build check.

@@ -1669,6 +1669,56 @@ void test_concurrent_clients() {
     cleanup_socket_artifacts(path);
 }
 
+void test_concurrent_handler_registration() {
+    using namespace easy_uds;
+
+    const std::string path = socket_path("handler-cow");
+    ServerOptions options;
+    options.worker_threads = 4;
+    options.max_connections = 64;
+    options.io_timeout = 2s;
+    Server server(path, options);
+    server.on("stable", [](const Request& request) { return Response{200, request.body}; });
+
+    std::thread server_thread([&] { server.run(); });
+    wait_until_running(server);
+
+    Client client(path);
+    std::atomic<bool> failed{false};
+    std::vector<std::thread> callers;
+    for (std::size_t caller_index = 0; caller_index < 4; ++caller_index) {
+        callers.emplace_back([&, caller_index] {
+            try {
+                for (std::size_t request_index = 0; request_index < 100; ++request_index) {
+                    const std::string body = std::to_string(caller_index) + ":" + std::to_string(request_index);
+                    const Response response = client.request("stable", body);
+                    if (response.status != 200 || response.body != body) {
+                        failed.store(true, std::memory_order_release);
+                        return;
+                    }
+                }
+            } catch (...) {
+                failed.store(true, std::memory_order_release);
+            }
+        });
+    }
+    for (std::size_t route_index = 0; route_index < 32; ++route_index) {
+        server.on("dynamic/" + std::to_string(route_index), [route_index](const Request&) {
+            return Response{200, std::to_string(route_index)};
+        });
+    }
+    for (auto& caller : callers) {
+        caller.join();
+    }
+    const Response dynamic = client.request("dynamic/31");
+
+    server.stop();
+    server_thread.join();
+    cleanup_socket_artifacts(path);
+    expect(!failed.load(std::memory_order_acquire), "existing handlers must survive concurrent COW registration");
+    expect(dynamic.status == 200 && dynamic.body == "31", "new handler snapshot must become visible atomically");
+}
+
 void test_stalled_response_does_not_block_workers() {
     using namespace easy_uds;
 
@@ -2213,6 +2263,7 @@ int main() {
         RUN(test_server_request_timeout_response);
         RUN(test_connection_limit);
         RUN(test_concurrent_clients);
+        RUN(test_concurrent_handler_registration);
         RUN(test_stalled_response_does_not_block_workers);
         RUN(test_fixed_output_queue_is_bounded);
         RUN(test_pipelined_input_applies_backpressure);

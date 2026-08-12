@@ -1,5 +1,6 @@
 #include "easy_uds/easy_uds.hpp"
 
+#include <array>
 #include <atomic>
 #include <cstddef>
 #include <cstdlib>
@@ -49,7 +50,10 @@ int main(int argc, char** argv) {
     easy_uds::ServerOptions options;
     options.worker_threads = 1;
     easy_uds::Server server(path, options);
-    server.on("ping", [](const easy_uds::Request&) { return easy_uds::Response{200, "pong"}; });
+    const std::array<char, 256> handler_state{};
+    server.on("ping", [handler_state](const easy_uds::Request&) {
+        return easy_uds::Response{handler_state[0] == 0 ? 200 : 500, "pong"};
+    });
 
     std::exception_ptr server_error;
     std::thread server_thread([&] {

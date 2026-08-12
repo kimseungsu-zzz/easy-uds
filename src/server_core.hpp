@@ -29,6 +29,13 @@ struct StreamHandlerEntry {
     easy_uds::Server::StreamHandler handler;
 };
 
+struct HandlerRegistry {
+    std::unordered_map<std::string, std::shared_ptr<const HandlerEntry>> handlers;
+    std::vector<std::pair<std::string, std::shared_ptr<const HandlerEntry>>> handler_prefixes;
+    std::unordered_map<std::string, std::shared_ptr<const StreamHandlerEntry>> stream_handlers;
+    std::vector<std::pair<std::string, std::shared_ptr<const StreamHandlerEntry>>> stream_prefixes;
+};
+
 struct OutgoingFrame {
     protocol::HeaderBytes header{};
     std::string body;
@@ -101,7 +108,7 @@ struct PendingJob {
     std::shared_ptr<Connection> connection;
     easy_uds::Request request;
     Deadline deadline = Deadline::max();
-    easy_uds::Server::Handler handler;
+    std::shared_ptr<const HandlerEntry> handler;
     bool is_stream = false;
     std::size_t request_bytes = 0;
     // For stream jobs: bytes already read from the socket before the lease
@@ -114,7 +121,7 @@ struct SerializedJob {
     std::shared_ptr<Connection> connection;  // null for maintenance jobs
     easy_uds::Request request;
     Deadline deadline = Deadline::max();
-    easy_uds::Server::Handler handler;
+    std::shared_ptr<const HandlerEntry> handler;
     std::function<void()> maintenance;
     std::size_t request_bytes = 0;
 };
@@ -142,11 +149,12 @@ struct ServerState {
     bool run_started = false;
     bool run_active = false;
 
-    std::mutex handlers_mutex;
-    std::unordered_map<std::string, HandlerEntry> handlers;
-    std::vector<std::pair<std::string, HandlerEntry>> handler_prefixes;
-    std::unordered_map<std::string, StreamHandlerEntry> stream_handlers;
-    std::vector<std::pair<std::string, StreamHandlerEntry>> stream_prefixes;
+    // Registrations are cold-path copy-on-write updates. Request dispatch
+    // atomically loads one immutable snapshot and passes shared entries to
+    // workers without a global read lock or std::function copy.
+    std::mutex handler_registration_mutex;
+    std::shared_ptr<const HandlerRegistry> handler_registry = std::make_shared<const HandlerRegistry>();
+    std::shared_ptr<const HandlerEntry> not_found_handler;
 
     std::mutex work_mutex;
     std::condition_variable work_cv;
@@ -177,10 +185,10 @@ struct ServerState {
 // Exact match wins; otherwise the longest registered prefix. `serialized`
 // reports the executor class of the matched route.
 bool find_request_handler(const std::shared_ptr<ServerState>& state, const std::string& route,
-                          easy_uds::Server::Handler& handler, bool& serialized);
+                          std::shared_ptr<const HandlerEntry>& handler);
 
 bool find_stream_handler(const std::shared_ptr<ServerState>& state, const std::string& route,
-                         easy_uds::Server::StreamHandler& handler);
+                         std::shared_ptr<const StreamHandlerEntry>& handler);
 
 // Runs the reactor loop (accept, frame parsing, dispatch) until stopped.
 void run_reactor(const std::shared_ptr<ServerState>& state);
@@ -236,7 +244,7 @@ bool pause_connection_reads_if_needed(const std::shared_ptr<ServerState>& state,
 
 // Enqueues a parsed request for the regular worker pool.
 bool enqueue_worker_job(const std::shared_ptr<ServerState>& state, std::shared_ptr<Connection> connection,
-                        easy_uds::Request request, Deadline deadline, easy_uds::Server::Handler handler,
+                        easy_uds::Request request, Deadline deadline, std::shared_ptr<const HandlerEntry> handler,
                         bool is_stream, std::string buffered, std::size_t buffered_offset);
 
 // Removes and shuts down a connection; the fd closes when the last worker/

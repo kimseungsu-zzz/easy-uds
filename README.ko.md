@@ -12,6 +12,7 @@
 
 - C++17, 런타임 서드파티 의존성 없음
 - route 기반 request/response RPC
+- handler table copy-on-write snapshot(요청 dispatch 시 전역 table lock·`std::function` 복사 없음)
 - request/response body에 NUL, 개행 등을 포함한 임의 바이너리 데이터 사용 가능
 - `on_serialized()`를 이용한 전역 FIFO 직렬 명령 큐
 - 직렬 명령 대기 중에도 일반 `on()` RPC worker는 점유하지 않음
@@ -318,7 +319,7 @@ socket timeout은 `std::system_error`로 전달되며 timeout의 error code는 `
 
 `Server::run()`은 epoll reactor와 고정 worker pool을 시작한 뒤 종료될 때까지 block됩니다. serialized executor thread는 처음 필요할 때 지연 시작됩니다. 하나의 `Server` 객체에서 `run()`은 한 번만 호출할 수 있습니다.
 
-일반 `on()` handler는 여러 worker thread에서 동시에 실행될 수 있습니다. 공유 mutable state가 있다면 애플리케이션이 직접 동기화해야 합니다.
+일반 `on()` handler는 여러 worker thread에서 동시에 실행될 수 있습니다. 동일하게 등록된 함수 객체가 여러 worker에서 동시에 호출될 수 있으므로 mutable capture와 공유 state는 애플리케이션이 직접 동기화해야 합니다. Handler table 갱신은 copy-on-write이며 진행 중인 요청을 무효화하지 않고 원자적으로 공개됩니다.
 
 `on_serialized()` handler는 모든 serialized route가 하나의 executor를 공유하므로 한 번에 정확히 하나만 실행됩니다. reactor가 serialized request의 header/body를 읽어 전용 queue로 넘기므로 일반 worker pool을 점유하지 않습니다.
 

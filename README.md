@@ -13,6 +13,7 @@
 - Multiplexed persistent sessions: concurrent `request()` calls on one connection, correlated by request id and answered in any order
 - Peer credentials (`pid`/`uid`/`gid`) via Linux `SO_PEERCRED`
 - Exact and longest-prefix route registration (`on()` / `on_prefix()`)
+- Copy-on-write immutable handler snapshots: request dispatch takes no global handler-table mutex and does not copy `std::function`
 - FIFO serialized request handlers for exclusive hardware/resources, without occupying the normal worker pool while waiting
 - Incremental, constant-memory upload/download streams with configurable chunk sizes and total limits
 - `Server::enqueue_maintenance()` for safe server-side state cleanup from external threads
@@ -251,7 +252,7 @@ During shutdown:
 
 The listener is not closed by another thread while the reactor may still be polling it, eliminating descriptor-number reuse races in the accept loop.
 
-Handlers registered with `on()` run concurrently on worker threads. If they share mutable state, that state must provide its own synchronization. Handlers registered with `on_serialized()` instead share one dedicated FIFO executor across all serialized routes; queued serialized requests therefore do not occupy regular workers, allowing routes such as health/status RPCs to remain responsive while a hardware command is in progress.
+Handlers registered with `on()` run concurrently on worker threads. The same registered function object may be invoked by several workers at once, so mutable captures and other shared state must provide their own synchronization. Handler-table updates are copy-on-write and become visible atomically without invalidating in-flight requests. Handlers registered with `on_serialized()` instead share one dedicated FIFO executor across all serialized routes; queued serialized requests therefore do not occupy regular workers, allowing routes such as health/status RPCs to remain responsive while a hardware command is in progress.
 
 ## Wire protocol
 

@@ -264,6 +264,16 @@ void validate_route(std::string_view route, std::size_t max_message_size) {
     }
 }
 
+template <typename Mutation>
+void update_handler_registry(const std::shared_ptr<detail::ServerState>& state, Mutation&& mutation) {
+    std::lock_guard<std::mutex> lock(state->handler_registration_mutex);
+    const auto current = std::atomic_load_explicit(&state->handler_registry, std::memory_order_acquire);
+    auto updated = std::make_shared<detail::HandlerRegistry>(*current);
+    mutation(*updated);
+    std::shared_ptr<const detail::HandlerRegistry> published = std::move(updated);
+    std::atomic_store_explicit(&state->handler_registry, std::move(published), std::memory_order_release);
+}
+
 } // namespace
 
 Server::Server(std::string socket_path, ServerOptions options) : state_(std::make_shared<detail::ServerState>()) {
@@ -272,6 +282,11 @@ Server::Server(std::string socket_path, ServerOptions options) : state_(std::mak
 
     state_->socket_path = std::move(socket_path);
     state_->options = options;
+    state_->not_found_handler = std::make_shared<const detail::HandlerEntry>(detail::HandlerEntry{
+        [max_message_size = options.max_message_size](const Request&) {
+            return Response{404, max_message_size >= std::string_view{"Not Found"}.size() ? "Not Found" : ""};
+        },
+        false});
     state_->max_concurrent_streams = options.max_concurrent_streams == 0
                                          ? std::max<std::size_t>(1, options.worker_threads - 1)
                                          : options.max_concurrent_streams;
@@ -345,10 +360,14 @@ void Server::on(std::string route, Handler handler) {
     if (!handler) {
         throw std::invalid_argument("handler must not be empty");
     }
-    std::lock_guard<std::mutex> lock(state_->handlers_mutex);
-    if (!state_->handlers.emplace(std::move(route), detail::HandlerEntry{std::move(handler), false}).second) {
-        throw std::runtime_error("route already exists");
-    }
+    update_handler_registry(state_, [&](detail::HandlerRegistry& registry) {
+        if (registry.handlers.find(route) != registry.handlers.end()) {
+            throw std::runtime_error("route already exists");
+        }
+        registry.handlers.emplace(
+            std::move(route),
+            std::make_shared<const detail::HandlerEntry>(detail::HandlerEntry{std::move(handler), false}));
+    });
 }
 
 void Server::on_prefix(std::string prefix, Handler handler) {
@@ -356,13 +375,16 @@ void Server::on_prefix(std::string prefix, Handler handler) {
     if (!handler) {
         throw std::invalid_argument("handler must not be empty");
     }
-    std::lock_guard<std::mutex> lock(state_->handlers_mutex);
-    for (const auto& entry : state_->handler_prefixes) {
-        if (entry.first == prefix) {
-            throw std::runtime_error("prefix route already exists");
+    update_handler_registry(state_, [&](detail::HandlerRegistry& registry) {
+        for (const auto& entry : registry.handler_prefixes) {
+            if (entry.first == prefix) {
+                throw std::runtime_error("prefix route already exists");
+            }
         }
-    }
-    state_->handler_prefixes.emplace_back(std::move(prefix), detail::HandlerEntry{std::move(handler), false});
+        registry.handler_prefixes.emplace_back(
+            std::move(prefix),
+            std::make_shared<const detail::HandlerEntry>(detail::HandlerEntry{std::move(handler), false}));
+    });
 }
 
 void Server::on_serialized(std::string route, Handler handler) {
@@ -370,10 +392,14 @@ void Server::on_serialized(std::string route, Handler handler) {
     if (!handler) {
         throw std::invalid_argument("handler must not be empty");
     }
-    std::lock_guard<std::mutex> lock(state_->handlers_mutex);
-    if (!state_->handlers.emplace(std::move(route), detail::HandlerEntry{std::move(handler), true}).second) {
-        throw std::runtime_error("route already exists");
-    }
+    update_handler_registry(state_, [&](detail::HandlerRegistry& registry) {
+        if (registry.handlers.find(route) != registry.handlers.end()) {
+            throw std::runtime_error("route already exists");
+        }
+        registry.handlers.emplace(
+            std::move(route),
+            std::make_shared<const detail::HandlerEntry>(detail::HandlerEntry{std::move(handler), true}));
+    });
 }
 
 void Server::on_stream(std::string route, StreamHandler handler) {
@@ -381,10 +407,14 @@ void Server::on_stream(std::string route, StreamHandler handler) {
     if (!handler) {
         throw std::invalid_argument("stream handler must not be empty");
     }
-    std::lock_guard<std::mutex> lock(state_->handlers_mutex);
-    if (!state_->stream_handlers.emplace(std::move(route), detail::StreamHandlerEntry{std::move(handler)}).second) {
-        throw std::runtime_error("stream route already exists");
-    }
+    update_handler_registry(state_, [&](detail::HandlerRegistry& registry) {
+        if (registry.stream_handlers.find(route) != registry.stream_handlers.end()) {
+            throw std::runtime_error("stream route already exists");
+        }
+        registry.stream_handlers.emplace(
+            std::move(route),
+            std::make_shared<const detail::StreamHandlerEntry>(detail::StreamHandlerEntry{std::move(handler)}));
+    });
 }
 
 void Server::on_stream_prefix(std::string prefix, StreamHandler handler) {
@@ -392,13 +422,16 @@ void Server::on_stream_prefix(std::string prefix, StreamHandler handler) {
     if (!handler) {
         throw std::invalid_argument("stream handler must not be empty");
     }
-    std::lock_guard<std::mutex> lock(state_->handlers_mutex);
-    for (const auto& entry : state_->stream_prefixes) {
-        if (entry.first == prefix) {
-            throw std::runtime_error("prefix route already exists");
+    update_handler_registry(state_, [&](detail::HandlerRegistry& registry) {
+        for (const auto& entry : registry.stream_prefixes) {
+            if (entry.first == prefix) {
+                throw std::runtime_error("prefix route already exists");
+            }
         }
-    }
-    state_->stream_prefixes.emplace_back(std::move(prefix), detail::StreamHandlerEntry{std::move(handler)});
+        registry.stream_prefixes.emplace_back(
+            std::move(prefix),
+            std::make_shared<const detail::StreamHandlerEntry>(detail::StreamHandlerEntry{std::move(handler)}));
+    });
 }
 
 void Server::enqueue_maintenance(std::function<void()> task) {

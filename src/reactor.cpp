@@ -76,11 +76,11 @@ std::uint64_t connection_token(int fd, std::uint32_t generation) noexcept {
            static_cast<std::uint32_t>(fd);
 }
 
-easy_uds::Response invoke_request_handler(const easy_uds::Server::Handler& handler,
+easy_uds::Response invoke_request_handler(const std::shared_ptr<const HandlerEntry>& handler,
                                           const easy_uds::Request& request,
                                           const std::shared_ptr<ServerState>& state) {
     try {
-        return handler(request);
+        return handler->handler(request);
     } catch (const std::exception& error) {
         const std::string_view message =
             state->options.include_handler_error_messages ? std::string_view{error.what()}
@@ -248,53 +248,51 @@ std::string bounded_error_body(std::string_view message, std::size_t max_message
 }
 
 bool find_request_handler(const std::shared_ptr<ServerState>& state, const std::string& route,
-                          easy_uds::Server::Handler& handler, bool& serialized) {
-    std::lock_guard<std::mutex> lock(state->handlers_mutex);
-    const auto it = state->handlers.find(route);
-    if (it != state->handlers.end()) {
-        handler = it->second.handler;
-        serialized = it->second.serialized;
+                          std::shared_ptr<const HandlerEntry>& handler) {
+    const auto registry = std::atomic_load_explicit(&state->handler_registry, std::memory_order_acquire);
+    const auto it = registry->handlers.find(route);
+    if (it != registry->handlers.end()) {
+        handler = it->second;
         return true;
     }
-    const std::pair<std::string, HandlerEntry>* best = nullptr;
-    for (const auto& entry : state->handler_prefixes) {
+    const std::pair<std::string, std::shared_ptr<const HandlerEntry>>* best = nullptr;
+    for (const auto& entry : registry->handler_prefixes) {
         if (route.size() >= entry.first.size() && route.compare(0, entry.first.size(), entry.first) == 0 &&
             (best == nullptr || entry.first.size() > best->first.size())) {
             best = &entry;
         }
     }
     if (best != nullptr) {
-        handler = best->second.handler;
-        serialized = best->second.serialized;
+        handler = best->second;
         return true;
     }
     return false;
 }
 
 bool find_stream_handler(const std::shared_ptr<ServerState>& state, const std::string& route,
-                         easy_uds::Server::StreamHandler& handler) {
-    std::lock_guard<std::mutex> lock(state->handlers_mutex);
-    const auto it = state->stream_handlers.find(route);
-    if (it != state->stream_handlers.end()) {
-        handler = it->second.handler;
+                         std::shared_ptr<const StreamHandlerEntry>& handler) {
+    const auto registry = std::atomic_load_explicit(&state->handler_registry, std::memory_order_acquire);
+    const auto it = registry->stream_handlers.find(route);
+    if (it != registry->stream_handlers.end()) {
+        handler = it->second;
         return true;
     }
-    const std::pair<std::string, StreamHandlerEntry>* best = nullptr;
-    for (const auto& entry : state->stream_prefixes) {
+    const std::pair<std::string, std::shared_ptr<const StreamHandlerEntry>>* best = nullptr;
+    for (const auto& entry : registry->stream_prefixes) {
         if (route.size() >= entry.first.size() && route.compare(0, entry.first.size(), entry.first) == 0 &&
             (best == nullptr || entry.first.size() > best->first.size())) {
             best = &entry;
         }
     }
     if (best != nullptr) {
-        handler = best->second.handler;
+        handler = best->second;
         return true;
     }
     return false;
 }
 
 bool enqueue_worker_job(const std::shared_ptr<ServerState>& state, std::shared_ptr<Connection> connection,
-                        easy_uds::Request request, Deadline deadline, easy_uds::Server::Handler handler,
+                        easy_uds::Request request, Deadline deadline, std::shared_ptr<const HandlerEntry> handler,
                         bool is_stream, std::string buffered, std::size_t buffered_offset) {
     PendingJob job;
     job.connection = std::move(connection);
@@ -353,19 +351,14 @@ bool dispatch_request(const std::shared_ptr<ServerState>& state,
     request.peer = rc->conn->peer;
     request.request_id = rc->request_id;
 
-    easy_uds::Server::Handler handler;
-    bool serialized = false;
-    if (!find_request_handler(state, request.route, handler, serialized)) {
-        // Keep all potentially blocking response I/O off the reactor. A peer
-        // that floods unknown routes while not reading replies must not stall
-        // accept/parsing for every other connection.
-        const std::size_t max_message_size = state->options.max_message_size;
-        handler = [max_message_size](const easy_uds::Request&) {
-            return easy_uds::Response{404, bounded_error_body("Not Found", max_message_size)};
-        };
+    std::shared_ptr<const HandlerEntry> handler;
+    if (!find_request_handler(state, request.route, handler)) {
+        // Keep all potentially blocking response I/O off the reactor. The
+        // prebuilt entry also avoids allocating a lambda for every 404.
+        handler = state->not_found_handler;
     }
 
-    if (serialized) {
+    if (handler->serialized) {
         if (!ensure_serialized_worker(state)) {
             rc->conn->closing.store(true, std::memory_order_release);
             return false;
@@ -462,12 +455,12 @@ void run_stream_exchange(const std::shared_ptr<ServerState>& state, PendingJob&&
         };
 
         StreamResponse response;
-        easy_uds::Server::StreamHandler handler;
+        std::shared_ptr<const StreamHandlerEntry> handler;
         if (!find_stream_handler(state, job.request.route, handler)) {
             response.status = 404;
         } else {
             try {
-                response = handler(body_reader, job.request);
+                response = handler->handler(body_reader, job.request);
             } catch (const std::exception& error) {
                 response = state->options.include_handler_error_messages
                                ? StreamResponse{500, bounded_error_body_reader(error.what(),
@@ -605,9 +598,8 @@ void rearm_connection(const std::shared_ptr<ServerState>& state, const std::shar
 // hand-off / inline invocation and response write.
 bool serve_fixed_request(const std::shared_ptr<ServerState>& state, const std::shared_ptr<Connection>& conn,
                          easy_uds::Request& request, Deadline deadline) {
-    easy_uds::Server::Handler handler;
-    bool serialized = false;
-    if (!find_request_handler(state, request.route, handler, serialized)) {
+    std::shared_ptr<const HandlerEntry> handler;
+    if (!find_request_handler(state, request.route, handler)) {
         try {
             write_fixed_response(state, conn, request.request_id,
                                  {404, bounded_error_body("Not Found", state->options.max_message_size)},
@@ -617,7 +609,7 @@ bool serve_fixed_request(const std::shared_ptr<ServerState>& state, const std::s
         }
         return true;
     }
-    if (serialized) {
+    if (handler->serialized) {
         if (!ensure_serialized_worker(state)) {
             conn->closing.store(true, std::memory_order_release);
             return true;

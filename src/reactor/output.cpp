@@ -46,6 +46,22 @@ std::size_t output_queue_limit(const std::shared_ptr<ServerState>& state) noexce
     return std::max(kMinimumOutputQueueLimit, one_max_response);
 }
 
+bool reserve_global_output(const std::shared_ptr<ServerState>& state, std::size_t bytes) noexcept {
+    const std::size_t limit = state->options.max_total_output_bytes;
+    if (limit == 0) {
+        state->total_queued_output_bytes.fetch_add(bytes, std::memory_order_relaxed);
+        return true;
+    }
+    std::size_t current = state->total_queued_output_bytes.load(std::memory_order_relaxed);
+    while (current <= limit && bytes <= limit - current) {
+        if (state->total_queued_output_bytes.compare_exchange_weak(
+                current, current + bytes, std::memory_order_acq_rel, std::memory_order_relaxed)) {
+            return true;
+        }
+    }
+    return false;
+}
+
 std::array<iovec, 2> remaining_parts(OutgoingFrame& frame, std::size_t& part_count) noexcept {
     std::array<iovec, 2> parts{};
     if (frame.offset < frame.header.size()) {
@@ -182,7 +198,11 @@ void write_fixed_response(const std::shared_ptr<ServerState>& state,
 
         const std::size_t remaining = frame_size - frame.offset;
         const std::size_t limit = output_queue_limit(state);
-        if (remaining > limit || pending > limit - remaining) {
+        bool reserved_global = false;
+        if (remaining <= limit && pending <= limit - remaining) {
+            reserved_global = reserve_global_output(state, remaining);
+        }
+        if (!reserved_global) {
             overflow = true;
         } else {
             if (pending == 0) {
@@ -228,6 +248,7 @@ bool flush_connection_output(const std::shared_ptr<ServerState>& state,
                 frame.offset += count;
                 flushed += count;
                 connection->queued_output_bytes.fetch_sub(count, std::memory_order_acq_rel);
+                state->total_queued_output_bytes.fetch_sub(count, std::memory_order_acq_rel);
                 mark_output_progress(connection);
                 if (frame.offset == frame.header.size() + frame.body.size()) {
                     connection->output_queue.pop_front();

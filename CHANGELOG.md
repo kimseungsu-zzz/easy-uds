@@ -2,6 +2,14 @@
 
 All notable changes to this project are documented here.
 
+## Unreleased — 0.6.3 Experimental Closure
+
+- Added optional aggregate server budgets for queued fixed-request input and
+  fixed-response output across all connections.
+- Global input budgets participate in reactor pause/resume watermarks; global
+  output budgets are released on flush or connection cleanup.
+- Added validation and regression coverage for configured memory budgets.
+
 ## 0.6.1 — Reactor Hardening
 
 Patch release focused on bounded resource use, persistent-session reliability,

@@ -91,7 +91,7 @@ bool enqueue_worker_job(const std::shared_ptr<ServerState>& state, std::shared_p
         if (!is_stream) {
             const auto& queued = state->pending_jobs.back();
             queued.connection->active_regular.fetch_add(1, std::memory_order_relaxed);
-            account_connection_request(queued.connection, queued.request_bytes);
+            account_connection_request(state, queued.connection, queued.request_bytes);
         }
     }
     state->work_cv.notify_one();
@@ -111,6 +111,14 @@ void close_connection(const std::shared_ptr<ServerState>& state, int fd) {
         (void)::epoll_ctl(state->epoll_fd, EPOLL_CTL_DEL, fd, &event);
     }
     (void)::shutdown(fd, SHUT_RDWR);
+    {
+        std::lock_guard<std::mutex> output_lock(connection->output_mutex);
+        const std::size_t queued = connection->queued_output_bytes.exchange(0, std::memory_order_acq_rel);
+        connection->output_queue.clear();
+        if (queued != 0) {
+            state->total_queued_output_bytes.fetch_sub(queued, std::memory_order_acq_rel);
+        }
+    }
     if (connection->active_regular.load(std::memory_order_acquire) != 0 ||
         connection->pending_serialized.load(std::memory_order_acquire) != 0) {
         // Keep the closing connection counted against max_connections until
@@ -154,7 +162,7 @@ bool dispatch_request(const std::shared_ptr<ServerState>& state,
             state->pending_serialized.push_back(std::move(job));
             reactor_connection->conn->pending_serialized.fetch_add(1, std::memory_order_relaxed);
             const auto& queued = state->pending_serialized.back();
-            account_connection_request(queued.connection, queued.request_bytes);
+            account_connection_request(state, queued.connection, queued.request_bytes);
         }
         state->serialized_cv.notify_one();
         return pause_connection_reads_if_needed(state, reactor_connection);

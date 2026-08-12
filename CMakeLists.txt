@@ -95,6 +95,7 @@ if(EASY_UDS_BUILD_TESTS)
             tests/easy_uds_test/timeouts_concurrency.cpp
             tests/easy_uds_test/backpressure.cpp
             tests/easy_uds_test/shutdown.cpp
+            tests/easy_uds_test/budgets.cpp
         )
         target_link_libraries(easy_uds_test PRIVATE easy_uds::easy_uds)
         target_compile_options(easy_uds_test PRIVATE

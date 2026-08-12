@@ -197,7 +197,7 @@ void continue_connection(const std::shared_ptr<ServerState>& state,
                 request.route.size() + request.body.size();
 
             connection->active_regular.fetch_add(1, std::memory_order_relaxed);
-            account_connection_request(connection, request_bytes);
+            account_connection_request(state, connection, request_bytes);
             if (request.request_id != 0) {
                 connection->session_capable.store(true, std::memory_order_relaxed);
             }

@@ -100,5 +100,6 @@ void test_disconnected_handler_fd_isolation();
 void test_closing_connection_counts_toward_limit();
 void test_stop_interrupts_blocked_workers();
 void test_handler_error_opt_out();
+void test_global_memory_budgets();
 
 } // namespace easy_uds::test

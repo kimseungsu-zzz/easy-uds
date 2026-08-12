@@ -132,6 +132,8 @@ struct ServerState {
 
     std::atomic<bool> running{false};
     std::atomic<std::size_t> active_streams{0};
+    std::atomic<std::size_t> total_inflight_request_bytes{0};
+    std::atomic<std::size_t> total_queued_output_bytes{0};
     std::atomic<std::uint32_t> next_connection_generation{1};
     std::size_t max_concurrent_streams = 1;
 
@@ -244,7 +246,8 @@ Deadline connection_output_deadline(const std::shared_ptr<ServerState>& state,
 
 // Per-connection input flow control. Accounting includes queued and executing
 // fixed requests; pause/resume toggles only EPOLLIN for the affected peer.
-void account_connection_request(const std::shared_ptr<Connection>& connection,
+void account_connection_request(const std::shared_ptr<ServerState>& state,
+                                const std::shared_ptr<Connection>& connection,
                                 std::size_t request_bytes) noexcept;
 void release_connection_request(const std::shared_ptr<ServerState>& state,
                                 const std::shared_ptr<Connection>& connection,

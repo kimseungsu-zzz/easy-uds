@@ -18,14 +18,22 @@ std::size_t inflight_byte_limit(const std::shared_ptr<ServerState>& state) noexc
 
 bool below_resume_watermark(const std::shared_ptr<ServerState>& state,
                             const std::shared_ptr<Connection>& connection) noexcept {
-    return connection->inflight_requests.load(std::memory_order_acquire) <= kResumeInflightRequests &&
+    const bool global_below = state->options.max_total_inflight_bytes == 0 ||
+        state->total_inflight_request_bytes.load(std::memory_order_acquire) <=
+            state->options.max_total_inflight_bytes / 2;
+    return global_below &&
+           connection->inflight_requests.load(std::memory_order_acquire) <= kResumeInflightRequests &&
            connection->inflight_request_bytes.load(std::memory_order_acquire) <=
                inflight_byte_limit(state) / 2;
 }
 
 bool above_pause_watermark(const std::shared_ptr<ServerState>& state,
                            const std::shared_ptr<Connection>& connection) noexcept {
-    return connection->inflight_requests.load(std::memory_order_acquire) >= kMaxInflightRequests ||
+    const bool global_above = state->options.max_total_inflight_bytes != 0 &&
+        state->total_inflight_request_bytes.load(std::memory_order_acquire) >=
+            state->options.max_total_inflight_bytes;
+    return global_above ||
+           connection->inflight_requests.load(std::memory_order_acquire) >= kMaxInflightRequests ||
            connection->inflight_request_bytes.load(std::memory_order_acquire) >= inflight_byte_limit(state);
 }
 
@@ -40,10 +48,12 @@ void wake_reactor(const std::shared_ptr<ServerState>& state) noexcept {
 
 } // namespace
 
-void account_connection_request(const std::shared_ptr<Connection>& connection,
+void account_connection_request(const std::shared_ptr<ServerState>& state,
+                                const std::shared_ptr<Connection>& connection,
                                 std::size_t request_bytes) noexcept {
     connection->inflight_requests.fetch_add(1, std::memory_order_relaxed);
     connection->inflight_request_bytes.fetch_add(request_bytes, std::memory_order_relaxed);
+    state->total_inflight_request_bytes.fetch_add(request_bytes, std::memory_order_relaxed);
 }
 
 void release_connection_request(const std::shared_ptr<ServerState>& state,
@@ -51,6 +61,7 @@ void release_connection_request(const std::shared_ptr<ServerState>& state,
                                 std::size_t request_bytes) noexcept {
     connection->inflight_request_bytes.fetch_sub(request_bytes, std::memory_order_release);
     connection->inflight_requests.fetch_sub(1, std::memory_order_acq_rel);
+    state->total_inflight_request_bytes.fetch_sub(request_bytes, std::memory_order_release);
 
     bool resumed = false;
     {

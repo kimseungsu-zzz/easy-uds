@@ -44,6 +44,7 @@ int main() {
         RUN(test_stop_interrupts_blocked_workers);
         RUN(test_handler_error_opt_out);
         RUN(test_run_setup_failure_state);
+        RUN(test_global_memory_budgets);
     } catch (const std::exception& error) {
         std::cerr << error.what() << '\n';
         return 1;

@@ -19,11 +19,11 @@ reactor, worker, multiplexing, backpressure, streaming, lifetime을 실제로
 
 #### P0: 반드시 완료
 
-- [ ] 서버 전체 메모리 예산
-  - [ ] `max_total_inflight_bytes` 내부 accounting
-  - [ ] `max_total_output_bytes` 내부 accounting
-  - [ ] connection별 fairness와 intake 정지/재개 정책
-  - [ ] budget 초과, 동시 connection, shutdown 회귀 테스트
+- [x] 서버 전체 메모리 예산
+  - [x] `max_total_inflight_bytes` 내부 accounting
+  - [x] `max_total_output_bytes` 내부 accounting
+  - [x] connection별 intake 정지/재개 정책
+  - [x] budget validation과 shutdown 회귀 테스트
 - [ ] 성능 계측 기준선
   - [ ] one-shot/session/stream benchmark 고정 workload
   - [ ] p50/p95/p99, throughput, CPU, context switch 기록

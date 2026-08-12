@@ -190,6 +190,8 @@ options.max_concurrent_streams = 3;
 | `max_message_size` | `1 MiB` | Maximum request route+body size and maximum response body size |
 | `stream_chunk_size` | `64 KiB` | Reusable buffer and outgoing frame size for streamed bodies |
 | `max_stream_size` | `1 GiB` | Maximum bytes per streamed request body and response body; `0` is unbounded |
+| `max_total_inflight_bytes` | `0` | Aggregate queued fixed-request payload budget across connections; `0` disables the global limit |
+| `max_total_output_bytes` | `0` | Aggregate queued fixed-response payload budget across connections; `0` disables the global limit |
 | `max_concurrent_streams` | `0` (auto) | Maximum simultaneous streams; auto uses `worker_threads - 1`, or `1` when only one worker exists. Explicit values must be between `1` and `worker_threads` |
 | `io_timeout` | `5000 ms` | Maximum idle time between successful socket-I/O progress events; `0` disables it |
 | `request_timeout` | `30000 ms` | Absolute deadline per regular request; a request that expires before a worker runs it is answered `408`. `0` disables it |
@@ -202,7 +204,7 @@ options.max_concurrent_streams = 3;
 
 When the connection limit is reached, newly accepted connections are closed instead of creating more workers or growing an unbounded queue.
 
-Fixed RPC input is also bounded per connection without changing the public ABI. The reactor pauses only that peer's `EPOLLIN` at 64 in-flight requests or at least 4 MiB of queued request payload, then resumes below the half-full low-water mark. Bytes already accepted by the kernel remain under Unix-socket backpressure instead of being copied into an unbounded worker queue.
+Fixed RPC input is bounded per connection and can also be bounded across the whole server. The reactor pauses only that peer's `EPOLLIN` at 64 in-flight requests, at least 4 MiB of queued request payload, or the configured `max_total_inflight_bytes`, then resumes below the low-water marks. Bytes already accepted by the kernel remain under Unix-socket backpressure instead of being copied into an unbounded worker queue. Fixed responses have the analogous `max_total_output_bytes` aggregate budget.
 
 Fixed responses use a nonblocking worker fast path. A response that does not fit immediately is handed to a per-connection `EPOLLOUT` queue, so a client that stops reading cannot occupy a worker. The queued remainder is capped at the larger of 4 MiB or one maximum-size response; a peer that exceeds the cap is closed without affecting other connections. Streaming exchanges retain their exclusive worker lease and are governed by `max_concurrent_streams`.
 

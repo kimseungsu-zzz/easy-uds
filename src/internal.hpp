@@ -64,6 +64,16 @@ inline void validate_server_options(const easy_uds::ServerOptions& options) {
     if (options.max_connections == 0) {
         throw std::invalid_argument("max_connections must be greater than zero");
     }
+    if (options.max_total_inflight_bytes != 0 &&
+        options.max_total_inflight_bytes < options.max_message_size) {
+        throw std::invalid_argument("max_total_inflight_bytes must be zero or at least max_message_size");
+    }
+    if (options.max_total_output_bytes != 0 &&
+        (options.max_message_size > protocol::max_wire_field - protocol::header_size ||
+         options.max_total_output_bytes < options.max_message_size + protocol::header_size)) {
+        throw std::invalid_argument(
+            "max_total_output_bytes must be zero or large enough for one maximum response frame");
+    }
     if (options.worker_threads > options.max_connections) {
         throw std::invalid_argument("worker_threads must not exceed max_connections");
     }

@@ -40,7 +40,7 @@ reactor, worker, multiplexing, backpressure, streaming, lifetime을 실제로
 - [x] `io_uring_setup` capability probe — backend는 epoll 유지
 - [x] `SCM_RIGHTS`/`memfd_create` FD passing standalone prototype
 - [ ] file-backed stream의 `sendfile`/`splice` zero-copy 비교
-- [ ] false sharing 및 allocator 측정 (`alignas`, queue/map allocation)
+- [x] false sharing 및 allocator 측정 (`alignas`, queue/map allocation probe)
 
 P1 실험은 성능·복잡도·이식성 자료가 없으면 public API 또는 기본 backend에
 포함하지 않는다. 결과가 부정적이어도 실험 보고서에 기록하면 완료로 본다.

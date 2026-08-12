@@ -21,3 +21,9 @@ The benchmark also reports `getrusage()` user/system CPU time and voluntary /
 involuntary context switches. `perf stat` and `strace -c` should be used on a
 host where those tools are available for syscall, cache-miss, and branch-miss
 counts. They are not available in the current WSL image.
+
+The warmed-up allocation benchmark reports `0` ordinary heap allocations per
+request in the current session fast path (5,000 requests). The standalone
+false-sharing probe measured `5.31x` speedup from 64-byte padding on this WSL2
+host (20 million relaxed increments per counter). That result is diagnostic only;
+production state will be padded only after a workload-specific measurement.

@@ -293,43 +293,7 @@ bool find_stream_handler(const std::shared_ptr<ServerState>& state, const std::s
     return false;
 }
 
-void write_error_response(const std::shared_ptr<ServerState>& state,
-                          const std::shared_ptr<Connection>& connection, std::uint32_t request_id,
-                          std::string_view message, std::chrono::milliseconds io_timeout, Deadline deadline,
-                          easy_uds::Status status) {
-    const easy_uds::Response response{status, bounded_error_body(message, state->options.max_message_size)};
-    write_fixed_response(state, connection, request_id, response, io_timeout, deadline);
-}
-
-void write_fixed_response(const std::shared_ptr<ServerState>& state,
-                          const std::shared_ptr<Connection>& connection, std::uint32_t request_id,
-                          const easy_uds::Response& response, std::chrono::milliseconds io_timeout,
-                          Deadline deadline) {
-    if (response.status < 0) {
-        write_error_response(state, connection, request_id,
-                             state->options.include_handler_error_messages
-                                 ? "response status_code must not be negative"
-                                 : "Internal Server Error",
-                             io_timeout, deadline);
-        return;
-    }
-    if (response.body.size() > state->options.max_message_size ||
-        response.body.size() > protocol::max_wire_field) {
-        write_error_response(state, connection, request_id,
-                             state->options.include_handler_error_messages ? "response exceeds max_message_size"
-                                                                           : "Internal Server Error",
-                             io_timeout, deadline);
-        return;
-    }
-    std::lock_guard<std::mutex> lock(connection->write_mutex);
-    write_frame_with_payload(connection->fd, WireType::response, request_id,
-                             static_cast<std::uint32_t>(response.status),
-                             static_cast<std::uint32_t>(response.body.size()), response.body.data(),
-                             response.body.size(), io_timeout, deadline);
-    mark_io_progress(connection);
-}
-
-void enqueue_worker_job(const std::shared_ptr<ServerState>& state, std::shared_ptr<Connection> connection,
+bool enqueue_worker_job(const std::shared_ptr<ServerState>& state, std::shared_ptr<Connection> connection,
                         easy_uds::Request request, Deadline deadline, easy_uds::Server::Handler handler,
                         bool is_stream, std::string buffered, std::size_t buffered_offset) {
     PendingJob job;
@@ -338,16 +302,23 @@ void enqueue_worker_job(const std::shared_ptr<ServerState>& state, std::shared_p
     job.deadline = deadline;
     job.handler = std::move(handler);
     job.is_stream = is_stream;
+    job.request_bytes = job.request.route.size() + job.request.body.size();
     job.buffered = std::move(buffered);
     job.buffered_offset = buffered_offset;
     {
         std::lock_guard<std::mutex> lock(state->work_mutex);
         if (state->workers_stopping) {
-            return;
+            return false;
         }
         state->pending_jobs.push_back(std::move(job));
+        if (!is_stream) {
+            const auto& queued = state->pending_jobs.back();
+            queued.connection->active_regular.fetch_add(1, std::memory_order_relaxed);
+            account_connection_request(queued.connection, queued.request_bytes);
+        }
     }
     state->work_cv.notify_one();
+    return true;
 }
 
 void close_connection(const std::shared_ptr<ServerState>& state, int fd) {
@@ -374,7 +345,8 @@ void close_connection(const std::shared_ptr<ServerState>& state, int fd) {
 
 // ---- dispatch (reactor thread) ---------------------------------------------
 
-void dispatch_request(const std::shared_ptr<ServerState>& state, const std::shared_ptr<ReactorConnection>& rc) {
+bool dispatch_request(const std::shared_ptr<ServerState>& state,
+                      const std::shared_ptr<ReactorConnection>& rc) {
     easy_uds::Request request;
     request.route = std::move(rc->route_buffer);
     request.body = std::move(rc->body_buffer);
@@ -395,36 +367,42 @@ void dispatch_request(const std::shared_ptr<ServerState>& state, const std::shar
 
     if (serialized) {
         if (!ensure_serialized_worker(state)) {
-            rc->conn->closing = true;
-            return;
+            rc->conn->closing.store(true, std::memory_order_release);
+            return false;
         }
         SerializedJob job;
         job.connection = rc->conn;
         job.request = std::move(request);
         job.deadline = rc->deadline;
         job.handler = std::move(handler);
+        job.request_bytes = job.request.route.size() + job.request.body.size();
         {
             std::unique_lock<std::mutex> lock(state->serialized_mutex);
             if (state->serialized_stopping || !state->running.load()) {
-                return;
+                return false;
             }
             state->pending_serialized.push_back(std::move(job));
             rc->conn->pending_serialized.fetch_add(1, std::memory_order_relaxed);
+            const auto& queued = state->pending_serialized.back();
+            account_connection_request(queued.connection, queued.request_bytes);
         }
         state->serialized_cv.notify_one();
-        return;
+        return pause_connection_reads_if_needed(state, rc);
     }
 
     // Keep the reactor on the connection while the handler runs so later
     // multiplexed requests can be parsed and dispatched to other workers.
     // The last completing request may take a short continuation lease after
     // its response has been written.
-    rc->conn->active_regular.fetch_add(1, std::memory_order_relaxed);
     if (request.request_id != 0) {
         rc->conn->session_capable.store(true, std::memory_order_relaxed);
     }
-    enqueue_worker_job(state, rc->conn, std::move(request), rc->deadline, std::move(handler), false,
-                       {}, 0);
+    if (!enqueue_worker_job(state, rc->conn, std::move(request), rc->deadline, std::move(handler), false,
+                            {}, 0)) {
+        rc->conn->closing.store(true, std::memory_order_release);
+        return false;
+    }
+    return pause_connection_reads_if_needed(state, rc);
 }
 
 void dispatch_stream(const std::shared_ptr<ServerState>& state, const std::shared_ptr<ReactorConnection>& rc) {
@@ -432,12 +410,12 @@ void dispatch_stream(const std::shared_ptr<ServerState>& state, const std::share
         rc->conn->pending_serialized.load(std::memory_order_acquire) != 0) {
         // Streams are exclusive per connection and may not overlap an
         // outstanding fixed response.
-        rc->conn->closing = true;
+        rc->conn->closing.store(true, std::memory_order_release);
         return;
     }
     if (!try_acquire_stream_slot(state)) {
         // Excess stream: reject explicitly by closing the connection.
-        rc->conn->closing = true;
+        rc->conn->closing.store(true, std::memory_order_release);
         return;
     }
 
@@ -462,8 +440,10 @@ void dispatch_stream(const std::shared_ptr<ServerState>& state, const std::share
     const std::size_t leftover_offset = rc->pending_offset;
     rc->pending.clear();
     rc->pending_offset = 0;
-    enqueue_worker_job(state, rc->conn, std::move(request), stream_deadline, {}, true, std::move(leftover),
-                       leftover_offset);
+    if (!enqueue_worker_job(state, rc->conn, std::move(request), stream_deadline, {}, true,
+                            std::move(leftover), leftover_offset)) {
+        rc->conn->closing.store(true, std::memory_order_release);
+    }
 }
 
 // ---- stream exchange (worker-owned lease) ----------------------------------
@@ -591,6 +571,7 @@ void rearm_connection(const std::shared_ptr<ServerState>& state, const std::shar
         fresh->arg2 = 0;
         fresh->deadline = Deadline::max();
         fresh->reactor_busy = false;
+        fresh->read_paused = false;
         clear_reusable_buffer(fresh->pending);
         if (buffered_offset < buffered.size()) {
             fresh->pending.append(buffered.data() + buffered_offset, buffered.size() - buffered_offset);
@@ -622,7 +603,7 @@ void rearm_connection(const std::shared_ptr<ServerState>& state, const std::shar
 
 // Serves one parsed fixed request from the worker side: 404 / serialized
 // hand-off / inline invocation and response write.
-void serve_fixed_request(const std::shared_ptr<ServerState>& state, const std::shared_ptr<Connection>& conn,
+bool serve_fixed_request(const std::shared_ptr<ServerState>& state, const std::shared_ptr<Connection>& conn,
                          easy_uds::Request& request, Deadline deadline) {
     easy_uds::Server::Handler handler;
     bool serialized = false;
@@ -632,38 +613,41 @@ void serve_fixed_request(const std::shared_ptr<ServerState>& state, const std::s
                                  {404, bounded_error_body("Not Found", state->options.max_message_size)},
                                  state->options.io_timeout, deadline);
         } catch (...) {
-            conn->closing = true;
+            conn->closing.store(true, std::memory_order_release);
         }
-        return;
+        return true;
     }
     if (serialized) {
         if (!ensure_serialized_worker(state)) {
-            conn->closing = true;
-            return;
+            conn->closing.store(true, std::memory_order_release);
+            return true;
         }
         SerializedJob job;
         job.connection = conn;
         job.request = std::move(request);
         job.deadline = deadline;
         job.handler = std::move(handler);
+        job.request_bytes = job.request.route.size() + job.request.body.size();
         {
             std::unique_lock<std::mutex> lock(state->serialized_mutex);
             if (state->serialized_stopping || !state->running.load()) {
-                return;
+                return true;
             }
             state->pending_serialized.push_back(std::move(job));
             conn->pending_serialized.fetch_add(1, std::memory_order_relaxed);
         }
         state->serialized_cv.notify_one();
-        return;
+        return false;
     }
 
-    const easy_uds::Response response = invoke_request_handler(handler, request, state);
+    easy_uds::Response response = invoke_request_handler(handler, request, state);
     try {
-        write_fixed_response(state, conn, request.request_id, response, state->options.io_timeout, deadline);
+        write_fixed_response(state, conn, request.request_id, std::move(response), state->options.io_timeout,
+                             deadline);
     } catch (...) {
-        conn->closing = true;
+        conn->closing.store(true, std::memory_order_release);
     }
+    return true;
 }
 
 bool try_acquire_continuation_lease(const std::shared_ptr<ServerState>& state,
@@ -679,6 +663,7 @@ bool try_acquire_continuation_lease(const std::shared_ptr<ServerState>& state,
     const auto it = state->connections.find(conn->fd);
     if (it == state->connections.end() || it->second->conn != conn || it->second->reactor_busy ||
         it->second->phase != ParsePhase::header ||
+        it->second->read_paused ||
         it->second->pending_offset != it->second->pending.size() ||
         conn->stream_active.load(std::memory_order_acquire) ||
         conn->worker_owned.load(std::memory_order_acquire) ||
@@ -698,8 +683,12 @@ bool try_acquire_continuation_lease(const std::shared_ptr<ServerState>& state,
 }
 
 bool complete_regular_request(const std::shared_ptr<ServerState>& state,
-                              const std::shared_ptr<Connection>& conn) {
+                              const std::shared_ptr<Connection>& conn, std::size_t request_bytes,
+                              bool release_accounting = true) {
     const std::size_t previous = conn->active_regular.fetch_sub(1, std::memory_order_acq_rel);
+    if (release_accounting) {
+        release_connection_request(state, conn, request_bytes);
+    }
     if (previous != 1) {
         return false;
     }
@@ -762,17 +751,19 @@ void continue_connection(const std::shared_ptr<ServerState>& state, std::shared_
             }
             request.peer = conn->peer;
             request.request_id = decoded.request_id;
+            const std::size_t request_bytes = request.route.size() + request.body.size();
 
             // Publish reactor ownership before executing the handler. If the
             // handler is slow, later requests on this same session can now be
             // dispatched to other workers and answered out of order.
             conn->active_regular.fetch_add(1, std::memory_order_relaxed);
+            account_connection_request(conn, request_bytes);
             if (request.request_id != 0) {
                 conn->session_capable.store(true, std::memory_order_relaxed);
             }
             rearm_connection(state, conn, std::move(buffered), buffered_offset);
-            serve_fixed_request(state, conn, request, req_deadline);
-            if (!complete_regular_request(state, conn)) {
+            const bool completed_inline = serve_fixed_request(state, conn, request, req_deadline);
+            if (!complete_regular_request(state, conn, request_bytes, completed_inline)) {
                 return;
             }
             buffered.clear();
@@ -822,21 +813,21 @@ void worker_loop(const std::shared_ptr<ServerState>& state) {
                                      "request timed out before execution", state->options.io_timeout,
                                      Deadline::max(), 408);
             } else if (state->running.load()) {
-                const easy_uds::Response response = invoke_request_handler(job.handler, job.request, state);
+                easy_uds::Response response = invoke_request_handler(job.handler, job.request, state);
                 try {
-                    write_fixed_response(state, job.connection, job.request.request_id, response,
+                    write_fixed_response(state, job.connection, job.request.request_id, std::move(response),
                                          state->options.io_timeout, job.deadline);
                 } catch (const std::exception&) {
-                    job.connection->closing = true;
+                    job.connection->closing.store(true, std::memory_order_release);
                 } catch (...) {
-                    job.connection->closing = true;
+                    job.connection->closing.store(true, std::memory_order_release);
                 }
             }
         } catch (...) {
-            job.connection->closing = true;
+            job.connection->closing.store(true, std::memory_order_release);
         }
 
-        if (complete_regular_request(state, job.connection)) {
+        if (complete_regular_request(state, job.connection, job.request_bytes)) {
             continue_connection(state, job.connection, std::move(job.buffered), job.buffered_offset);
         }
     }
@@ -876,9 +867,11 @@ void serialized_worker_loop(const std::shared_ptr<ServerState>& state) {
             std::shared_ptr<Connection> connection;
             ~CompletionGuard() {
                 connection->pending_serialized.fetch_sub(1, std::memory_order_release);
+                release_connection_request(state, connection, request_bytes);
                 wake_reactor(state);
             }
-        } completion{state, job.connection};
+            std::size_t request_bytes;
+        } completion{state, job.connection, job.request_bytes};
 
         try {
             if (Clock::now() >= job.deadline) {
@@ -890,9 +883,9 @@ void serialized_worker_loop(const std::shared_ptr<ServerState>& state) {
             if (!state->running.load()) {
                 continue;
             }
-            const easy_uds::Response response = invoke_request_handler(job.handler, job.request, state);
+            easy_uds::Response response = invoke_request_handler(job.handler, job.request, state);
             try {
-                write_fixed_response(state, job.connection, job.request.request_id, response,
+                write_fixed_response(state, job.connection, job.request.request_id, std::move(response),
                                      state->options.io_timeout, job.deadline);
             } catch (...) {
                 job.connection->closing.store(true, std::memory_order_release);
@@ -948,7 +941,7 @@ void consume(const std::shared_ptr<ServerState>& state, const std::shared_ptr<Re
             break;
         }
         if (n == 0) {
-            rc->conn->closing = true;
+            rc->conn->closing.store(true, std::memory_order_release);
             return;
         }
         if (errno == EINTR) {
@@ -957,7 +950,7 @@ void consume(const std::shared_ptr<ServerState>& state, const std::shared_ptr<Re
         if (errno == EAGAIN || errno == EWOULDBLOCK) {
             break;
         }
-        rc->conn->closing = true;
+        rc->conn->closing.store(true, std::memory_order_release);
         return;
     }
 
@@ -1022,9 +1015,12 @@ void consume(const std::shared_ptr<ServerState>& state, const std::shared_ptr<Re
                 rc->payload_received += take;
             }
             if (rc->payload_received == rc->payload_total) {
-                dispatch_request(state, rc);
+                const bool read_paused = dispatch_request(state, rc);
                 rc->phase = ParsePhase::header;
                 rc->deadline = Deadline::max();
+                if (read_paused) {
+                    return;
+                }
                 continue;
             }
             return;
@@ -1038,6 +1034,50 @@ void consume(const std::shared_ptr<ServerState>& state, const std::shared_ptr<Re
             dispatch_stream(state, rc);
         }
         return;
+    }
+}
+
+// A worker that drops a connection below the input low-water mark queues its
+// parser state here. Processing on the reactor thread is required because the
+// bytes that triggered the high-water mark may already live in rc->pending and
+// therefore cannot generate another kernel EPOLLIN edge on their own.
+void process_resumed_connections(const std::shared_ptr<ServerState>& state) {
+    constexpr std::size_t max_batch = 64;
+    for (std::size_t index = 0; index < max_batch; ++index) {
+        std::shared_ptr<ReactorConnection> rc;
+        {
+            std::lock_guard<std::mutex> lock(state->connections_mutex);
+            if (state->resumed_connections.empty()) {
+                return;
+            }
+            rc = std::move(state->resumed_connections.front());
+            state->resumed_connections.pop_front();
+            const auto it = state->connections.find(rc->conn->fd);
+            if (it == state->connections.end() || it->second != rc || rc->read_paused || rc->reactor_busy ||
+                rc->conn->closing.load(std::memory_order_acquire) ||
+                rc->conn->stream_active.load(std::memory_order_acquire) ||
+                rc->conn->worker_owned.load(std::memory_order_acquire)) {
+                continue;
+            }
+            rc->reactor_busy = true;
+        }
+
+        try {
+            consume(state, rc);
+        } catch (...) {
+            rc->conn->closing.store(true, std::memory_order_release);
+        }
+        if (rc->conn->closing.load(std::memory_order_acquire)) {
+            close_connection(state, rc->conn->fd);
+            continue;
+        }
+        {
+            std::lock_guard<std::mutex> lock(state->connections_mutex);
+            const auto it = state->connections.find(rc->conn->fd);
+            if (it != state->connections.end() && it->second == rc) {
+                rc->reactor_busy = false;
+            }
+        }
     }
 }
 
@@ -1062,6 +1102,8 @@ Deadline expire_reactor_connections(const std::shared_ptr<ServerState>& state) {
             }
 
             Deadline connection_deadline = rc->deadline;
+            connection_deadline = earlier_deadline(connection_deadline,
+                                                   connection_output_deadline(state, connection));
             const bool partial_request = rc->phase != ParsePhase::header ||
                                          rc->pending_offset != rc->pending.size();
             const bool response_pending =
@@ -1091,6 +1133,7 @@ void run_reactor(const std::shared_ptr<ServerState>& state) {
 
     std::array<epoll_event, 128> events{};
     while (state->running.load()) {
+        process_resumed_connections(state);
         const Deadline next_deadline = expire_reactor_connections(state);
         const int count = ::epoll_wait(epoll_fd, events.data(), static_cast<int>(events.size()),
                                        poll_timeout_ms(next_deadline));
@@ -1169,6 +1212,7 @@ void run_reactor(const std::shared_ptr<ServerState>& state) {
             const std::uint32_t generation = static_cast<std::uint32_t>(token >> 32);
             std::shared_ptr<ReactorConnection> rc;
             bool close_requested = false;
+            bool read_allowed = false;
             {
                 std::lock_guard<std::mutex> lock(state->connections_mutex);
                 const auto it = state->connections.find(fd);
@@ -1183,6 +1227,7 @@ void run_reactor(const std::shared_ptr<ServerState>& state) {
                     continue;
                 } else {
                     rc->reactor_busy = true;
+                    read_allowed = !rc->read_paused;
                 }
             }
             if (close_requested) {
@@ -1193,12 +1238,18 @@ void run_reactor(const std::shared_ptr<ServerState>& state) {
                 close_connection(state, fd);
                 continue;
             }
-            if ((mask & EPOLLIN) != 0) {
+            if ((mask & EPOLLOUT) != 0) {
+                if (!flush_connection_output(state, rc)) {
+                    close_connection(state, fd);
+                    continue;
+                }
+            }
+            if ((mask & EPOLLIN) != 0 && read_allowed) {
                 try {
                     consume(state, rc);
                 } catch (...) {
                     // Malformed or invalid frames: isolate the peer.
-                    rc->conn->closing = true;
+                    rc->conn->closing.store(true, std::memory_order_release);
                 }
                 if (rc->conn->closing.load(std::memory_order_acquire)) {
                     close_connection(state, fd);

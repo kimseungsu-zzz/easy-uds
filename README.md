@@ -18,7 +18,7 @@
 - `Server::enqueue_maintenance()` for safe server-side state cleanup from external threads
 - Natural flow control through Unix-socket backpressure
 - Versioned, binary-safe protocol framing (protocol v2 with request-id multiplexing)
-- epoll reactor server: idle connections never occupy a worker, and response I/O never blocks the reactor
+- epoll reactor server: idle connections never occupy a worker, and stalled fixed-response I/O never blocks the reactor or worker pool
 - Configurable connection limit, inactivity timeout, absolute request deadline (`408` on expiry), connect timeout, backlog, and message size
 - Optimistic non-blocking socket I/O that calls `poll()` only on backpressure
 - Gathered header+payload writes through `sendmsg()` to reduce per-chunk system calls
@@ -201,6 +201,10 @@ options.max_concurrent_streams = 3;
 
 When the connection limit is reached, newly accepted connections are closed instead of creating more workers or growing an unbounded queue.
 
+Fixed RPC input is also bounded per connection without changing the public ABI. The reactor pauses only that peer's `EPOLLIN` at 64 in-flight requests or at least 4 MiB of queued request payload, then resumes below the half-full low-water mark. Bytes already accepted by the kernel remain under Unix-socket backpressure instead of being copied into an unbounded worker queue.
+
+Fixed responses use a nonblocking worker fast path. A response that does not fit immediately is handed to a per-connection `EPOLLOUT` queue, so a client that stops reading cannot occupy a worker. The queued remainder is capped at the larger of 4 MiB or one maximum-size response; a peer that exceeds the cap is closed without affecting other connections. Streaming exchanges retain their exclusive worker lease and are governed by `max_concurrent_streams`.
+
 Each stream occupies one worker until its response body is complete. The automatic stream limit is `worker_threads - 1`, or `1` for a single-worker server. This prevents long-lived streams from starving regular RPC traffic. An excess stream is closed before its body is read, so the client receives a `std::system_error`; retry it with a fresh/rewound `StreamReader`. Set `ServerOptions::max_concurrent_streams = worker_threads` to allow every worker to run a stream, or use separate server instances when short RPCs and many long-lived streams have different capacity requirements.
 
 `request_timeout` includes time spent waiting in the worker queue, time spent waiting in the serialized-command queue, and socket I/O time. A serialized request that expires before its handler starts is discarded without executing it. User handler execution cannot be forcibly cancelled by portable C++; if a handler runs past the deadline, response I/O fails immediately after that handler returns.
@@ -220,7 +224,7 @@ options.stream_timeout = std::chrono::milliseconds(0);
 easy_uds::Client client("/tmp/easy-uds.sock", options);
 ```
 
-`connect_timeout` bounds only connection establishment. `io_timeout` bounds inactivity between successful I/O progress. `request_timeout` bounds a regular transaction, while `stream_timeout` bounds a streaming transaction. A value of `0` disables the corresponding limit.
+`connect_timeout` bounds only connection establishment. `io_timeout` bounds inactivity between successful I/O progress. An idle `Session` does not consume this timeout: its reader waits indefinitely for the first response byte, a partial response frame uses `io_timeout`, and each pending caller is still bounded by `request_timeout`. `request_timeout` bounds a regular transaction, while `stream_timeout` bounds a streaming transaction. A value of `0` disables the corresponding limit.
 
 Socket failures and timeouts are reported as `std::system_error`; timeouts use `ETIMEDOUT`.
 

@@ -26,6 +26,8 @@ find_package(Threads REQUIRED)
 add_library(easy_uds
     src/server.cpp
     src/reactor.cpp
+    src/server_flow.cpp
+    src/server_output.cpp
     src/client.cpp
     src/server_core.hpp
     src/protocol.hpp

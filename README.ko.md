@@ -19,6 +19,7 @@
 - Unix socket backpressure를 통한 자연스러운 흐름 제어
 - versioned binary protocol
 - connection마다 detached thread를 만들지 않는 고정 worker pool
+- 느린 고정 응답의 쓰기가 reactor나 worker pool을 점유하지 않는 `EPOLLOUT` 출력 큐
 - 최대 connection 수, I/O inactivity timeout, absolute request deadline, connect timeout 설정
 - non-blocking socket + 필요할 때만 `poll()` 사용
 - `sendmsg()`를 이용한 header+payload gathered write
@@ -268,6 +269,10 @@ options.max_concurrent_streams = 3;
 | `listen_backlog` | `64` | `listen()` backlog |
 | `socket_permissions` | `0600` | Unix socket pathname 권한 |
 
+일반 RPC 입력은 connection마다 자동으로 제한됩니다. in-flight 요청 64개 또는 queued request payload 최소 4 MiB의 고수위에 도달하면 해당 peer의 `EPOLLIN`만 일시 중지하고, 절반 이하의 저수위에서 다시 시작합니다. 따라서 이미 kernel이 받은 나머지 byte에는 Unix socket backpressure가 걸리며 worker queue가 무제한으로 커지지 않습니다.
+
+고정 응답은 worker가 non-blocking fast path로 한 번 전송한 뒤, 남은 byte만 connection별 `EPOLLOUT` 큐에 넘깁니다. 큐 상한은 4 MiB와 최대 응답 하나의 크기 중 큰 값이며, 이를 넘기는 peer만 닫습니다. 응답을 읽지 않는 client가 일반 worker pool을 점유하지 않습니다. Stream은 기존의 전용 worker lease와 `max_concurrent_streams` 제한을 사용합니다.
+
 `request_timeout`은 worker queue, serialized queue, socket I/O 시간을 모두 포함합니다. serialized 명령이 실행 전에 timeout되면 handler를 실행하지 않고 `408`로 응답합니다.
 
 ## Client 설정
@@ -289,7 +294,7 @@ options.stream_timeout = 0ms;
 easy_uds::Client client("/tmp/easy-uds.sock", options);
 ```
 
-`connect_timeout`은 연결 수립 시간만 제한합니다. `io_timeout`은 I/O 진행이 없는 시간을 제한하고, `request_timeout`은 일반 request 전체, `stream_timeout`은 streaming transaction 전체를 제한합니다. `0`은 해당 제한을 비활성화합니다.
+`connect_timeout`은 연결 수립 시간만 제한합니다. `io_timeout`은 I/O 진행이 없는 시간을 제한합니다. 유휴 `Session` 자체에는 이 시간이 적용되지 않습니다. 첫 response byte는 무기한 기다리되 각 호출자의 `request_timeout`은 계속 적용되며, response frame이 일부 도착한 뒤 멈추면 `io_timeout`이 적용됩니다. `request_timeout`은 일반 request 전체, `stream_timeout`은 streaming transaction 전체를 제한합니다. `0`은 해당 제한을 비활성화합니다.
 
 socket timeout은 `std::system_error`로 전달되며 timeout의 error code는 `ETIMEDOUT`입니다.
 

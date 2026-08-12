@@ -29,12 +29,20 @@ struct StreamHandlerEntry {
     easy_uds::Server::StreamHandler handler;
 };
 
+struct OutgoingFrame {
+    protocol::HeaderBytes header{};
+    std::string body;
+    std::size_t offset = 0;
+    Deadline deadline = Deadline::max();
+};
+
 // A connected client. fd access is governed by the reactor phase machine:
 // either the reactor parses frames on it (connection in the epoll set) or a
 // stream worker owns it as an exclusive lease.
 struct Connection {
     Connection(int fd, easy_uds::PeerCredentials peer)
-        : fd(fd), peer(peer), last_io_progress(Clock::now().time_since_epoch().count()) {}
+        : fd(fd), peer(peer), last_io_progress(Clock::now().time_since_epoch().count()),
+          last_output_progress(last_io_progress.load(std::memory_order_relaxed)) {}
     ~Connection() {
         if (fd >= 0) {
             (void)::close(fd);
@@ -52,11 +60,18 @@ struct Connection {
     std::atomic<bool> session_capable{false};
     std::atomic<std::size_t> active_regular{0};
     std::atomic<std::size_t> pending_serialized{0};
+    std::atomic<std::size_t> inflight_requests{0};
+    std::atomic<std::size_t> inflight_request_bytes{0};
     std::atomic<Clock::duration::rep> last_io_progress;
+    std::atomic<Clock::duration::rep> last_output_progress;
+    std::atomic<std::size_t> queued_output_bytes{0};
 
-    // Responses are written as complete frames under this lock so multiplexed
-    // responses never interleave inside a frame.
+    // Streams hold write_mutex for their exclusive blocking exchange. Fixed
+    // responses use output_mutex: a worker performs one nonblocking fast-path
+    // send and the reactor drains any remainder through EPOLLOUT.
     std::mutex write_mutex;
+    std::mutex output_mutex;
+    std::deque<OutgoingFrame> output_queue;
 };
 
 // Reactor-side parse state for one connection.
@@ -77,6 +92,7 @@ struct ReactorConnection {
     std::uint32_t arg2 = 0;
     Deadline deadline = Deadline::max();     // absolute deadline once a request starts
     bool reactor_busy = false;               // guarded by connections_mutex
+    bool read_paused = false;                 // guarded by connections_mutex
     std::string pending;              // bytes read ahead of the parser
     std::size_t pending_offset = 0;   // consumed prefix of pending
 };
@@ -87,6 +103,7 @@ struct PendingJob {
     Deadline deadline = Deadline::max();
     easy_uds::Server::Handler handler;
     bool is_stream = false;
+    std::size_t request_bytes = 0;
     // For stream jobs: bytes already read from the socket before the lease
     // hand-off, followed by the fd.
     std::string buffered;
@@ -99,6 +116,7 @@ struct SerializedJob {
     Deadline deadline = Deadline::max();
     easy_uds::Server::Handler handler;
     std::function<void()> maintenance;
+    std::size_t request_bytes = 0;
 };
 
 struct ServerState {
@@ -151,6 +169,7 @@ struct ServerState {
     // short fixed-request continuation path take exclusive read leases.
     std::mutex connections_mutex;
     std::unordered_map<int, std::shared_ptr<ReactorConnection>> connections;
+    std::deque<std::shared_ptr<ReactorConnection>> resumed_connections;
 };
 
 // ---- shared helpers implemented in reactor.cpp ----------------------------
@@ -184,7 +203,7 @@ bool try_acquire_stream_slot(const std::shared_ptr<ServerState>& state) noexcept
 // Validates and writes a response frame (500 conversion on invalid responses).
 void write_fixed_response(const std::shared_ptr<ServerState>& state,
                           const std::shared_ptr<Connection>& connection, std::uint32_t request_id,
-                          const easy_uds::Response& response, std::chrono::milliseconds io_timeout,
+                          easy_uds::Response response, std::chrono::milliseconds io_timeout,
                           Deadline deadline);
 
 void write_error_response(const std::shared_ptr<ServerState>& state,
@@ -192,8 +211,31 @@ void write_error_response(const std::shared_ptr<ServerState>& state,
                           std::string_view message, std::chrono::milliseconds io_timeout, Deadline deadline,
                           easy_uds::Status status = 500);
 
+// Drains a bounded amount of queued fixed-response data without blocking.
+// False marks the connection unusable (peer error, timeout, or protocol I/O).
+bool flush_connection_output(const std::shared_ptr<ServerState>& state,
+                             const std::shared_ptr<ReactorConnection>& connection);
+
+// Recomputes EPOLLIN/EPOLLOUT interest for a reactor-owned connection.
+bool refresh_connection_events(const std::shared_ptr<ServerState>& state,
+                               const std::shared_ptr<Connection>& connection) noexcept;
+
+// Earliest fixed-output absolute/inactivity deadline, or Deadline::max().
+Deadline connection_output_deadline(const std::shared_ptr<ServerState>& state,
+                                    const std::shared_ptr<Connection>& connection);
+
+// Per-connection input flow control. Accounting includes queued and executing
+// fixed requests; pause/resume toggles only EPOLLIN for the affected peer.
+void account_connection_request(const std::shared_ptr<Connection>& connection,
+                                std::size_t request_bytes) noexcept;
+void release_connection_request(const std::shared_ptr<ServerState>& state,
+                                const std::shared_ptr<Connection>& connection,
+                                std::size_t request_bytes) noexcept;
+bool pause_connection_reads_if_needed(const std::shared_ptr<ServerState>& state,
+                                      const std::shared_ptr<ReactorConnection>& connection) noexcept;
+
 // Enqueues a parsed request for the regular worker pool.
-void enqueue_worker_job(const std::shared_ptr<ServerState>& state, std::shared_ptr<Connection> connection,
+bool enqueue_worker_job(const std::shared_ptr<ServerState>& state, std::shared_ptr<Connection> connection,
                         easy_uds::Request request, Deadline deadline, easy_uds::Server::Handler handler,
                         bool is_stream, std::string buffered, std::size_t buffered_offset);
 

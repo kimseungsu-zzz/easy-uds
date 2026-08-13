@@ -18,6 +18,7 @@ cmake --build build-experiments --parallel
 ./build-experiments/easy_uds_io_uring_probe
 ./build-experiments/easy_uds_false_sharing_probe 100000000
 ./build-experiments/easy_uds_zero_copy_probe 16777216
+./build-experiments/easy_uds_shm_transport_probe 4096 10000
 ```
 
 `easy_uds_fd_passing_probe` transfers a `memfd_create()` descriptor with
@@ -25,6 +26,13 @@ cmake --build build-experiments --parallel
 `easy_uds_io_uring_probe` only calls `io_uring_setup`; it is a capability probe,
 not an alternate reactor. The current production backend remains epoll until a
 complete io_uring implementation demonstrates a measurable benefit.
+
+`easy_uds_shm_transport_probe` is a control-plane/data-plane experiment. It
+passes a `memfd` and an `eventfd` over a Unix socketpair, maps an eight-slot
+single-producer/single-consumer ring, and compares fixed-payload throughput and
+send-side latency with a plain `SOCK_STREAM` socketpair. It does not claim
+multi-producer ordering, crash recovery, ownership leases, or a stable public
+transport API; those are prerequisites for any future shared-memory design.
 
 `easy_uds_false_sharing_probe` compares two adjacent relaxed atomics with two
 64-byte-aligned atomics. It is a hardware-sensitive diagnostic; it does not
@@ -43,9 +51,9 @@ the naive transport result.
 
 ## ARM64 validation
 
-The repository has no hosted ARM64 runner configured. On an ARM64 SBC or
-self-hosted runner, run `scripts/arm64_smoke.sh` for the normal release build,
-unit tests, and stress target, then extend the run at
+The `workflow_dispatch` CI path uses GitHub's hosted ARM64 runner and runs
+`scripts/arm64_smoke.sh` for the normal release build, unit tests, and stress
+target. On an ARM64 SBC or self-hosted runner, extend the run at
 1 KiB, 64 KiB, and 1 MiB payloads with connection counts 1/8/32/64, then repeat
 the session and streaming benchmarks. Record p50/p95/p99, throughput, CPU,
 context switches, and a shutdown/timeout soak before marking the ARM64 roadmap

@@ -63,6 +63,36 @@ re-run on a native Linux host before absolute numbers are used.
 Session resources (independent c8): user 19.3 s, system 19.6 s, voluntary
 context switches 567 k, involuntary 25 k. Shared c8: voluntary 641 k, involuntary 76.
 
+### Shared-session contention sweep (2026-08-13)
+
+The `scripts/session_contention_sweep.sh` helper runs one shared `Session`
+through c1/c2/c4/c8/c16/c32. A short WSL2 smoke run (2,000 total requests per
+point, `session_idle_grace=0`) reproduced the expected contention curve:
+
+| Callers | Throughput | p50 | p99 |
+|---:|---:|---:|---:|
+| 1 | 14.4k req/s | 53.6 us | 229.9 us |
+| 2 | 20.9k req/s | 73.4 us | 309.7 us |
+| 4 | 17.8k req/s | 202.3 us | 573.5 us |
+| 8 | 19.2k req/s | 375.6 us | 1.10 ms |
+| 16 | 19.7k req/s | 669.1 us | 2.41 ms |
+| 32 | 26.0k req/s | 1.09 ms | 2.99 ms |
+
+These numbers are diagnostic rather than a release baseline, but they confirm
+that a single shared session becomes the limiting topology under high caller
+counts. The next optimization candidates are sharded in-flight lookup and a
+single sender/MPSC path; each must be benchmarked against this sweep before it
+is adopted.
+
+### Shared-memory transport probe (2026-08-13)
+
+The standalone `memfd + eventfd` SPSC probe measured, on the same WSL2 host,
+about 5.0 GiB/s versus 2.1 GiB/s for a 4 KiB socketpair payload, and 9.6 GiB/s
+versus 2.6 GiB/s for a 64 KiB payload. This is a raw fixed-payload transport
+comparison with one producer and one consumer; it excludes crash recovery,
+multi-producer ordering, leases, and application framing. It is therefore
+evidence for an experimental data-plane direction, not a public API decision.
+
 ### Read-ahead batch size sweep (2026-08-12)
 
 `reactor_read_batch_size` (256 KiB default) caps how much the reactor parses

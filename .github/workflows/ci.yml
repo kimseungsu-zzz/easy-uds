@@ -91,6 +91,7 @@ jobs:
           ./build-experiments/easy_uds_fd_passing_probe
           ./build-experiments/easy_uds_false_sharing_probe 100000
           ./build-experiments/easy_uds_zero_copy_probe 1048576
+          ./build-experiments/easy_uds_shm_transport_probe 4096 1000
 
       - name: Run io_uring probe when the runner permits it
         run: |

@@ -32,6 +32,7 @@
 - `std::system_error` for socket failures, preserving the underlying `errno`
 - Static or shared library builds through `BUILD_SHARED_LIBS`
 - CMake install/export package and downstream `find_package()` support
+- Standalone Linux experiments for io_uring, FD passing, zero-copy, and memfd/eventfd shared-memory transport
 - Unit, shutdown-race stress, ASan/UBSan/TSan, protocol/session fuzz, static/shared, and install-consumer CI coverage
 
 ## Platform

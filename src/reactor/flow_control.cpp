@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <limits>
+#include <vector>
 
 #include <unistd.h>
 
@@ -35,6 +36,44 @@ bool above_pause_watermark(const std::shared_ptr<ServerState>& state,
            connection->inflight_request_bytes.load(std::memory_order_acquire) >= inflight_byte_limit(state);
 }
 
+void wake_reactor(const std::shared_ptr<ServerState>& state) noexcept;
+
+void resume_paused_connections(const std::shared_ptr<ServerState>& state,
+                               const std::shared_ptr<Connection>& released) noexcept {
+    std::vector<std::shared_ptr<Connection>> refresh;
+    {
+        std::lock_guard<std::mutex> lock(state->connections_mutex);
+        auto queue_if_ready = [&](const std::shared_ptr<ReactorConnection>& reactor_connection) {
+            const auto& connection = reactor_connection->conn;
+            if (!reactor_connection->read_paused ||
+                connection->closing.load(std::memory_order_acquire) ||
+                !below_resume_watermark(state, connection)) {
+                return;
+            }
+            reactor_connection->read_paused = false;
+            state->resumed_connections.push_back(reactor_connection);
+            refresh.push_back(connection);
+        };
+
+        if (state->options.max_total_inflight_bytes == 0) {
+            const auto it = state->connections.find(released->fd);
+            if (it != state->connections.end() && it->second->conn == released) {
+                queue_if_ready(it->second);
+            }
+        } else {
+            for (const auto& entry : state->connections) {
+                queue_if_ready(entry.second);
+            }
+        }
+    }
+    for (const auto& connection : refresh) {
+        (void)refresh_connection_events(state, connection);
+    }
+    if (!refresh.empty()) {
+        wake_reactor(state);
+    }
+}
+
 void wake_reactor(const std::shared_ptr<ServerState>& state) noexcept {
     if (state->wake_write_fd < 0) {
         return;
@@ -51,12 +90,63 @@ void wake_reactor(const std::shared_ptr<ServerState>& state) noexcept {
 
 } // namespace
 
+bool try_reserve_connection_request_bytes(const std::shared_ptr<ServerState>& state,
+                                          const std::shared_ptr<Connection>& connection,
+                                          std::size_t request_bytes) noexcept {
+    if (request_bytes == 0) {
+        return true;
+    }
+
+    const std::size_t connection_limit = inflight_byte_limit(state);
+    std::size_t connection_bytes =
+        connection->inflight_request_bytes.load(std::memory_order_acquire);
+    while (request_bytes <= connection_limit - std::min(connection_bytes, connection_limit)) {
+        if (connection->inflight_request_bytes.compare_exchange_weak(
+                connection_bytes, connection_bytes + request_bytes,
+                std::memory_order_acq_rel, std::memory_order_acquire)) {
+            break;
+        }
+    }
+    if (connection_bytes > connection_limit || request_bytes > connection_limit - connection_bytes) {
+        return false;
+    }
+
+    const std::size_t global_limit = state->options.max_total_inflight_bytes;
+    std::size_t global_bytes =
+        state->total_inflight_request_bytes.load(std::memory_order_acquire);
+    while (global_bytes <= global_limit && request_bytes <= global_limit - global_bytes) {
+        if (state->total_inflight_request_bytes.compare_exchange_weak(
+                global_bytes, global_bytes + request_bytes,
+                std::memory_order_acq_rel, std::memory_order_acquire)) {
+            return true;
+        }
+    }
+
+    connection->inflight_request_bytes.fetch_sub(request_bytes, std::memory_order_acq_rel);
+    return false;
+}
+
+void release_connection_request_bytes(const std::shared_ptr<ServerState>& state,
+                                      const std::shared_ptr<Connection>& connection,
+                                      std::size_t request_bytes) noexcept {
+    if (request_bytes == 0) {
+        return;
+    }
+    connection->inflight_request_bytes.fetch_sub(request_bytes, std::memory_order_acq_rel);
+    state->total_inflight_request_bytes.fetch_sub(request_bytes, std::memory_order_acq_rel);
+    resume_paused_connections(state, connection);
+}
+
 void account_connection_request(const std::shared_ptr<ServerState>& state,
                                 const std::shared_ptr<Connection>& connection,
                                 std::size_t request_bytes) noexcept {
     connection->inflight_requests.fetch_add(1, std::memory_order_relaxed);
     connection->inflight_request_bytes.fetch_add(request_bytes, std::memory_order_relaxed);
     state->total_inflight_request_bytes.fetch_add(request_bytes, std::memory_order_relaxed);
+}
+
+void account_connection_request_count(const std::shared_ptr<Connection>& connection) noexcept {
+    connection->inflight_requests.fetch_add(1, std::memory_order_relaxed);
 }
 
 void release_connection_request(const std::shared_ptr<ServerState>& state,
@@ -66,20 +156,24 @@ void release_connection_request(const std::shared_ptr<ServerState>& state,
     connection->inflight_requests.fetch_sub(1, std::memory_order_acq_rel);
     state->total_inflight_request_bytes.fetch_sub(request_bytes, std::memory_order_release);
 
-    bool resumed = false;
+    resume_paused_connections(state, connection);
+}
+
+void pause_connection_reads(const std::shared_ptr<ServerState>& state,
+                            const std::shared_ptr<ReactorConnection>& connection) noexcept {
+    const auto& peer = connection->conn;
+    bool paused = false;
     {
         std::lock_guard<std::mutex> lock(state->connections_mutex);
-        const auto it = state->connections.find(connection->fd);
-        if (it != state->connections.end() && it->second->conn == connection && it->second->read_paused &&
-            !connection->closing.load(std::memory_order_acquire) && below_resume_watermark(state, connection)) {
-            it->second->read_paused = false;
-            state->resumed_connections.push_back(it->second);
-            resumed = true;
+        const auto it = state->connections.find(peer->fd);
+        if (it != state->connections.end() && it->second == connection &&
+            !connection->read_paused) {
+            connection->read_paused = true;
+            paused = true;
         }
     }
-    if (resumed) {
-        (void)refresh_connection_events(state, connection);
-        wake_reactor(state);
+    if (paused && !refresh_connection_events(state, peer)) {
+        peer->closing.store(true, std::memory_order_release);
     }
 }
 
@@ -90,7 +184,6 @@ bool pause_connection_reads_if_needed(const std::shared_ptr<ServerState>& state,
         return false;
     }
 
-    bool paused = false;
     bool should_stop_reading = false;
     {
         std::lock_guard<std::mutex> lock(state->connections_mutex);
@@ -98,14 +191,10 @@ bool pause_connection_reads_if_needed(const std::shared_ptr<ServerState>& state,
         if (it != state->connections.end() && it->second == connection &&
             above_pause_watermark(state, peer)) {
             should_stop_reading = true;
-            if (!connection->read_paused) {
-                connection->read_paused = true;
-                paused = true;
-            }
         }
     }
-    if (paused && !refresh_connection_events(state, peer)) {
-        peer->closing.store(true, std::memory_order_release);
+    if (should_stop_reading) {
+        pause_connection_reads(state, connection);
     }
     return should_stop_reading;
 }

@@ -62,7 +62,8 @@ bool find_stream_handler(const std::shared_ptr<ServerState>& state, const std::s
 
 bool enqueue_worker_job(const std::shared_ptr<ServerState>& state, std::shared_ptr<Connection> connection,
                         easy_uds::Request request, Deadline deadline, std::shared_ptr<const HandlerEntry> handler,
-                        bool is_stream, std::string buffered, std::size_t buffered_offset) {
+                        bool is_stream, bool request_bytes_reserved, std::string buffered,
+                        std::size_t buffered_offset) {
     PendingJob job;
     job.connection = std::move(connection);
     job.request = std::move(request);
@@ -74,24 +75,39 @@ bool enqueue_worker_job(const std::shared_ptr<ServerState>& state, std::shared_p
     job.handler = std::move(handler);
     job.is_stream = is_stream;
     job.request_bytes = job.request.route.size() + job.request.body.size();
+    job.release_stream_request_bytes = is_stream && request_bytes_reserved;
     job.buffered = std::move(buffered);
     job.buffered_offset = buffered_offset;
+    const auto accounting_connection = job.connection;
+    const std::size_t accounting_bytes = job.request_bytes;
     {
         std::lock_guard<std::mutex> lock(state->work_mutex);
         if (state->workers_stopping) {
             close_request_fd(job.request);
+            if (request_bytes_reserved) {
+                release_connection_request_bytes(state, accounting_connection,
+                                                 accounting_bytes);
+            }
             return false;
         }
         try {
             state->pending_jobs.push_back(std::move(job));
         } catch (...) {
             close_request_fd(job.request);
+            if (request_bytes_reserved) {
+                release_connection_request_bytes(state, accounting_connection,
+                                                 accounting_bytes);
+            }
             throw;
         }
         if (!is_stream) {
             const auto& queued = state->pending_jobs.back();
             queued.connection->active_regular.fetch_add(1, std::memory_order_relaxed);
-            account_connection_request(state, queued.connection, queued.request_bytes);
+            if (request_bytes_reserved) {
+                account_connection_request_count(queued.connection);
+            } else {
+                account_connection_request(state, queued.connection, queued.request_bytes);
+            }
         }
     }
     state->work_cv.notify_one();
@@ -99,12 +115,14 @@ bool enqueue_worker_job(const std::shared_ptr<ServerState>& state, std::shared_p
 }
 
 void close_connection(const std::shared_ptr<ServerState>& state, int fd) {
-    std::lock_guard<std::mutex> lock(state->connections_mutex);
+    std::unique_lock<std::mutex> lock(state->connections_mutex);
     const auto it = state->connections.find(fd);
     if (it == state->connections.end()) {
         return;
     }
     const auto connection = it->second->conn;
+    const std::size_t parser_request_bytes = it->second->reserved_request_bytes;
+    it->second->reserved_request_bytes = 0;
     // Descriptors that were received via SCM_RIGHTS but never delivered to a
     // handler (the frame errored or the connection died mid-parse) must not
     // outlive the connection.
@@ -134,9 +152,18 @@ void close_connection(const std::shared_ptr<ServerState>& state, int fd) {
         connection->pending_serialized.load(std::memory_order_acquire) != 0) {
         // Keep the closing connection counted against max_connections until
         // every already-dispatched response job has released its fd reference.
+        lock.unlock();
+        if (parser_request_bytes != 0) {
+            release_connection_request_bytes(state, connection,
+                                             parser_request_bytes);
+        }
         return;
     }
     state->connections.erase(it);
+    lock.unlock();
+    if (parser_request_bytes != 0) {
+        release_connection_request_bytes(state, connection, parser_request_bytes);
+    }
 }
 
 bool dispatch_request(const std::shared_ptr<ServerState>& state,
@@ -169,10 +196,17 @@ bool dispatch_request(const std::shared_ptr<ServerState>& state,
         job.deadline = reactor_connection->deadline;
         job.handler = std::move(handler);
         job.request_bytes = job.request.route.size() + job.request.body.size();
+        const bool request_bytes_reserved =
+            state->options.max_total_inflight_bytes != 0;
+        reactor_connection->reserved_request_bytes = 0;
         {
             std::unique_lock<std::mutex> lock(state->serialized_mutex);
             if (state->serialized_stopping || !state->running.load()) {
                 close_request_fd(job.request);
+                if (request_bytes_reserved) {
+                    release_connection_request_bytes(state, job.connection,
+                                                     job.request_bytes);
+                }
                 reactor_connection->conn->closing.store(true, std::memory_order_release);
                 return false;
             }
@@ -180,11 +214,19 @@ bool dispatch_request(const std::shared_ptr<ServerState>& state,
                 state->pending_serialized.push_back(std::move(job));
             } catch (...) {
                 close_request_fd(job.request);
+                if (request_bytes_reserved) {
+                    release_connection_request_bytes(state, reactor_connection->conn,
+                                                     reactor_connection->payload_total);
+                }
                 throw;
             }
             reactor_connection->conn->pending_serialized.fetch_add(1, std::memory_order_relaxed);
             const auto& queued = state->pending_serialized.back();
-            account_connection_request(state, queued.connection, queued.request_bytes);
+            if (request_bytes_reserved) {
+                account_connection_request_count(queued.connection);
+            } else {
+                account_connection_request(state, queued.connection, queued.request_bytes);
+            }
         }
         state->serialized_cv.notify_one();
         return pause_connection_reads_if_needed(state, reactor_connection);
@@ -195,8 +237,11 @@ bool dispatch_request(const std::shared_ptr<ServerState>& state,
     if (request.request_id != 0) {
         reactor_connection->conn->session_capable.store(true, std::memory_order_relaxed);
     }
+    const bool request_bytes_reserved =
+        state->options.max_total_inflight_bytes != 0;
+    reactor_connection->reserved_request_bytes = 0;
     if (!enqueue_worker_job(state, reactor_connection->conn, std::move(request), reactor_connection->deadline,
-                            std::move(handler), false, {}, 0)) {
+                            std::move(handler), false, request_bytes_reserved, {}, 0)) {
         reactor_connection->conn->closing.store(true, std::memory_order_release);
         return false;
     }
@@ -221,6 +266,9 @@ void dispatch_stream(const std::shared_ptr<ServerState>& state,
     request.peer = connection->peer;
     request.request_id = reactor_connection->request_id;
     const Deadline stream_deadline = reactor_connection->deadline;
+    const bool request_bytes_reserved =
+        state->options.max_total_inflight_bytes != 0;
+    reactor_connection->reserved_request_bytes = 0;
 
     // Stream workers take the fd lease and carry unread reactor bytes with it.
     {
@@ -236,6 +284,7 @@ void dispatch_stream(const std::shared_ptr<ServerState>& state,
     reactor_connection->pending.clear();
     reactor_connection->pending_offset = 0;
     if (!enqueue_worker_job(state, connection, std::move(request), stream_deadline, {}, true,
+                            request_bytes_reserved,
                             std::move(leftover), leftover_offset)) {
         connection->closing.store(true, std::memory_order_release);
     }

@@ -101,7 +101,11 @@ bool serve_fixed_request(const std::shared_ptr<ServerState>& state,
 
 bool try_acquire_continuation_lease(const std::shared_ptr<ServerState>& state,
                                     const std::shared_ptr<Connection>& connection) {
-    if (!state->running.load() ||
+    // A configured aggregate request budget has one strict admission point in
+    // the reactor, before parser buffers are reserved. Keep the default
+    // zero-budget fast path unchanged, but do not bypass that admission point
+    // through a worker-owned continuation read.
+    if (state->options.max_total_inflight_bytes != 0 || !state->running.load() ||
         !connection->session_capable.load(std::memory_order_relaxed) ||
         connection->closing.load(std::memory_order_acquire) ||
         connection->active_regular.load(std::memory_order_acquire) != 0 ||
@@ -301,6 +305,7 @@ void rearm_connection(const std::shared_ptr<ServerState>& state,
         fresh->request_id = 0;
         fresh->arg1 = 0;
         fresh->arg2 = 0;
+        fresh->reserved_request_bytes = 0;
         fresh->deadline = Deadline::max();
         fresh->reactor_busy = false;
         fresh->read_paused = false;

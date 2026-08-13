@@ -69,15 +69,83 @@ ssize_t recv_with_fds(int fd, char* data, std::size_t size, std::deque<int>& fds
 
 } // namespace
 
+bool begin_request_payload(const std::shared_ptr<ServerState>& state,
+                           const std::shared_ptr<ReactorConnection>& rc) {
+    const std::size_t request_bytes = rc->payload_total;
+    if (state->options.max_total_inflight_bytes != 0) {
+        if (!try_reserve_connection_request_bytes(state, rc->conn, request_bytes)) {
+            pause_connection_reads(state, rc);
+            return false;
+        }
+        rc->reserved_request_bytes = request_bytes;
+    }
+    rc->route_buffer.clear();
+    rc->body_buffer.clear();
+    rc->route_buffer.reserve(rc->arg1);
+    rc->body_buffer.reserve(rc->arg2);
+    rc->phase = ParsePhase::request_payload;
+    return true;
+}
+
+bool begin_stream_route(const std::shared_ptr<ServerState>& state,
+                        const std::shared_ptr<ReactorConnection>& rc) {
+    const std::size_t request_bytes = rc->arg1;
+    if (state->options.max_total_inflight_bytes != 0) {
+        if (!try_reserve_connection_request_bytes(state, rc->conn, request_bytes)) {
+            pause_connection_reads(state, rc);
+            return false;
+        }
+        rc->reserved_request_bytes = request_bytes;
+    }
+    rc->route_buffer.clear();
+    rc->route_buffer.reserve(rc->arg1);
+    rc->phase = ParsePhase::stream_route;
+    return true;
+}
+
+void release_consumed_pending(const std::shared_ptr<ReactorConnection>& rc,
+                              bool strict_budget) {
+    if (strict_budget && rc->pending_offset == rc->pending.size()) {
+        std::string{}.swap(rc->pending);
+        rc->pending_offset = 0;
+    }
+}
+
 void consume(const std::shared_ptr<ServerState>& state,
              const std::shared_ptr<ReactorConnection>& rc) {
     const int fd = rc->conn->fd;
     std::array<char, reactor_read_scratch_size> scratch{};
+    const bool strict_budget = state->options.max_total_inflight_bytes != 0;
+
+    if (rc->phase == ParsePhase::request_budget &&
+        !begin_request_payload(state, rc)) {
+        return;
+    }
+    if (rc->phase == ParsePhase::stream_budget &&
+        !begin_stream_route(state, rc)) {
+        return;
+    }
 
     std::size_t read_ahead = 0;
     while (read_ahead < reactor_read_batch_size) {
-        const std::size_t request_size =
+        std::size_t request_size =
             std::min(scratch.size(), reactor_read_batch_size - read_ahead);
+        if (strict_budget) {
+            const std::size_t available = rc->pending.size() - rc->pending_offset;
+            if (rc->phase == ParsePhase::header) {
+                const std::size_t need = protocol::header_size - rc->header_received;
+                request_size = std::min(request_size, need > available ? need - available : 0);
+            } else if (rc->phase == ParsePhase::request_payload) {
+                const std::size_t remaining = rc->payload_total - rc->payload_received;
+                request_size = std::min(request_size, remaining > available ? remaining - available : 0);
+            } else if (rc->phase == ParsePhase::stream_route) {
+                const std::size_t remaining = rc->arg1 - rc->route_buffer.size();
+                request_size = std::min(request_size, remaining > available ? remaining - available : 0);
+            }
+            if (request_size == 0) {
+                break;
+            }
+        }
         const ssize_t size = recv_with_fds(fd, scratch.data(), request_size, rc->received_fds);
         if (size > 0) {
             mark_io_progress(rc->conn);
@@ -87,6 +155,12 @@ void consume(const std::shared_ptr<ServerState>& state,
             }
             rc->pending.append(scratch.data(), static_cast<std::size_t>(size));
             read_ahead += static_cast<std::size_t>(size);
+            if (strict_budget) {
+                // Parse the bounded chunk before reading again. In particular,
+                // never read payload bytes until its declared allocation has
+                // been admitted by the aggregate budget.
+                break;
+            }
             continue;
         }
         if (size == 0) {
@@ -110,13 +184,19 @@ void consume(const std::shared_ptr<ServerState>& state,
                 rc->deadline = deadline_from_now(state->options.request_timeout);
             }
             const std::size_t need = protocol::header_size - rc->header_received;
-            if (available < need) {
+            const std::size_t take = std::min(available, need);
+            if (take != 0) {
+                std::memcpy(rc->header.data() + rc->header_received,
+                            rc->pending.data() + rc->pending_offset, take);
+                rc->pending_offset += take;
+                rc->header_received += take;
+            }
+            if (rc->header_received != protocol::header_size) {
+                release_consumed_pending(rc, strict_budget);
                 return;
             }
-            std::memcpy(rc->header.data() + rc->header_received,
-                        rc->pending.data() + rc->pending_offset, need);
-            rc->pending_offset += need;
             rc->header_received = 0;
+            release_consumed_pending(rc, strict_budget);
 
             const auto decoded = protocol::decode_header(rc->header);
             if (decoded.type == WireType::request) {
@@ -134,11 +214,10 @@ void consume(const std::shared_ptr<ServerState>& state,
                 rc->arg2 = decoded.arg2;
                 rc->payload_total = static_cast<std::size_t>(decoded.arg1) + decoded.arg2;
                 rc->payload_received = 0;
-                rc->route_buffer.clear();
-                rc->body_buffer.clear();
-                rc->route_buffer.reserve(decoded.arg1);
-                rc->body_buffer.reserve(decoded.arg2);
-                rc->phase = ParsePhase::request_payload;
+                rc->phase = ParsePhase::request_budget;
+                if (!begin_request_payload(state, rc)) {
+                    return;
+                }
                 continue;
             }
             if (decoded.type == WireType::stream_request) {
@@ -151,10 +230,12 @@ void consume(const std::shared_ptr<ServerState>& state,
                 }
                 rc->request_id = decoded.request_id;
                 rc->arg1 = decoded.arg1;
-                rc->route_buffer.clear();
-                rc->route_buffer.reserve(decoded.arg1);
-                rc->phase = ParsePhase::stream_route;
+                rc->arg2 = 0;
+                rc->phase = ParsePhase::stream_budget;
                 rc->deadline = deadline_from_now(state->options.stream_timeout);
+                if (!begin_stream_route(state, rc)) {
+                    return;
+                }
                 continue;
             }
             throw std::runtime_error("unexpected protocol message type");
@@ -172,6 +253,7 @@ void consume(const std::shared_ptr<ServerState>& state,
                 rc->pending_offset += take;
                 rc->payload_received += take;
             }
+            release_consumed_pending(rc, strict_budget);
             if (rc->payload_received == rc->payload_total) {
                 const bool read_paused = dispatch_request(state, rc);
                 rc->phase = ParsePhase::header;
@@ -188,6 +270,7 @@ void consume(const std::shared_ptr<ServerState>& state,
             std::min(available, rc->arg1 - rc->route_buffer.size());
         rc->route_buffer.append(rc->pending.data() + rc->pending_offset, take);
         rc->pending_offset += take;
+        release_consumed_pending(rc, strict_budget);
         if (rc->route_buffer.size() == rc->arg1) {
             dispatch_stream(state, rc);
         }

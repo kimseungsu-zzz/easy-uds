@@ -82,7 +82,7 @@ struct Connection {
 };
 
 // Reactor-side parse state for one connection.
-enum class ParsePhase { header, request_payload, stream_route };
+enum class ParsePhase { header, request_budget, request_payload, stream_budget, stream_route };
 
 struct ReactorConnection {
     std::shared_ptr<Connection> conn;
@@ -98,6 +98,10 @@ struct ReactorConnection {
     std::uint32_t request_id = 0;
     std::uint32_t arg1 = 0;
     std::uint32_t arg2 = 0;
+    // Declared route+body bytes reserved against the strict aggregate request
+    // budget while this frame is only partially received. Ownership transfers
+    // to the queued/executing job at dispatch.
+    std::size_t reserved_request_bytes = 0;
     Deadline deadline = Deadline::max();     // absolute deadline once a request starts
     bool reactor_busy = false;               // guarded by connections_mutex
     bool read_paused = false;                 // guarded by connections_mutex
@@ -117,6 +121,9 @@ struct PendingJob {
     std::shared_ptr<const HandlerEntry> handler;
     bool is_stream = false;
     std::size_t request_bytes = 0;
+    // Stream routes participate in the strict aggregate request budget but do
+    // not increment the fixed-request count.
+    bool release_stream_request_bytes = false;
     // For stream jobs: bytes already read from the socket before the lease
     // hand-off, followed by the fd.
     std::string buffered;
@@ -251,21 +258,32 @@ bool refresh_connection_events(const std::shared_ptr<ServerState>& state,
 Deadline connection_output_deadline(const std::shared_ptr<ServerState>& state,
                                     const std::shared_ptr<Connection>& connection);
 
-// Per-connection input flow control. Accounting includes queued and executing
-// fixed requests; pause/resume toggles only EPOLLIN for the affected peer.
+// Per-connection input flow control. With a configured aggregate budget,
+// byte accounting starts after the header and includes partially received,
+// queued, and executing requests. Pause/resume toggles only EPOLLIN.
+bool try_reserve_connection_request_bytes(const std::shared_ptr<ServerState>& state,
+                                          const std::shared_ptr<Connection>& connection,
+                                          std::size_t request_bytes) noexcept;
+void release_connection_request_bytes(const std::shared_ptr<ServerState>& state,
+                                      const std::shared_ptr<Connection>& connection,
+                                      std::size_t request_bytes) noexcept;
 void account_connection_request(const std::shared_ptr<ServerState>& state,
                                 const std::shared_ptr<Connection>& connection,
                                 std::size_t request_bytes) noexcept;
+void account_connection_request_count(const std::shared_ptr<Connection>& connection) noexcept;
 void release_connection_request(const std::shared_ptr<ServerState>& state,
                                 const std::shared_ptr<Connection>& connection,
                                 std::size_t request_bytes) noexcept;
+void pause_connection_reads(const std::shared_ptr<ServerState>& state,
+                            const std::shared_ptr<ReactorConnection>& connection) noexcept;
 bool pause_connection_reads_if_needed(const std::shared_ptr<ServerState>& state,
                                       const std::shared_ptr<ReactorConnection>& connection) noexcept;
 
 // Enqueues a parsed request for the regular worker pool.
 bool enqueue_worker_job(const std::shared_ptr<ServerState>& state, std::shared_ptr<Connection> connection,
                         easy_uds::Request request, Deadline deadline, std::shared_ptr<const HandlerEntry> handler,
-                        bool is_stream, std::string buffered, std::size_t buffered_offset);
+                        bool is_stream, bool request_bytes_reserved, std::string buffered,
+                        std::size_t buffered_offset);
 
 // Removes and shuts down a connection; the fd closes when the last worker/
 // reactor reference releases Connection, preventing fd-number reuse races.

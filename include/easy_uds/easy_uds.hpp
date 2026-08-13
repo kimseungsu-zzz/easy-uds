@@ -97,8 +97,11 @@ struct ServerOptions {
     // allows an unbounded stream; io_timeout still detects stalled peers.
     std::size_t max_stream_size = default_max_stream_size;
 
-    // Aggregate queued fixed-request payload budget across all connections.
-    // Zero disables the global limit; per-connection backpressure remains.
+    // Strict aggregate declared route+body budget across all connections. A
+    // frame reserves its bytes after header validation and before parser
+    // buffers are allocated, so partial, queued, and executing requests are
+    // included. Zero disables the aggregate limit and preserves the session
+    // continuation fast path.
     std::size_t max_total_inflight_bytes = 0;
 
     // Aggregate unsent fixed-response wire-byte budget (header + remaining

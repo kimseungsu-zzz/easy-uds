@@ -123,6 +123,18 @@ void run_stream_exchange(const std::shared_ptr<ServerState>& state, PendingJob&&
     auto connection = job.connection;
     const int fd = connection->fd;
     ActiveStreamGuard stream_guard(state);
+    struct RequestBytesGuard {
+        std::shared_ptr<ServerState> state;
+        std::shared_ptr<Connection> connection;
+        std::size_t bytes;
+        bool active;
+        ~RequestBytesGuard() {
+            if (active) {
+                release_connection_request_bytes(state, connection, bytes);
+            }
+        }
+    } request_bytes_guard{state, connection, job.request_bytes,
+                          job.release_stream_request_bytes};
     try {
         StreamByteSource source(job.buffered, job.buffered_offset, fd);
         IncomingStream incoming(source, WireType::stream_request_chunk, WireType::stream_request_end,

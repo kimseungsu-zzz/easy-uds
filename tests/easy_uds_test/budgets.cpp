@@ -1,5 +1,7 @@
 #include "common.hpp"
 
+#include <future>
+
 namespace easy_uds::test {
 
 void test_global_memory_budgets() {
@@ -54,6 +56,51 @@ void test_global_memory_budgets() {
     const Response response = client.request("ping");
     expect(response.status == 200 && response.body == "pong",
            "global memory budgets must preserve ordinary requests");
+    server.stop();
+    server_thread.join();
+    cleanup_socket_artifacts(path);
+}
+
+void test_partial_request_uses_global_budget() {
+    using namespace easy_uds;
+
+    const std::string path = socket_path("partial-global-budget");
+    ServerOptions options;
+    options.worker_threads = 2;
+    options.max_connections = 4;
+    options.max_message_size = 64U * 1024U;
+    options.max_total_inflight_bytes = options.max_message_size;
+    options.io_timeout = 2s;
+    options.request_timeout = 5s;
+    Server server(path, options);
+    server.on("ping", [](const Request&) { return Response{200, "pong"}; });
+
+    std::thread server_thread([&] { server.run(); });
+    wait_until_running(server);
+
+    const int partial = connect_raw(path);
+    const auto header = frame(1, 1, 4,
+                              static_cast<std::uint32_t>(options.max_message_size - 4),
+                              nullptr, 0);
+    send_exact(partial, header.data(), header.size());
+    std::this_thread::sleep_for(50ms);
+
+    ClientOptions client_options;
+    client_options.request_timeout = 2s;
+    auto pending = std::async(std::launch::async, [&] {
+        Client client(path, client_options);
+        return client.request("ping");
+    });
+    expect(pending.wait_for(100ms) == std::future_status::timeout,
+           "a header-reserved partial request must consume the aggregate budget");
+
+    (void)::close(partial);
+    expect(pending.wait_for(1s) == std::future_status::ready,
+           "closing a partial request must resume peers waiting for aggregate budget");
+    const Response response = pending.get();
+    expect(response.status == 200 && response.body == "pong",
+           "resumed request must complete after partial parser memory is released");
+
     server.stop();
     server_thread.join();
     cleanup_socket_artifacts(path);

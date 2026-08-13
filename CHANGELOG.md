@@ -2,6 +2,24 @@
 
 All notable changes to this project are documented here.
 
+## Unreleased 0.7.0 — 🌱 Usability Foundation
+
+- Made `max_total_inflight_bytes` a strict declared request-byte budget. Fixed
+  requests and stream routes reserve route+body bytes after header validation
+  and before parser buffers are allocated, so partial parsing, queued work, and
+  executing work share one cap.
+- Connections that cannot reserve parser memory pause `EPOLLIN` and resume when
+  another partial or completed request releases the low watermark. Closing a
+  partial frame releases its reservation and wakes globally paused peers.
+- Kept the 0.6.4 hot path unchanged when the aggregate budget is disabled (the
+  default). Strict-budget Sessions use reactor admission instead of bypassing
+  the cap through a worker continuation lease.
+- Added a regression that fills the budget with a header-only partial request,
+  verifies another peer is backpressured, then verifies cleanup resumes it.
+- Added the 0.7 roadmap: easy defaults, explicit advanced control, modular
+  public/internal layout, protocol-v3 decision gates, and 0.6.4 performance
+  regression thresholds.
+
 ## 0.6.4 — ⚙️ Final Experimental Closure
 
 - Split the multiplexed client Session's in-flight request table into 16

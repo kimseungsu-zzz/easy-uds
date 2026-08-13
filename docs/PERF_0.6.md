@@ -167,6 +167,61 @@ but its extra ring copies and eventfd wakeups lose at 4 KiB and 1 MiB. These
 numbers are an experiment result, not a transport selection or a release
 performance guarantee.
 
+#### Process/direct-slot/conditional-wakeup follow-up (2026-08-13)
+
+`easy_uds_shm_process_probe` repeats the framed exchange between separate
+`fork()` processes. The parent creates two memfds and two eventfds after the
+fork and transfers all four descriptors with `SCM_RIGHTS`, so the data-plane
+setup is no longer an in-process approximation. It compares three ring paths:
+
+1. private application buffers copied into mapped slots, with one eventfd write
+   on every publish;
+2. direct mapped-slot write/read, still with an eventfd write every publish;
+3. direct slots with a sleeping-consumer handshake, signaling only when the
+   consumer cannot observe work after its spin window.
+
+One WSL2 `g++ -O3` sweep at 2,048 spin iterations with the corrected request
+layout (20-byte header, 4-byte route, body) produced these representative
+points:
+
+| Payload | Path | p50 | p99 | p99.9 | Throughput | CPU-s / 1M | eventfd / exchange |
+|---:|---|---:|---:|---:|---:|---:|---:|
+| 64 B | copy + always | 32.8 us | 137.5 us | 245 us | 0.0038 GiB/s | 32.3 | 2.0 |
+| 64 B | direct + conditional | 0.47 us | 0.54 us | 10.5 us | 0.275 GiB/s | 1.17 | 0.00005 |
+| 4 KiB | copy + always | 42.2 us | 111 us | 229 us | 0.172 GiB/s | 34.6 | 2.0 |
+| 4 KiB | direct + conditional | 2.49 us | 2.70 us | 13.1 us | 2.91 GiB/s | 5.28 | 0 |
+| 64 KiB | copy + always | 73.2 us | 246 us | 320 us | 1.19 GiB/s | 88.9 | 2.0 |
+| 64 KiB | direct + conditional | 26.1 us | 97.4 us | 184 us | 3.90 GiB/s | 62.4 | 0.01 |
+| 1 MiB | direct + always | 501 us | 869 us | 869 us | 2.86 GiB/s | 654 | 2.0 |
+| 1 MiB | direct + conditional | 567 us | 1097 us | 1097 us | 2.65 GiB/s | 881 | 2.0 |
+| 1 MiB | socketpair | 690 us | 1377 us | 1377 us | 2.40 GiB/s | 960 | n/a |
+| 4 MiB | direct + conditional | 3.76 ms | 4.26 ms | 4.26 ms | 1.62 GiB/s | 4898 | 2.0 |
+| 4 MiB | socketpair | 4.47 ms | 5.70 ms | 5.70 ms | 1.60 GiB/s | 5849 | n/a |
+
+Removing the intermediate payload copies is useful, but conditional wakeup is
+the decisive hot-path change below 64 KiB. At 1 MiB and above, frame fill and
+validation exceed the spin window and eventfd returns to two writes per
+exchange; the advantage narrows and becomes run-sensitive.
+
+A separate spin sweep compared 0/64/256/1024/2048 iterations. A 256-iteration
+window retained the 64-byte hot p50/p99 result (0.44/0.50 us in that sweep)
+while using about 69% less CPU than 2048 iterations when the responder delayed
+every reply by 2 ms. The default probe value is therefore 256. The idle test
+also shows why this is not a general transport decision: any spin window burns
+CPU while waiting for slow application work.
+
+The zero-spin stress initially exposed a real lost wakeup in the experimental
+handshake. A consumer used a plain store to advertise sleep while the producer
+used an exchange, permitting both sides to miss each other. Pairing producer
+and consumer RMW exchanges fixed the ordering; zero-spin then completed
+100,000 exchanges, and the ASan/UBSan boundary runs remained clean.
+
+Decision: **KEEP AS AN EXPERIMENT, DO NOT ADD A PUBLIC SHM TRANSPORT IN 0.6.x**.
+The fast result is compelling for a continuously hot, trusted SPSC data channel,
+but ownership lifetime, peer crash recovery, ring leases, backpressure, and
+multi-producer ordering would add substantially more complexity. The result is
+enough to inform a future opt-in design without expanding the final 0.6 API.
+
 ### Read-ahead batch size sweep (2026-08-12)
 
 `reactor_read_batch_size` (256 KiB default) caps how much the reactor parses

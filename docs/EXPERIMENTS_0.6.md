@@ -20,6 +20,7 @@ cmake --build build-experiments --parallel
 ./build-experiments/easy_uds_zero_copy_probe 16777216
 ./build-experiments/easy_uds_shm_transport_probe 4096 10000
 ./build-experiments/easy_uds_shm_framed_probe 4096 1000
+./build-experiments/easy_uds_shm_process_probe 4096 1000
 ```
 
 `easy_uds_fd_passing_probe` transfers a `memfd_create()` descriptor with
@@ -43,6 +44,21 @@ an SCM_RIGHTS control message; the socketpair path is the same framed exchange
 over a normal byte stream. This isolates transport overhead, not the reactor,
 handler dispatch, multiplexing, or backpressure, so it must not be read as an
 in-library performance claim.
+
+`easy_uds_shm_process_probe` closes two omissions in the earlier threaded
+probe. The request and response endpoints are separate `fork()` processes,
+and the parent creates the data-plane descriptors after the fork and transfers
+them with a real `SCM_RIGHTS` message. It compares private-buffer copies with
+direct mapped-slot access, then enables an empty-to-non-empty conditional
+`eventfd` wakeup. Request slots contain the actual protocol-v2 header, route,
+and body layout; response slots contain the header and body. The direct path
+exposes mapped memory only inside this standalone probe--it is not a public
+ownership or lifetime contract. Run the complete payload sweep with:
+
+```sh
+./scripts/shm_process_sweep.sh
+./scripts/shm_spin_sweep.sh
+```
 
 ## Shared Session contention attribution
 

@@ -96,6 +96,7 @@ jobs:
           ./build-experiments/easy_uds_zero_copy_probe 1048576
           ./build-experiments/easy_uds_shm_transport_probe 4096 1000
           ./build-experiments/easy_uds_shm_framed_probe 4096 200
+          ./build-experiments/easy_uds_shm_process_probe 4096 200
           ./build-experiments/easy_uds_session_benchmark 200 4 shared 0
 
       - name: Run io_uring probe when the runner permits it

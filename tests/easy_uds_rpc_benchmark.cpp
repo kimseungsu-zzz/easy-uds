@@ -157,6 +157,8 @@ int main(int argc, char** argv) {
               << "throughput: " << requests_per_second << " requests/s\n"
               << "latency:    avg=" << latency_sum / static_cast<double>(samples.size())
               << " us, p50=" << percentile(samples, 0.50) << " us, p95=" << percentile(samples, 0.95)
-              << " us, p99=" << percentile(samples, 0.99) << " us\n";
+              << " us, p99=" << percentile(samples, 0.99)
+              << " us, p99.9=" << percentile(samples, 0.999)
+              << " us, max=" << samples.back() << " us\n";
     return 0;
 }

@@ -2,9 +2,9 @@
 
 `0.6`의 목표는 Unix Domain Socket 기반 IPC 서버의 **한계 돌파**다. reactor,
 worker, multiplexing, backpressure, streaming, lifetime을 실제로 검증하는
-것을 넘어서, 측정으로 입증된 기법(io_uring 백엔드, `SCM_RIGHTS` FD passing,
-zero-copy 파일 스트림, allocator/object pool, 플랫폼별 spin 프로파일 등)을
-**0.6 안에서 채택**한다. API/ABI/protocol 동결(0.6.5)은 채택 판정이 모두 끝난
+것을 넘어서, io_uring, `SCM_RIGHTS` FD passing, zero-copy 파일 스트림,
+allocator/object pool, 플랫폼별 spin 프로파일 등을 실제로 측정해
+**0.6 안에서 채택 또는 기각 판정**한다. API/ABI/protocol 동결(0.6.4)은 판정이 모두 끝난
 뒤의 마지막 0.6 릴리즈로 **연기**한다.
 
 판정 원칙은 그대로 유지한다: "코드가 존재함"이 아니라 동일 워크로드에서
@@ -83,13 +83,13 @@ latency/throughput/CPU/memory 중 하나 이상의 개선이 **측정**되어야
 
 #### P1: 게이트용 실험 (수행 완료, 채택 판정은 0.6.3/0.6.4에서)
 
-- [x] `io_uring_setup` capability probe — 채택 판정은 0.6.5 옵트인 백엔드
+- [x] `io_uring_setup` capability probe와 epoll/basic-io_uring A/B — 기본 backend 채택 기각
 - [x] `SCM_RIGHTS`/`memfd_create` FD passing standalone prototype — 채택 판정은
       0.6.4
 - [x] file-backed `sendfile`/`splice` zero-copy standalone 비교 — 채택 판정은
       0.6.4
 - [x] false sharing 및 allocator 측정 (`alignas`, queue/map allocation probe)
-- [ ] end-to-end framed stream에서 `sendfile`/`splice` 유효성 검증
+- [x] end-to-end framed stream에서 `sendfile`/`splice` 유효성 검증
       (framing + size limit + deadline + fallback을 얹고 재측정)
 
 P1 실험은 측정 자료가 없으면 public API 또는 기본 backend에 포함하지 않는다.
@@ -102,7 +102,7 @@ P1 실험은 측정 자료가 없으면 public API 또는 기본 backend에 포�
         라이브러리 gathered `sendmsg` 경로(~9.8 GiB/s)와 비교하면 sendfile
         파일 스트림은 non-blocking에서 1.3–1.6 GiB/s, blocking에서 2.3 GiB/s로
         4~7x 회귀. 파일 소스 public API는 **도입하지 않는다**.
-      - zero-copy 목표는 io_uring(0.6.5) `IORING_OP_SENDFILE`로 연기.
+      - zero-copy 목표는 0.6 밖의 workload-specific io_uring 실험으로 연기.
       - 같은 검증에서 백투백 스트림 스퓨리어스 거부 레이스 발견·하드닝:
         스트림 슬롯을 응답 쓰기 직후(rearm 전) 해제. 회귀 테스트
         `test_back_to_back_streams` 추가.
@@ -119,18 +119,20 @@ P1 실험은 측정 자료가 없으면 public API 또는 기본 backend에 포�
         누수 없음, 404 경로)
 - [x] protocol v2 와이어 호환 유지 (SCM_RIGHTS는 라이트 확장·ancillary data)
 
-### 0.6.5 — io_uring 백엔드 + Final Stabilization (마지막 0.6 릴리즈)
+### 0.6.4 — Final Stabilization (마지막 0.6 릴리즈)
 
-- [ ] io_uring 리액터 프로토타입: multishot accept, fixed CQE, 제공자 버퍼
-- [ ] epoll 대비 동일 워크로드 벤치 판정 (고동시성, syscall/req, p99, CPU)
-- [ ] 채택 시 기본은 epoll 유지하고 옵트인 백엔드로 포함 여부 결정
-- [ ] 0.6.3/0.6.4 채택 결과 정리 — 미채택 prototype 제거 또는 실험
+- [x] exact-I/O epoll/basic-io_uring transport A/B 구현
+- [x] 동일 워크로드 판정 (c1/c2/c8/c32, syscall/req, p99.9, CPU)
+      — io_uring은 syscall 수는 줄였지만 c2 이상 latency/CPU/throughput 회귀로 **기각**
+- [x] production epoll 유지 확정. multishot accept는 steady-state RPC 비용을 바꾸지
+      않고 provided buffer/send-zc는 이 tiny RPC workload와 맞지 않아 0.6에서 중단
+- [x] 0.6.3/0.6.4 채택 결과 정리 — 미채택 prototype 제거 또는 실험
       namespace 격리
 - [ ] public API/ABI/protocol 동결
 - [ ] Linux x86_64 + ARM64 장시간 stress
 - [ ] full sanitizer/fuzz/package CI green
 - [ ] 성능표와 migration/release 문서 최종 동기화
-- [ ] `0.6.x`에서 더 이상 기능 확장하지 않고 0.7 사용성 작업으로 이동
+- [x] `0.6.x`에서 더 이상 기능 확장하지 않고 0.7 사용성 작업으로 이동
 
 ## 채택 게이트
 

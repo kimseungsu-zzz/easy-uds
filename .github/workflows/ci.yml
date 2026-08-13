@@ -19,8 +19,56 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Install optional Linux probe dependency
+        run: sudo apt-get update && sudo apt-get install -y liburing-dev
+
       - name: Run ARM64 release smoke workload
-        run: ./scripts/arm64_smoke.sh
+        run: ./scripts/arm64_smoke.sh 2>&1 | tee arm64-final-benchmarks.log
+
+      - name: Upload ARM64 benchmark log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: easy-uds-arm64-final-benchmarks
+          path: arm64-final-benchmarks.log
+
+  native-linux-benchmarks:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Install optional Linux probe dependency
+        run: sudo apt-get update && sudo apt-get install -y liburing-dev
+
+      - name: Configure final benchmark build
+        run: >-
+          cmake -S . -B build-final
+          -DCMAKE_BUILD_TYPE=Release
+          -DEASY_UDS_BUILD_BENCHMARKS=ON
+          -DEASY_UDS_BUILD_EXPERIMENTS=ON
+          -DEASY_UDS_BUILD_EXAMPLES=OFF
+          -DEASY_UDS_WARNINGS_AS_ERRORS=ON
+
+      - name: Build final benchmark targets
+        run: cmake --build build-final --parallel
+
+      - name: Run native Linux final benchmarks
+        run: ./scripts/final_linux_benchmarks.sh build-final 2>&1 | tee x86_64-final-benchmarks.log
+
+      - name: Run repeated unit and stress soak
+        run: ./scripts/long_soak.sh build-final 20 2>&1 | tee -a x86_64-final-benchmarks.log
+
+      - name: Upload x86_64 benchmark log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: easy-uds-x86_64-final-benchmarks
+          path: x86_64-final-benchmarks.log
 
   build-and-test:
     runs-on: ubuntu-latest
@@ -192,16 +240,26 @@ jobs:
 
       - name: Run bounded fuzz smoke test
         run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            runs=200000
+          else
+            runs=20000
+          fi
           mkdir -p fuzz-corpus
-          ./build-fuzz/easy_uds_protocol_fuzz fuzz-corpus -runs=20000 -max_len=64
+          ./build-fuzz/easy_uds_protocol_fuzz fuzz-corpus -runs="$runs" -max_len=64
 
       - name: Build session fuzzer
         run: cmake --build build-fuzz --target easy_uds_session_fuzz --parallel
 
       - name: Run bounded session fuzz smoke test
         run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            runs=20000
+          else
+            runs=2000
+          fi
           mkdir -p session-fuzz-corpus
-          ./build-fuzz/easy_uds_session_fuzz session-fuzz-corpus -runs=2000 -max_len=256
+          ./build-fuzz/easy_uds_session_fuzz session-fuzz-corpus -runs="$runs" -max_len=256
 
   install-package:
     runs-on: ubuntu-latest

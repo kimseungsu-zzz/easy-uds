@@ -382,8 +382,9 @@ Standalone on this host a memfd read is ~5.5 GiB/s and blocking `sendfile`
 ~4.2 GiB/s, so the file→socket path is slower than the user-space gather path
 before any non-blocking penalty is added. A file-source API is a 4–7x
 regression here. Decision: the 0.6.4 file-stream API is **rejected**; the
-zero-copy goal moves to the io_uring backend (0.6.5), where
-`IORING_OP_SENDFILE` handles non-blocking targets efficiently. The framed and
+zero-copy goal moves beyond 0.6 to a workload-specific io_uring experiment,
+where `IORING_OP_SENDFILE` can be measured without the temporary blocking-mode
+workaround. The framed and
 raw probe passes remain as documentation of the naive transport result.
 
 ### recvmsg-with-control read path (2026-08-12)

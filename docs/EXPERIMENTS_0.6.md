@@ -107,12 +107,20 @@ the naive transport result.
 ## ARM64 validation
 
 The `workflow_dispatch` CI path uses GitHub's hosted ARM64 runner and runs
-`scripts/arm64_smoke.sh` for the normal release build, unit tests, and stress
-target. On an ARM64 SBC or self-hosted runner, extend the run at
-1 KiB, 64 KiB, and 1 MiB payloads with connection counts 1/8/32/64, then repeat
-the session and streaming benchmarks. Record p50/p95/p99, throughput, CPU,
-context switches, and a shutdown/timeout soak before marking the ARM64 roadmap
-items complete.
+`scripts/arm64_smoke.sh` for the release build, unit/stress tests, 1 KiB / 64
+KiB / 1 MiB RPC payloads, session concurrency 1/8/32/64, streaming, process
+SHM, and io_uring A/B when the kernel permits it. The same script finishes with
+five complete unit/stress soak passes. `/usr/bin/time` adds CPU, RSS, and
+context-switch data around benchmarks that do not report those values
+internally. The workflow uploads the complete ARM64 log as an artifact.
+
+The same dispatch starts a native Ubuntu x86_64 job with identical benchmarks
+and twenty soak passes. Run either workload directly with:
+
+```sh
+./scripts/final_linux_benchmarks.sh build-directory
+./scripts/long_soak.sh build-directory 20
+```
 
 The script exits with status 2 on non-ARM64 hosts so an x86 build cannot be
 mistaken for ARM coverage. Set `EASY_UDS_ALLOW_NON_ARM64=1` only for a local

@@ -26,6 +26,9 @@ All notable changes to this project are documented here.
 - Reworked the io_uring echo probe into a correctness-checked epoll/io_uring A/B.
   Basic io_uring reduced syscall count but regressed concurrent throughput,
   latency, and CPU cost, so the production backend remains epoll.
+- Added matching native x86_64 and hosted ARM64 final benchmark gates with
+  payload/concurrency sweeps, CPU/RSS/context-switch reporting, uploaded logs,
+  repeated unit/stress soaks, and longer dispatch-only fuzz runs.
 
 ## 0.6.3 — ⚙️ Experimental Closure
 

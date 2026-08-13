@@ -1,5 +1,7 @@
 #pragma once
 
+#include "easy_uds/error.hpp"
+
 #include <cerrno>
 #include <system_error>
 #include <utility>
@@ -57,16 +59,18 @@ class OwnedFd {
     // returned value owns its descriptor and has close-on-exec set.
     [[nodiscard]] OwnedFd duplicate() const {
         if (!valid()) {
-            throw std::system_error(EBADF, std::generic_category(),
-                                    "cannot duplicate an empty descriptor");
+            throw Error(ErrorCode::invalid_request,
+                        "cannot duplicate an empty descriptor",
+                        {EBADF, std::generic_category()});
         }
         int duplicate_fd;
         do {
             duplicate_fd = ::fcntl(fd_, F_DUPFD_CLOEXEC, 0);
         } while (duplicate_fd < 0 && errno == EINTR);
         if (duplicate_fd < 0) {
-            throw std::system_error(errno, std::generic_category(),
-                                    "fcntl(F_DUPFD_CLOEXEC) failed");
+            const std::error_code system_code(errno, std::generic_category());
+            throw Error(detail::classify_system_error(system_code),
+                        "fcntl(F_DUPFD_CLOEXEC) failed", system_code);
         }
         return adopt(duplicate_fd);
     }

@@ -45,6 +45,21 @@ void expect_throws(Function&& function, const std::string& message) {
     throw std::runtime_error("test failed: " + message);
 }
 
+template <typename Function>
+void expect_easy_error(Function&& function, easy_uds::ErrorCode expected,
+                       const std::string& message) {
+    try {
+        function();
+    } catch (const easy_uds::Error& error) {
+        if (error.kind() == expected) {
+            return;
+        }
+        throw std::runtime_error("test failed: " + message +
+                                 " (wrong easy-uds error code)");
+    }
+    throw std::runtime_error("test failed: " + message);
+}
+
 std::string socket_path(const char* suffix);
 void wait_until_running(const easy_uds::Server& server);
 int connect_raw(const std::string& path);
@@ -80,6 +95,7 @@ void test_session_broken_after_shutdown();
 void test_session_broken_after_timeout();
 void test_idle_session_survives_io_timeout();
 void test_session_move();
+void test_error_model();
 void test_fd_passing();
 void test_reactor_request_timeouts();
 void test_streams();

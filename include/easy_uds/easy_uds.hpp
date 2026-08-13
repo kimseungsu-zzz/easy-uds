@@ -1,5 +1,6 @@
 #pragma once
 
+#include "easy_uds/error.hpp"
 #include "easy_uds/fd.hpp"
 #include "easy_uds/version.hpp"
 
@@ -282,7 +283,8 @@ class Client {
 // call returns its own response. request_stream() uses a separate dedicated
 // connection, so it does not block fixed requests or another stream call.
 // After an I/O error, time-out, or peer close the fixed-request session is
-// permanently unusable and every later call throws std::logic_error.
+// permanently unusable and every later call throws Error with
+// ErrorCode::closed. A moved-from Session still throws std::logic_error.
 class Session {
   public:
     ~Session();

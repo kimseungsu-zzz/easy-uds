@@ -44,8 +44,8 @@ available on persistent `Session` requests or streams. The v2 wire protocol
 allows exactly one descriptor and rejects the FD flag on nonzero request IDs.
 
 - Passing an empty `BorrowedFd` throws `std::invalid_argument` before connect.
-- `OwnedFd::duplicate()` throws `std::system_error` with the original `errno`
-  information; duplicating an empty value reports `EBADF`.
+- `OwnedFd::duplicate()` throws `Error`. An empty value is classified as
+  `invalid_request` and preserves `EBADF` in `system_code()`.
 - Connection, timeout, and protocol errors follow the normal one-shot request
   behavior. The caller still owns its original descriptor after any error.
 

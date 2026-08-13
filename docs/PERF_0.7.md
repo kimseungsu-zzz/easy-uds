@@ -5,6 +5,48 @@ entry compares against tag `v0.6.4` with the same compiler, host, build flags,
 workload, and repeated runs. Absolute values are development measurements, not
 portable guarantees.
 
+## Semantic error model (2026-08-13)
+
+Change: operational exceptions now use one `Error` type with an easy-uds
+category and an independently preserved OS `system_code()`. Protocol/limit
+failures receive stable meanings, while local contract exceptions remain
+standard C++ types. Category lookup and message construction occur only on
+throw paths; successful I/O retains the same syscalls, locks, allocations, and
+branches.
+
+### Default hot-path A/B
+
+WSL2, g++ 15.2, CMake Release, empty payload. Each row is the median of three
+alternating runs from separately built pre-error-model `1cbf856` and current
+trees. Session runs use 30,000 requests and one shared Session; one-shot runs
+use 10,000 requests.
+
+| Workload / revision | Throughput | p50 | p99 | CPU-s / 1M |
+|---|---:|---:|---:|---:|
+| Session c1 / `1cbf856` | 24.58k req/s | 35.025 us | 143.193 us | 61.55 |
+| Session c1 / semantic errors | 24.01k req/s | 34.988 us | 142.979 us | 62.51 |
+| c1 delta | -2.3% | -0.1% | -0.1% | +1.6% |
+| Session c8 / `1cbf856` | 32.70k req/s | 226.757 us | 683.244 us | 172.99 |
+| Session c8 / semantic errors | 32.75k req/s | 226.778 us | 682.860 us | 173.27 |
+| c8 delta | +0.2% | +0.0% | -0.1% | +0.2% |
+| One-shot c1 / `1cbf856` | 14.95k req/s | 57.314 us | 181.125 us | n/a |
+| One-shot c1 / semantic errors | 14.95k req/s | 57.235 us | 177.032 us | n/a |
+| one-shot delta | +0.0% | -0.1% | -2.3% | n/a |
+
+Every median remains inside the 0.7 gate. The c1 throughput/CPU variation is
+not accompanied by a latency regression and is within the noise seen across
+the alternating WSL runs; the exception-only abstraction is retained.
+
+### Correctness gates
+
+- Release/Werror static and shared unit/stress suites passed.
+- ASan/UBSan unit and stress binaries passed with leak detection.
+- Static and shared installed-package consumers caught a library-thrown
+  `Error`, compared its DSO-owned category, and inspected its original errno.
+- Timeout, closed Session, protocol, too-large, busy, invalid-FD, unavailable,
+  human-readable context, and `std::system_error` catch compatibility have
+  dedicated regressions.
+
 ## Typed FD ownership (2026-08-13)
 
 Change: replace raw server-side `Request::fd` ownership with a one-`int`,

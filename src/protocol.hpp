@@ -1,5 +1,7 @@
 #pragma once
 
+#include "easy_uds/error.hpp"
+
 // Protocol version 2 wire codec.
 //
 // Framing: every message begins with a fixed 20-byte, big-endian header:
@@ -90,25 +92,26 @@ inline HeaderBytes encode_header(WireType type, std::uint32_t request_id, std::u
 
 inline DecodedHeader decode_header(const HeaderBytes& header) {
     if (!std::equal(magic.begin(), magic.end(), header.begin())) {
-        throw std::runtime_error("invalid protocol magic");
+        throw Error(ErrorCode::protocol, "invalid protocol magic");
     }
     if (header[4] != version) {
-        throw std::runtime_error("unsupported protocol version");
+        throw Error(ErrorCode::protocol, "unsupported protocol version");
     }
     const std::uint16_t flags =
         (static_cast<std::uint16_t>(header[6]) << 8) | static_cast<std::uint16_t>(header[7]);
     if ((flags & ~carries_fd_flag) != 0) {
-        throw std::runtime_error("unsupported protocol flags");
+        throw Error(ErrorCode::protocol, "unsupported protocol flags");
     }
     const auto raw_type = header[5];
     if (raw_type < static_cast<std::uint8_t>(WireType::request) ||
         raw_type > static_cast<std::uint8_t>(WireType::stream_response_end)) {
-        throw std::runtime_error("unknown protocol message type");
+        throw Error(ErrorCode::protocol, "unknown protocol message type");
     }
     const std::uint32_t request_id = get_u32(header, header_field_offset);
     if ((flags & carries_fd_flag) != 0 &&
         (raw_type != static_cast<std::uint8_t>(WireType::request) || request_id != 0)) {
-        throw std::runtime_error("descriptor flag is only valid on one-shot fixed requests");
+        throw Error(ErrorCode::protocol,
+                    "descriptor flag is only valid on one-shot fixed requests");
     }
     return {static_cast<WireType>(raw_type), request_id, get_u32(header, arg1_offset),
             get_u32(header, arg2_offset), flags};
@@ -117,7 +120,7 @@ inline DecodedHeader decode_header(const HeaderBytes& header) {
 inline DecodedHeader decode_header(const HeaderBytes& header, WireType expected_type) {
     const auto decoded = decode_header(header);
     if (decoded.type != expected_type) {
-        throw std::runtime_error("unexpected protocol message type");
+        throw Error(ErrorCode::protocol, "unexpected protocol message type");
     }
     return decoded;
 }

@@ -87,13 +87,13 @@ Response read_response(BufferedReader& reader, std::size_t max_message_size, std
     reader.read(header.data(), header.size(), io_timeout, deadline);
     const auto decoded = protocol::decode_header(header, WireType::response);
     if (decoded.request_id != 0) {
-        throw std::runtime_error("unexpected response request_id");
+        throw Error(ErrorCode::protocol, "unexpected response request_id");
     }
     if (decoded.arg1 > static_cast<std::uint32_t>(INT32_MAX)) {
-        throw std::runtime_error("response status_code is out of range");
+        throw Error(ErrorCode::protocol, "response status_code is out of range");
     }
     if (decoded.arg2 > max_message_size) {
-        throw std::length_error("response exceeds max_message_size");
+        throw Error(ErrorCode::too_large, "response exceeds max_message_size");
     }
     Response response;
     response.status = static_cast<Status>(decoded.arg1);
@@ -154,7 +154,7 @@ Status run_oneshot_stream(const std::string& socket_path, const ClientOptions& o
     reader.read(header.data(), header.size(), options.io_timeout, deadline);
     const auto decoded = protocol::decode_header(header, WireType::stream_response);
     if (decoded.request_id != 0 || decoded.arg1 > static_cast<std::uint32_t>(INT32_MAX) || decoded.arg2 != 0) {
-        throw std::runtime_error("invalid stream response header");
+        throw Error(ErrorCode::protocol, "invalid stream response header");
     }
 
     std::vector<char> buffer(options.stream_chunk_size);
@@ -165,18 +165,18 @@ Status run_oneshot_stream(const std::string& socket_path, const ClientOptions& o
         const auto chunk = protocol::decode_header(chunk_header);
         if (chunk.type == WireType::stream_response_end) {
             if (chunk.request_id != 0 || chunk.arg1 != 0 || chunk.arg2 != 0) {
-                throw std::runtime_error("invalid stream end frame");
+                throw Error(ErrorCode::protocol, "invalid stream end frame");
             }
             break;
         }
         if (chunk.type != WireType::stream_response_chunk || chunk.request_id != 0 || chunk.arg1 == 0 ||
             chunk.arg2 != 0) {
-            throw std::runtime_error("invalid stream chunk frame");
+            throw Error(ErrorCode::protocol, "invalid stream chunk frame");
         }
         const std::size_t chunk_size = chunk.arg1;
         if (chunk_size > std::numeric_limits<std::size_t>::max() - total_size ||
             (options.max_stream_size != 0 && chunk_size > options.max_stream_size - total_size)) {
-            throw std::length_error("stream exceeds max_stream_size");
+            throw Error(ErrorCode::too_large, "stream exceeds max_stream_size");
         }
         total_size += chunk_size;
         std::size_t remaining = chunk.arg1;
@@ -395,10 +395,10 @@ void session_reader_loop(detail::SessionState* state) {
             reader.read(header.data(), header.size(), state->options.io_timeout, Deadline::max());
             const auto decoded = protocol::decode_header(header, WireType::response);
             if (decoded.arg1 > static_cast<std::uint32_t>(INT32_MAX)) {
-                throw std::runtime_error("response status_code is out of range");
+                throw Error(ErrorCode::protocol, "response status_code is out of range");
             }
             if (decoded.arg2 > state->options.max_message_size) {
-                throw std::length_error("response exceeds max_message_size");
+                throw Error(ErrorCode::too_large, "response exceeds max_message_size");
             }
             Response response;
             response.status = static_cast<Status>(decoded.arg1);
@@ -413,12 +413,12 @@ void session_reader_loop(detail::SessionState* state) {
                 session_trace_counters.response_lookups.fetch_add(1, std::memory_order_relaxed);
 #endif
                 if (it == shard.inflight.end()) {
-                    throw std::runtime_error("unexpected response request_id");
+                    throw Error(ErrorCode::protocol, "unexpected response request_id");
                 }
                 auto* const slot = it->second;
                 auto slot_lock = acquire_session_lock(slot->mutex, SessionLockKind::reader_slot);
                 if (slot->done.load(std::memory_order_acquire)) {
-                    throw std::runtime_error("duplicate response request_id");
+                    throw Error(ErrorCode::protocol, "duplicate response request_id");
                 }
                 slot->response = std::move(response);
                 slot->done.store(true, std::memory_order_release);
@@ -497,7 +497,7 @@ Response Session::request(std::string_view route, std::string_view body) {
     }
     validate_request_lengths(route, body, state_->options.max_message_size);
     if (state_->broken.load(std::memory_order_acquire)) {
-        throw std::logic_error("session connection is no longer usable");
+        throw Error(ErrorCode::closed, "session connection is no longer usable");
     }
 
     detail::SessionState::Slot slot;
@@ -519,7 +519,7 @@ Response Session::request(std::string_view route, std::string_view body) {
         // already swept this shard, registering afterwards would leave a
         // stack Slot that no thread can ever complete.
         if (state_->broken.load(std::memory_order_acquire)) {
-            throw std::logic_error("session connection is no longer usable");
+            throw Error(ErrorCode::closed, "session connection is no longer usable");
         }
         if (shard.inflight.find(request_id) != shard.inflight.end()) {
             continue;

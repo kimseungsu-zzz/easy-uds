@@ -301,11 +301,12 @@ void test_client_stream_response_limit() {
     options.max_stream_size = 4;
     options.io_timeout = 1s;
     options.stream_timeout = 1s;
-    expect_throws<std::length_error>(
+    expect_easy_error(
         [&] {
             (void)Client(path, options).request_stream("x", [](char*, std::size_t) { return std::size_t{0}; },
                                                        [](std::string_view) {});
         },
+        ErrorCode::too_large,
         "client must enforce max_stream_size on the response body");
     fake_server.join();
     ::close(listener);
@@ -366,8 +367,9 @@ void test_client_rejects_mismatched_response_ids() {
     ClientOptions options;
     options.io_timeout = 1s;
     options.request_timeout = 500ms;
-    expect_throws<std::runtime_error>([&] { (void)Client(path, options).request("ping"); },
-                                      "one-shot client must reject a mismatched response id");
+    expect_easy_error([&] { (void)Client(path, options).request("ping"); },
+                      ErrorCode::protocol,
+                      "one-shot client must reject a mismatched response id");
 
     Session session = Client(path, options).session();
     constexpr std::size_t caller_count = 16;
@@ -385,12 +387,12 @@ void test_client_rejects_mismatched_response_ids() {
             }
             try {
                 (void)session.request("ping");
-            } catch (const std::logic_error&) {
-                errors[index] = std::current_exception();
-            } catch (const std::system_error&) {
+            } catch (const Error& error) {
+                if (error.kind() == ErrorCode::protocol) {
+                    protocol_errors.fetch_add(1, std::memory_order_relaxed);
+                }
                 errors[index] = std::current_exception();
             } catch (const std::runtime_error&) {
-                protocol_errors.fetch_add(1, std::memory_order_relaxed);
                 errors[index] = std::current_exception();
             }
         });
@@ -417,8 +419,8 @@ void test_client_rejects_mismatched_response_ids() {
            "reader failure must complete every concurrent session caller");
     expect(failure_elapsed < options.request_timeout,
            "reader failure must wake concurrent callers before their request timeout");
-    expect_throws<std::logic_error>([&] { (void)session.request("ping"); },
-                                    "unknown response id must permanently break the session");
+    expect_easy_error([&] { (void)session.request("ping"); }, ErrorCode::closed,
+                      "unknown response id must permanently break the session");
 }
 void test_session_broken_after_shutdown() {
     using namespace easy_uds;
@@ -440,13 +442,12 @@ void test_session_broken_after_shutdown() {
     server.stop();
     server_thread.join();
 
-    // The reader thread may observe the close before this call runs, so the
-    // first failure is either an I/O system_error or the sticky logic_error;
-    // both mark the session unusable.
-    expect_throws<std::exception>([&] { (void)session.request("ping"); },
-                                  "session request against a stopped server should fail");
-    expect_throws<std::logic_error>([&] { (void)session.request("ping"); },
-                                    "broken session should reject later requests");
+    // The reader thread may observe the close before this call runs. Both the
+    // original I/O failure and the sticky state are classified as closed.
+    expect_easy_error([&] { (void)session.request("ping"); }, ErrorCode::closed,
+                      "session request against a stopped server should fail");
+    expect_easy_error([&] { (void)session.request("ping"); }, ErrorCode::closed,
+                      "broken session should reject later requests");
     cleanup_socket_artifacts(path);
 }
 
@@ -470,10 +471,19 @@ void test_session_broken_after_timeout() {
     client_options.io_timeout = 500ms;
     client_options.request_timeout = 20ms;
     Session session = Client(path, client_options).session();
-    expect_throws<std::system_error>([&] { (void)session.request("slow"); },
-                                     "session request should report its deadline");
-    expect_throws<std::logic_error>([&] { (void)session.request("slow"); },
-                                    "timed-out session should remain permanently unusable");
+    try {
+        (void)session.request("slow");
+        throw std::runtime_error(
+            "test failed: session request should report its deadline");
+    } catch (const Error& error) {
+        expect(error.kind() == ErrorCode::timeout,
+               "session deadline should report timeout");
+        expect(error.system_code() ==
+                   std::error_code(ETIMEDOUT, std::generic_category()),
+               "session deadline should preserve ETIMEDOUT");
+    }
+    expect_easy_error([&] { (void)session.request("slow"); }, ErrorCode::closed,
+                      "timed-out session should remain permanently unusable");
 
     server.stop();
     server_thread.join();

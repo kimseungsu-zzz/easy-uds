@@ -4,6 +4,14 @@ All notable changes to this project are documented here.
 
 ## Unreleased 0.7.0 — 🌱 Usability Foundation
 
+- Added a compact operational error model: one `Error` type, stable
+  `ErrorCode` meanings, and lossless original `errno` access through
+  `system_code()`. `Error` remains a `std::system_error`; its inherited
+  `code()` uses the DSO-stable `easy_uds` category.
+- Classified timeout, closed, protocol, busy, too-large, invalid-resource,
+  unavailable, cancellation, and otherwise-system failures without changing
+  standard local contract exceptions. Broken Sessions now report `closed`,
+  and no failure implicitly reconnects or replays a request.
 - Replaced raw `Request::fd` ownership with allocation-free, move-only
   `OwnedFd`, eliminating manual close/reset paths across reactor, worker, and
   serialized queues. Handlers use `valid()`, `get()`, and `duplicate()`; a

@@ -75,9 +75,17 @@ void test_fd_passing() {
         (void)::close(released);
         (void)::close(descriptors[1]);
     }
-    expect_throws<std::system_error>(
-        [] { (void)OwnedFd{}.duplicate(); },
-        "duplicating an empty OwnedFd should report EBADF");
+    try {
+        (void)OwnedFd{}.duplicate();
+        throw std::runtime_error(
+            "test failed: duplicating an empty OwnedFd should report EBADF");
+    } catch (const Error& error) {
+        expect(error.kind() == ErrorCode::invalid_request,
+               "empty OwnedFd should report invalid_request");
+        expect(error.system_code() ==
+                   std::error_code(EBADF, std::generic_category()),
+               "empty OwnedFd should preserve EBADF");
+    }
 
     const std::string payload = "fd-passing-content";
     const std::string path = socket_path("fd-passing");

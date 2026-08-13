@@ -29,13 +29,13 @@
 - 동일 socket path의 중복 server 실행과 stale socket 정리를 보호하는 instance lock
 - 다른 thread에서 안전하게 호출할 수 있는 `Server::stop()`
 - handler 예외를 `500 / Internal Server Error`로 변환
-- socket 오류를 `errno`를 보존한 `std::system_error`로 전달
+- 작은 의미 분류 `ErrorCode`와 원본 `errno`를 함께 보존하는 `easy_uds::Error`
 - static/shared library 및 CMake `find_package()` 지원
 - unit/stress/ASan/UBSan/TSan/fuzz/package-consumer 테스트 구성
 
 ## 플랫폼
 
-0.6 구현은 Linux(`epoll`, `SO_PEERCRED`)를 요구합니다. Windows, macOS, BSD는 현재 지원하지 않습니다. Linux 전용 abstract socket이 아니라 파일시스템 pathname socket을 사용합니다.
+현재 구현은 Linux(`epoll`, `SO_PEERCRED`)를 요구합니다. Windows, macOS, BSD는 현재 지원하지 않습니다. Linux 전용 abstract socket이 아니라 파일시스템 pathname socket을 사용합니다.
 
 ## 빠른 시작
 
@@ -303,7 +303,7 @@ easy_uds::Client client("/tmp/easy-uds.sock", options);
 
 `connect_timeout`은 연결 수립 시간만 제한합니다. `io_timeout`은 I/O 진행이 없는 시간을 제한합니다. 유휴 `Session` 자체에는 이 시간이 적용되지 않습니다. 첫 response byte는 무기한 기다리되 각 호출자의 `request_timeout`은 계속 적용되며, response frame이 일부 도착한 뒤 멈추면 `io_timeout`이 적용됩니다. `request_timeout`은 일반 request 전체, `stream_timeout`은 streaming transaction 전체를 제한합니다. `0`은 해당 제한을 비활성화합니다.
 
-socket timeout은 `std::system_error`로 전달되며 timeout의 error code는 `ETIMEDOUT`입니다.
+운영 중 오류는 `std::system_error`를 상속한 `easy_uds::Error`로 전달됩니다. `kind()` 또는 `code()`는 안정적인 easy-uds 의미 분류를, `system_code()`는 원본 `errno`를 제공합니다.
 
 ## Socket 소유권과 stale socket 정리
 
@@ -355,11 +355,13 @@ reactor가 listener를 poll하는 동안 `stop()` thread가 listener FD를 직�
 - handler가 음수 status 또는 너무 큰 body 반환: `500`, response body에 거부 사유 포함
 - malformed/timed-out/disconnected peer: 해당 connection만 종료, server는 계속 실행
 - serialized queue에서 server `request_timeout` 초과: handler를 실행하지 않고 `408` 응답
-- connection/request deadline 초과: 관찰하는 쪽에서 `ETIMEDOUT`을 가진 `std::system_error`
+- connection/request deadline 초과: `ErrorCode::timeout`, `system_code()`에는 `ETIMEDOUT`
 - 잘못된 로컬 argument/configuration: `std::invalid_argument` 또는 `std::length_error`
-- socket/OS 오류: `std::system_error`
+- socket/OS 오류: `easy_uds::Error` (`std::system_error`로도 catch 가능)
+- 잘못된 response framing: `ErrorCode::protocol`, 수신 제한 초과: `ErrorCode::too_large`
+- 깨진 Session의 이후 호출: `ErrorCode::closed` (자동 reconnect/replay 없음)
 - 두 번째 `run()` 등의 잘못된 lifecycle 동작: `std::logic_error`
-- 이미 다른 easy-uds Server가 같은 path를 소유: `EADDRINUSE`를 가진 `std::system_error`
+- 이미 다른 easy-uds Server가 같은 path를 소유: `ErrorCode::busy`, `system_code()`에는 `EADDRINUSE`
 
 ## 빌드 및 테스트
 
@@ -507,6 +509,11 @@ pre-1.0 shared build에서는 minor release 사이 ABI 변경 가능성이 있�
 ```cpp
 using Status = std::int32_t;  // status_ok=200, status_request_timeout=408, status_not_found=404, ...
 
+enum class ErrorCode {
+    system, timeout, closed, protocol, busy, too_large,
+    invalid_request, unavailable, cancelled
+};
+
 struct PeerCredentials {
     pid_t pid; uid_t uid; gid_t gid;
     bool present;  // 플랫폼이 자격 증명을 제공하지 못하면 false
@@ -532,6 +539,11 @@ struct StreamResponse {
     StreamReader body;
 };
 ```
+
+FD 소유권은 [`docs/api/fd-passing.md`](docs/api/fd-passing.md), 오류 의미와
+원본 OS 오류 보존 방식은 [`docs/api/errors.md`](docs/api/errors.md), 0.6에서
+변경된 코드는 [`docs/migration/0.6-to-0.7.md`](docs/migration/0.6-to-0.7.md)에
+정리되어 있습니다.
 
 ## 보안 범위
 

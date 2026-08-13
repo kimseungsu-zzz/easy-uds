@@ -97,9 +97,12 @@ void remove_stale_socket(const std::string& socket_path, std::chrono::millisecon
         const sockaddr_un address = make_address(socket_path);
         try {
             connect_nonblocking(probe.get(), address, std::chrono::milliseconds{100}, Deadline::max());
-            throw std::runtime_error("socket path is already in use: " + socket_path);
-        } catch (const std::system_error& error) {
-            const int connect_error = error.code().value();
+            throw easy_uds::Error(
+                easy_uds::ErrorCode::busy,
+                "socket path is already in use: " + socket_path,
+                {EADDRINUSE, std::generic_category()});
+        } catch (const easy_uds::Error& error) {
+            const int connect_error = error.system_code().value();
             if (connect_error == ENOENT) {
                 return;
             }

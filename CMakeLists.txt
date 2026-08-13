@@ -39,6 +39,7 @@ endif()
 find_package(Threads REQUIRED)
 
 add_library(easy_uds
+    src/error.cpp
     src/server.cpp
     src/client.cpp
     src/reactor/dispatch.cpp
@@ -112,6 +113,7 @@ if(EASY_UDS_BUILD_TESTS)
             tests/easy_uds_test/common.cpp
             tests/easy_uds_test/server_lifecycle.cpp
             tests/easy_uds_test/session.cpp
+            tests/easy_uds_test/errors.cpp
             tests/easy_uds_test/streaming.cpp
             tests/easy_uds_test/serialized.cpp
             tests/easy_uds_test/timeouts_concurrency.cpp
@@ -239,7 +241,10 @@ if(EASY_UDS_BUILD_FUZZERS)
         message(FATAL_ERROR "EASY_UDS_BUILD_FUZZERS requires upstream Clang with libFuzzer")
     endif()
 
-    add_executable(easy_uds_protocol_fuzz tests/protocol_fuzz.cpp)
+    add_executable(easy_uds_protocol_fuzz
+        tests/protocol_fuzz.cpp
+        src/error.cpp
+    )
     target_include_directories(easy_uds_protocol_fuzz PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/src
         ${CMAKE_CURRENT_SOURCE_DIR}/include

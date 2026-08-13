@@ -29,7 +29,7 @@
 - Grace period before removing a connection-refused socket pathname as stale
 - Thread-safe `stop()` using a single Linux `eventfd` wakeup counter
 - Handler exceptions converted to `500` with the exception message in the body (opt-out via `include_handler_error_messages`)
-- `std::system_error` for socket failures, preserving the underlying `errno`
+- Small semantic `ErrorCode` classes with the original socket `errno` preserved by `Error::system_code()`
 - Static or shared library builds through `BUILD_SHARED_LIBS`
 - CMake install/export package and downstream `find_package()` support
 - Standalone Linux experiments for io_uring, FD passing, zero-copy, and memfd/eventfd shared-memory transport
@@ -37,7 +37,7 @@
 
 ## Platform
 
-The 0.6 implementation requires Linux (`epoll` and `SO_PEERCRED`). Windows, macOS, and BSD are not currently supported. The source uses pathname sockets rather than Linux-only abstract sockets.
+The current implementation requires Linux (`epoll` and `SO_PEERCRED`). Windows, macOS, and BSD are not currently supported. The source uses pathname sockets rather than Linux-only abstract sockets.
 
 ## Quick start
 
@@ -213,7 +213,7 @@ Fixed RPC input is bounded per connection and can also be bounded across the who
 
 Fixed responses use a nonblocking worker fast path. A response that does not fit immediately is handed to a per-connection `EPOLLOUT` queue, so a client that stops reading cannot occupy a worker. The queued remainder is capped at the larger of 4 MiB or one maximum-size response; a peer that exceeds the cap is closed without affecting other connections. Streaming exchanges retain their exclusive worker lease and are governed by `max_concurrent_streams`.
 
-Each stream occupies one worker until its response body is complete. The automatic stream limit is `worker_threads - 1`, or `1` for a single-worker server. This prevents long-lived streams from starving regular RPC traffic. An excess stream is closed before its body is read, so the client receives a `std::system_error`; retry it with a fresh/rewound `StreamReader`. Set `ServerOptions::max_concurrent_streams = worker_threads` to allow every worker to run a stream, or use separate server instances when short RPCs and many long-lived streams have different capacity requirements.
+Each stream occupies one worker until its response body is complete. The automatic stream limit is `worker_threads - 1`, or `1` for a single-worker server. This prevents long-lived streams from starving regular RPC traffic. An excess stream is closed before its body is read, so the client receives an `Error` classified as `closed`; retry it with a fresh/rewound `StreamReader`. Set `ServerOptions::max_concurrent_streams = worker_threads` to allow every worker to run a stream, or use separate server instances when short RPCs and many long-lived streams have different capacity requirements.
 
 `request_timeout` includes time spent waiting in the worker queue, time spent waiting in the serialized-command queue, and socket I/O time. A serialized request that expires before its handler starts is discarded without executing it. User handler execution cannot be forcibly cancelled by portable C++; if a handler runs past the deadline, response I/O fails immediately after that handler returns.
 
@@ -234,7 +234,9 @@ easy_uds::Client client("/tmp/easy-uds.sock", options);
 
 `connect_timeout` bounds only connection establishment. `io_timeout` bounds inactivity between successful I/O progress. An idle `Session` does not consume this timeout: its reader waits indefinitely for the first response byte, a partial response frame uses `io_timeout`, and each pending caller is still bounded by `request_timeout`. `request_timeout` bounds a regular transaction, while `stream_timeout` bounds a streaming transaction. A value of `0` disables the corresponding limit.
 
-Socket failures and timeouts are reported as `std::system_error`; timeouts use `ETIMEDOUT`.
+Operational failures are reported as `easy_uds::Error`, which remains derived
+from `std::system_error`. `kind()` (or inherited `code()`) reports a stable
+easy-uds classification while `system_code()` preserves the original `errno`.
 
 ## Socket ownership and stale cleanup
 
@@ -276,11 +278,13 @@ Fixed requests may be pipelined on a persistent connection and are correlated by
 - Handler returns a negative status or oversized body: `500` with the rejection reason as the response body (likewise gated by `include_handler_error_messages`)
 - A request that waits past its server-side `request_timeout` before a worker executes it: `408` (handler not invoked)
 - Malformed/timed-out/disconnected peer: that connection is closed; the server continues running
-- Connection/request deadline exceeded: `std::system_error` with `ETIMEDOUT` on the side observing the timeout
+- Connection/request deadline exceeded: `ErrorCode::timeout`, with `ETIMEDOUT` in `system_code()` on the side observing the timeout
 - Invalid local arguments/configuration: `std::invalid_argument` or `std::length_error`
-- Socket/OS failures: `std::system_error`
+- Socket/OS failures: `easy_uds::Error` (also catchable as `std::system_error`)
+- Invalid response framing: `ErrorCode::protocol`; response exceeding a configured receive limit: `ErrorCode::too_large`
+- A broken Session rejects later requests with `ErrorCode::closed`; easy-uds does not implicitly reconnect or replay requests
 - Invalid server lifecycle operation, such as a second `run()`: `std::logic_error`
-- A second easy-uds `Server` claiming the same path while the first owns it: `std::system_error` with `EADDRINUSE`
+- A second easy-uds `Server` claiming the same path while the first owns it: `ErrorCode::busy`, with `EADDRINUSE` in `system_code()`
 - Protocol version 1 peers are rejected (v2 server)
 
 ## Build and test
@@ -456,6 +460,11 @@ For pre-1.0 shared builds, the ELF `SOVERSION` tracks the major and minor releas
 ```cpp
 using Status = std::int32_t;  // status_ok=200, status_request_timeout=408, status_not_found=404, ...
 
+enum class ErrorCode {
+    system, timeout, closed, protocol, busy, too_large,
+    invalid_request, unavailable, cancelled
+};
+
 struct PeerCredentials {
     pid_t pid; uid_t uid; gid_t gid;
     bool present;  // false when the platform cannot provide credentials
@@ -485,6 +494,8 @@ struct StreamResponse {
 FD ownership and retention semantics are documented in
 [`docs/api/fd-passing.md`](docs/api/fd-passing.md). Source changes from 0.6 are
 listed in [`docs/migration/0.6-to-0.7.md`](docs/migration/0.6-to-0.7.md).
+Error classification and preserved OS details are documented in
+[`docs/api/errors.md`](docs/api/errors.md).
 
 ## Security scope
 

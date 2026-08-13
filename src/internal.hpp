@@ -34,7 +34,9 @@ using protocol::HeaderBytes;
 using protocol::WireType;
 
 [[noreturn]] inline void throw_system_error(const char* operation, int error = errno) {
-    throw std::system_error(error, std::generic_category(), operation);
+    const std::error_code system_code(error, std::generic_category());
+    throw easy_uds::Error(easy_uds::detail::classify_system_error(system_code),
+                          operation, system_code);
 }
 
 inline void validate_nonnegative_timeout(std::chrono::milliseconds timeout, const char* name) {

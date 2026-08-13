@@ -55,7 +55,7 @@ static/shared package consumer는 모든 phase의 필수 gate다.
   - `BorrowedFd`/`OwnedFd` 또는 동등한 move-only 설계
   - `valid()`, `get()`, `duplicate()`와 handler lifetime 문서화
   - raw descriptor 이중 소유처럼 보이는 수동 `fd = -1` 제거
-- [ ] error model 설계
+- [x] error model 설계
   - 작은 `ErrorCode`/category와 구체적인 human-readable message 병행
   - timeout, closed, protocol, busy, too-large, invalid-request 분류
   - OS `errno`와 `std::system_error` 정보 손실 금지

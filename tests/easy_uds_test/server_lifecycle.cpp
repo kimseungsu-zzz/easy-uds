@@ -60,7 +60,17 @@ void test_socket_path_safety() {
     expect(::lstat(path.c_str(), &info) == 0, "socket file should exist after construction");
     expect((info.st_mode & 0777U) == 0600U, "socket permissions should honor ServerOptions");
 
-    expect_throws<std::runtime_error>([&] { Server duplicate(path); }, "active socket path should not be replaced");
+    try {
+        Server duplicate(path);
+        throw std::runtime_error(
+            "test failed: active socket path should not be replaced");
+    } catch (const Error& error) {
+        expect(error.kind() == ErrorCode::busy,
+               "active socket path should report busy");
+        expect(error.system_code() ==
+                   std::error_code(EADDRINUSE, std::generic_category()),
+               "active socket path should preserve EADDRINUSE");
+    }
 
     std::exception_ptr run_error;
     std::thread server_thread([&] {

@@ -223,8 +223,8 @@ void continue_connection(const std::shared_ptr<ServerState>& state,
             }
             buffered.clear();
             buffered_offset = 0;
-        } catch (const std::system_error& error) {
-            if (error.code().value() != ETIMEDOUT || request_started) {
+        } catch (const easy_uds::Error& error) {
+            if (error.kind() != easy_uds::ErrorCode::timeout || request_started) {
                 connection->closing.store(true, std::memory_order_release);
             }
             rearm_connection(state, connection, std::move(buffered), buffered_offset);

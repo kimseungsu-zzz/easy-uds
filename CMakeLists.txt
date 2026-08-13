@@ -205,8 +205,20 @@ if(EASY_UDS_BUILD_EXPERIMENTS)
     add_executable(easy_uds_false_sharing_probe tests/easy_uds_false_sharing_probe.cpp)
     add_executable(easy_uds_zero_copy_probe tests/easy_uds_zero_copy_probe.cpp)
     add_executable(easy_uds_shm_transport_probe tests/easy_uds_shm_transport_probe.cpp)
-    add_executable(easy_uds_shm_framed_probe tests/easy_uds_shm_framed_probe.cpp)
-    add_executable(easy_uds_shm_process_probe tests/easy_uds_shm_process_probe.cpp)
+    add_executable(easy_uds_shm_framed_probe
+        tests/easy_uds_shm_framed_probe.cpp
+        src/error.cpp
+    )
+    add_executable(easy_uds_shm_process_probe
+        tests/easy_uds_shm_process_probe.cpp
+        src/error.cpp
+    )
+    target_include_directories(easy_uds_shm_framed_probe PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+    )
+    target_include_directories(easy_uds_shm_process_probe PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+    )
     find_library(EASY_UDS_LIBURING uring)
     find_path(EASY_UDS_LIBURING_INCLUDE_DIR liburing.h)
     if(EASY_UDS_LIBURING AND EASY_UDS_LIBURING_INCLUDE_DIR)

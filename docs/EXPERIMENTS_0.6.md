@@ -61,6 +61,12 @@ attribute contention rather than as release performance numbers. The same
 diagnostic can be enabled manually with
 `-DEASY_UDS_TRACE_SESSION_CONTENTION=ON`.
 
+The same attribution selected the direct send lock as the next candidate. An
+MPSC queue with one sender thread and batch caps 1/4/8 was implemented and
+measured, but all queued variants lost to the direct mutex on end-to-end
+latency/CPU efficiency. The implementation was removed after rejection; the
+scorecard and raw decision rationale remain in `PERF_0.6.md`.
+
 `easy_uds_false_sharing_probe` compares two adjacent relaxed atomics with two
 64-byte-aligned atomics. It is a hardware-sensitive diagnostic; it does not
 justify padding production state unless the target workload reproduces the gap.

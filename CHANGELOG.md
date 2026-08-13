@@ -13,6 +13,9 @@ All notable changes to this project are documented here.
   CPU-seconds per million requests, and requests per CPU-second.
 - Strengthened the reader-failure test so all callers racing a protocol error
   must be completed before their request deadline.
+- Implemented and rejected a shared-session MPSC/single-sender experiment:
+  batch caps 1/4/8 added wakeups and CPU cost without a stable throughput or
+  tail-latency win, so the direct send mutex remains in production.
 - Added raw and protocol-v2-framed `memfd + eventfd` transport probes. The
   framed request/response result remains experimental and does not justify a
   public shared-memory transport yet.

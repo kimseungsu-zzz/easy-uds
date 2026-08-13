@@ -112,6 +112,32 @@ noticeably more contention at c32 (22.8k req/s median and 3.69 ms p99), so the
 default is 16. Decision: **ACCEPT**. The build-time shard count remains tunable
 for repeatable experiments; the public API and protocol are unchanged.
 
+### Shared-session sender queue/batching A/B (2026-08-13)
+
+After sharding removed the table bottleneck, the next isolated experiment
+replaced the direct `send_mutex + sendmsg` path with an intrusive MPSC queue,
+one sender thread, and gathered batches capped at 1, 4, or 8 request frames.
+The implementation passed the normal unit/stress suite, but release sweeps at
+c1/c2/c4/c8/c16/c32 showed no stable end-to-end win. Batch 8 was the best
+queued variant; medians of three 30,000-request confirmation runs were:
+
+| Load | Path | Throughput | p50 | p99 | CPU-s / 1M requests |
+|---:|---|---:|---:|---:|---:|
+| c1 | direct mutex | 9.15k req/s | 79.8 us | 309 us | 165.1 |
+| c1 | sender, batch 8 | 7.06k req/s | 115.5 us | 384.6 us | 193.0 |
+| c8 | direct mutex | 20.2k req/s | 371.6 us | 983.9 us | 249.0 |
+| c8 | sender, batch 8 | 17.6k req/s | 433.6 us | 1009.9 us | 280.5 |
+| c32 | direct mutex | 30.3k req/s | 990.2 us | 2307.6 us | 226.9 |
+| c32 | sender, batch 8 | 26.9k req/s | 1149.7 us | 2400.7 us | 253.2 |
+
+Diagnostic runs showed batch 8 only combined about 2.3 frames at c8 and 3.7
+at c32. The extra sender handoff, condition-variable wake, and caller wait cost
+more than the saved send serialization: throughput fell 11-23%, p50 regressed
+16-45%, CPU cost rose 12-17%, and voluntary context switches increased. Batch
+1 was worse and batch 4 did not change the conclusion. Decision: **REJECT**.
+The queued sender implementation and knob were removed; this document retains
+the result, and the direct mutex remains the production path.
+
 ### Shared-memory transport probe (2026-08-13)
 
 The standalone `memfd + eventfd` SPSC probe measured, on the same WSL2 host,

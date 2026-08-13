@@ -1,5 +1,9 @@
 #include "easy_uds/easy_uds.hpp"
 
+#ifdef EASY_UDS_TRACE_SESSION_CONTENTION
+#include "../src/session_trace.hpp"
+#endif
+
 #include <atomic>
 
 #ifdef EASY_UDS_TRACE_SPIN_MISS
@@ -131,6 +135,9 @@ int main(int argc, char** argv) {
     while (ready.load(std::memory_order_relaxed) != concurrency) {
         std::this_thread::yield();
     }
+#ifdef EASY_UDS_TRACE_SESSION_CONTENTION
+    easy_uds::detail::session_trace_counters.reset();
+#endif
     rusage usage_before{};
     if (::getrusage(RUSAGE_SELF, &usage_before) != 0) {
         std::cerr << "getrusage failed\n";
@@ -167,6 +174,13 @@ int main(int argc, char** argv) {
     const auto system_microseconds =
         (usage_after.ru_stime.tv_sec - usage_before.ru_stime.tv_sec) * 1000000LL +
         usage_after.ru_stime.tv_usec - usage_before.ru_stime.tv_usec;
+    const auto cpu_microseconds = user_microseconds + system_microseconds;
+    const double cpu_seconds_per_million_requests =
+        static_cast<double>(cpu_microseconds) / static_cast<double>(iterations);
+    const double requests_per_cpu_second =
+        cpu_microseconds == 0
+            ? 0.0
+            : static_cast<double>(iterations) * 1000000.0 / static_cast<double>(cpu_microseconds);
     std::vector<double> samples;
     samples.reserve(iterations);
     for (auto& worker_samples : latency_samples) {
@@ -181,17 +195,45 @@ int main(int argc, char** argv) {
               << (shared_session ? " (one shared session)\n" : " (independent persistent sessions)\n")
               << "throughput: " << requests_per_second << " requests/s\n"
               << "latency:    avg=" << latency_sum / static_cast<double>(samples.size())
-              << " us, p50=" << percentile(samples, 0.50) << " us, p95=" << percentile(samples, 0.95)
-              << " us, p99=" << percentile(samples, 0.99) << " us\n"
+              << " us, p50=" << percentile(samples, 0.50) << " us, p90=" << percentile(samples, 0.90)
+              << " us, p95=" << percentile(samples, 0.95) << " us, p99=" << percentile(samples, 0.99)
+              << " us, p99.9=" << percentile(samples, 0.999) << " us, max=" << samples.back() << " us\n"
               << "resources:  user=" << user_microseconds << " us, system=" << system_microseconds
               << " us, voluntary_cs=" << usage_after.ru_nvcsw - usage_before.ru_nvcsw
-              << ", involuntary_cs=" << usage_after.ru_nivcsw - usage_before.ru_nivcsw << '\n';
+              << ", involuntary_cs=" << usage_after.ru_nivcsw - usage_before.ru_nivcsw << '\n'
+              << "efficiency: " << cpu_seconds_per_million_requests << " CPU-s/1M requests, "
+              << requests_per_cpu_second << " requests/CPU-s\n";
 #ifdef EASY_UDS_TRACE_SPIN_MISS
     const std::size_t spin_misses =
         easy_uds::detail::session_spin_miss_count.load(std::memory_order_relaxed);
     std::cout << "spin:       misses=" << spin_misses << "/" << iterations << " ("
               << 100.0 * static_cast<double>(spin_misses) / static_cast<double>(iterations)
               << "% condvar fallback)\n";
+#endif
+#ifdef EASY_UDS_TRACE_SESSION_CONTENTION
+    const auto& trace = easy_uds::detail::session_trace_counters;
+    const auto print_lock = [](const char* name, const std::atomic<std::uint64_t>& wait_ns,
+                               const std::atomic<std::uint64_t>& acquisitions) {
+        const auto total = wait_ns.load(std::memory_order_relaxed);
+        const auto count = acquisitions.load(std::memory_order_relaxed);
+        const double average = count == 0 ? 0.0 : static_cast<double>(total) / static_cast<double>(count);
+        std::cout << "  " << name << ": total=" << static_cast<double>(total) / 1000.0
+                  << " us, acquisitions=" << count << ", avg=" << average << " ns\n";
+    };
+    std::cout << "contention:\n";
+    print_lock("send lock", trace.send_lock_wait_ns, trace.send_lock_acquisitions);
+    print_lock("caller table lock", trace.caller_table_lock_wait_ns,
+               trace.caller_table_lock_acquisitions);
+    print_lock("reader table lock", trace.reader_table_lock_wait_ns,
+               trace.reader_table_lock_acquisitions);
+    print_lock("reader slot lock", trace.reader_slot_lock_wait_ns,
+               trace.reader_slot_lock_acquisitions);
+    print_lock("waiter slot lock", trace.waiter_slot_lock_wait_ns,
+               trace.waiter_slot_lock_acquisitions);
+    std::cout << "  request-id probes=" << trace.request_id_probes.load(std::memory_order_relaxed)
+              << ", response lookups=" << trace.response_lookups.load(std::memory_order_relaxed)
+              << ", notifications=" << trace.waiter_notifications.load(std::memory_order_relaxed)
+              << ", condvar waits=" << trace.condition_waits.load(std::memory_order_relaxed) << '\n';
 #endif
     return 0;
 }

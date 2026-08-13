@@ -2,6 +2,21 @@
 
 All notable changes to this project are documented here.
 
+## Unreleased 0.6.x experiments
+
+- Split the multiplexed client Session's in-flight request table into 16
+  cache-line-separated shards and made request-id allocation atomic. Release
+  A/B measurements improved shared-session throughput, p99, and CPU cost at
+  c8/c32 without changing the public API or protocol; see `docs/PERF_0.6.md`.
+- Added diagnostic-only shared-session contention counters and a reproducible
+  1/2/4/8/16 shard sweep. The session benchmark now reports p90, p99.9, max,
+  CPU-seconds per million requests, and requests per CPU-second.
+- Strengthened the reader-failure test so all callers racing a protocol error
+  must be completed before their request deadline.
+- Added raw and protocol-v2-framed `memfd + eventfd` transport probes. The
+  framed request/response result remains experimental and does not justify a
+  public shared-memory transport yet.
+
 ## 0.6.3 — ⚙️ Experimental Closure
 
 - Configurable per-connection fixed-request count and byte high-water marks;

@@ -346,10 +346,10 @@ void test_client_rejects_mismatched_response_ids() {
             std::vector<unsigned char> payload(payload_size);
             recv_exact(fd, payload.data(), payload.size());
 
-            const std::uint32_t request_id = get_u32(request_header.data() + 8);
-            const std::uint32_t wrong_id = request_id == std::numeric_limits<std::uint32_t>::max()
-                                               ? request_id - 1
-                                               : request_id + 1;
+            // One-shot requests require id 0; multiplexed Session requests
+            // never use id 0, so these values cannot alias a valid request on
+            // either connection (including the concurrent Session case).
+            const std::uint32_t wrong_id = connection == 0 ? 1U : 0U;
             const auto response = frame(2, wrong_id, 200, 4, "pong", 4);
             send_exact(fd, response.data(), response.size());
             if (connection == 1) {
@@ -370,20 +370,53 @@ void test_client_rejects_mismatched_response_ids() {
                                       "one-shot client must reject a mismatched response id");
 
     Session session = Client(path, options).session();
-    bool rejected_as_protocol_error = false;
-    try {
-        (void)session.request("ping");
-    } catch (const std::system_error&) {
-        // A timeout means the unknown id was silently ignored.
-    } catch (const std::runtime_error&) {
-        rejected_as_protocol_error = true;
+    constexpr std::size_t caller_count = 16;
+    std::atomic<std::size_t> ready{0};
+    std::atomic<bool> start{false};
+    std::atomic<std::size_t> protocol_errors{0};
+    std::vector<std::exception_ptr> errors(caller_count);
+    std::vector<std::thread> callers;
+    callers.reserve(caller_count);
+    for (std::size_t index = 0; index < caller_count; ++index) {
+        callers.emplace_back([&, index] {
+            ready.fetch_add(1, std::memory_order_release);
+            while (!start.load(std::memory_order_acquire)) {
+                std::this_thread::yield();
+            }
+            try {
+                (void)session.request("ping");
+            } catch (const std::logic_error&) {
+                errors[index] = std::current_exception();
+            } catch (const std::system_error&) {
+                errors[index] = std::current_exception();
+            } catch (const std::runtime_error&) {
+                protocol_errors.fetch_add(1, std::memory_order_relaxed);
+                errors[index] = std::current_exception();
+            }
+        });
     }
+    while (ready.load(std::memory_order_acquire) != caller_count) {
+        std::this_thread::yield();
+    }
+    const auto failure_started = std::chrono::steady_clock::now();
+    start.store(true, std::memory_order_release);
+    for (auto& caller : callers) {
+        caller.join();
+    }
+    const auto failure_elapsed = std::chrono::steady_clock::now() - failure_started;
     release_session_peer.store(true, std::memory_order_release);
     fake_server.join();
     ::close(listener);
     cleanup_socket_artifacts(path);
 
-    expect(rejected_as_protocol_error, "session must fail immediately on an unknown response id");
+    expect(protocol_errors.load(std::memory_order_relaxed) != 0,
+           "session must report an unknown response id as a protocol error");
+    expect(std::all_of(errors.begin(), errors.end(), [](const std::exception_ptr& error) {
+               return error != nullptr;
+           }),
+           "reader failure must complete every concurrent session caller");
+    expect(failure_elapsed < options.request_timeout,
+           "reader failure must wake concurrent callers before their request timeout");
     expect_throws<std::logic_error>([&] { (void)session.request("ping"); },
                                     "unknown response id must permanently break the session");
 }

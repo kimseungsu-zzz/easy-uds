@@ -22,10 +22,18 @@ option(EASY_UDS_BUILD_FUZZERS "Build libFuzzer protocol targets (Clang only)" OF
 option(EASY_UDS_BUILD_BENCHMARKS "Build RPC, allocation, and streaming benchmarks" OFF)
 option(EASY_UDS_BUILD_EXPERIMENTS "Build standalone UDS/io_uring experiment probes" OFF)
 option(EASY_UDS_TRACE_SPIN_MISS "Count client session spin-window misses (diagnostic)" OFF)
+option(EASY_UDS_TRACE_SESSION_CONTENTION
+    "Measure client shared-session lock contention (diagnostic)" OFF)
 set(EASY_UDS_SESSION_SPIN_US "100" CACHE STRING
     "Build-time Session response spin window in microseconds (0 disables spinning)")
 if(NOT EASY_UDS_SESSION_SPIN_US MATCHES "^[0-9]+$")
     message(FATAL_ERROR "EASY_UDS_SESSION_SPIN_US must be a non-negative integer")
+endif()
+set(EASY_UDS_SESSION_INFLIGHT_SHARDS "16" CACHE STRING
+    "Experimental client Session in-flight table shard count (1-64)")
+if(NOT EASY_UDS_SESSION_INFLIGHT_SHARDS MATCHES "^[1-9][0-9]*$" OR
+   EASY_UDS_SESSION_INFLIGHT_SHARDS GREATER 64)
+    message(FATAL_ERROR "EASY_UDS_SESSION_INFLIGHT_SHARDS must be an integer from 1 to 64")
 endif()
 
 find_package(Threads REQUIRED)
@@ -46,6 +54,7 @@ add_library(easy_uds
     src/reactor/stream_io.hpp
     src/protocol.hpp
     src/internal.hpp
+    src/session_trace.hpp
 )
 add_library(easy_uds::easy_uds ALIAS easy_uds)
 
@@ -73,7 +82,9 @@ target_include_directories(easy_uds
 target_link_libraries(easy_uds PUBLIC Threads::Threads)
 target_compile_definitions(easy_uds PRIVATE
     EASY_UDS_SESSION_SPIN_US=${EASY_UDS_SESSION_SPIN_US}
+    EASY_UDS_SESSION_INFLIGHT_SHARDS=${EASY_UDS_SESSION_INFLIGHT_SHARDS}
     $<$<BOOL:${EASY_UDS_TRACE_SPIN_MISS}>:EASY_UDS_TRACE_SPIN_MISS>
+    $<$<BOOL:${EASY_UDS_TRACE_SESSION_CONTENTION}>:EASY_UDS_TRACE_SESSION_CONTENTION>
 )
 
 target_compile_options(easy_uds PRIVATE
@@ -145,6 +156,7 @@ if(EASY_UDS_BUILD_BENCHMARKS)
     target_link_libraries(easy_uds_session_benchmark PRIVATE easy_uds::easy_uds)
     target_compile_definitions(easy_uds_session_benchmark PRIVATE
         $<$<BOOL:${EASY_UDS_TRACE_SPIN_MISS}>:EASY_UDS_TRACE_SPIN_MISS>
+        $<$<BOOL:${EASY_UDS_TRACE_SESSION_CONTENTION}>:EASY_UDS_TRACE_SESSION_CONTENTION>
     )
     add_executable(easy_uds_allocation_benchmark tests/easy_uds_allocation_benchmark.cpp)
     target_link_libraries(easy_uds_allocation_benchmark PRIVATE easy_uds::easy_uds)

@@ -80,7 +80,10 @@ jobs:
           -DCMAKE_BUILD_TYPE=Release
           -DEASY_UDS_BUILD_EXAMPLES=OFF
           -DEASY_UDS_BUILD_TESTS=OFF
+          -DEASY_UDS_BUILD_BENCHMARKS=ON
           -DEASY_UDS_BUILD_EXPERIMENTS=ON
+          -DEASY_UDS_TRACE_SPIN_MISS=ON
+          -DEASY_UDS_TRACE_SESSION_CONTENTION=ON
           -DEASY_UDS_WARNINGS_AS_ERRORS=ON
 
       - name: Build standalone probes
@@ -93,6 +96,7 @@ jobs:
           ./build-experiments/easy_uds_zero_copy_probe 1048576
           ./build-experiments/easy_uds_shm_transport_probe 4096 1000
           ./build-experiments/easy_uds_shm_framed_probe 4096 200
+          ./build-experiments/easy_uds_session_benchmark 200 4 shared 0
 
       - name: Run io_uring probe when the runner permits it
         run: |

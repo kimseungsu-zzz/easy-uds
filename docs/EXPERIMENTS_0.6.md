@@ -44,6 +44,23 @@ over a normal byte stream. This isolates transport overhead, not the reactor,
 handler dispatch, multiplexing, or backpressure, so it must not be read as an
 in-library performance claim.
 
+## Shared Session contention attribution
+
+The normal library build uses 16 in-flight table shards. Reproduce the
+end-to-end 1/2/4/8/16 A/B with:
+
+```sh
+./scripts/session_shard_sweep.sh /tmp/easy-uds-session-shards 30000 8
+```
+
+Set `EASY_UDS_SHARD_SWEEP_TRACE=ON` to compile diagnostic-only nanosecond
+counters for send-lock wait, caller/reader table-lock wait, per-slot wait,
+request-id probes, response lookups, notifications, and condition-variable
+fallbacks. The counters call the clock and update atomics, so use them to
+attribute contention rather than as release performance numbers. The same
+diagnostic can be enabled manually with
+`-DEASY_UDS_TRACE_SESSION_CONTENTION=ON`.
+
 `easy_uds_false_sharing_probe` compares two adjacent relaxed atomics with two
 64-byte-aligned atomics. It is a hardware-sensitive diagnostic; it does not
 justify padding production state unless the target workload reproduces the gap.

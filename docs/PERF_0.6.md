@@ -80,9 +80,37 @@ point, `session_idle_grace=0`) reproduced the expected contention curve:
 
 These numbers are diagnostic rather than a release baseline, but they confirm
 that a single shared session becomes the limiting topology under high caller
-counts. The next optimization candidates are sharded in-flight lookup and a
-single sender/MPSC path; each must be benchmarked against this sweep before it
-is adopted.
+counts. They selected sharded in-flight lookup as the next isolated experiment;
+the sender path remains a separate future A/B.
+
+### Shared-session in-flight sharding A/B (2026-08-13)
+
+`EASY_UDS_TRACE_SESSION_CONTENTION` first separated send, caller-table,
+reader-table, and per-slot lock waits. At c8 the single caller-side table lock
+waited about 48 us per acquisition versus about 24 us for the send lock; at
+c32 it reached about 141 us. Slot-lock waits stayed below 1 us. This selected
+the pending table—not waiter notification—as the first isolated experiment.
+
+The table was then split by request id with an atomic id allocator and
+cache-line-separated shards. The following figures are medians of three WSL2
+release runs with tracing disabled, 50,000 requests per concurrent point and
+30,000 requests at c1:
+
+| Load | Shards | Throughput | p50 | p99 | CPU-s / 1M requests |
+|---:|---:|---:|---:|---:|---:|
+| c1 | 1 | 10.9k req/s | 66.7 us | 355.7 us | 136.9 |
+| c1 | 16 | 11.2k req/s | 65.8 us | 354.2 us | 134.5 |
+| c8 | 1 | 13.7k req/s | 458.8 us | 2658.9 us | 302.7 |
+| c8 | 16 | 21.5k req/s | 338.8 us | 1038.7 us | 236.9 |
+| c32 | 1 | 19.5k req/s | 1326.2 us | 5057.4 us | 279.4 |
+| c32 | 16 | 34.6k req/s | 827.5 us | 2496.2 us | 204.7 |
+
+Scorecard: at c8, 16 shards improve throughput 57%, p50 26%, p99 61%, and
+CPU cost 22%; at c32 they improve throughput 78%, p50 38%, p99 51%, and CPU
+cost 27%. The c1 medians are effectively unchanged. Eight shards retained
+noticeably more contention at c32 (22.8k req/s median and 3.69 ms p99), so the
+default is 16. Decision: **ACCEPT**. The build-time shard count remains tunable
+for repeatable experiments; the public API and protocol are unchanged.
 
 ### Shared-memory transport probe (2026-08-13)
 

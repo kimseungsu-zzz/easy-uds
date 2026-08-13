@@ -16,6 +16,7 @@ cmake -S . -B build-experiments \
 cmake --build build-experiments --parallel
 ./build-experiments/easy_uds_fd_passing_probe
 ./build-experiments/easy_uds_io_uring_probe
+./build-experiments/easy_uds_io_uring_echo_probe 8 5000 both
 ./build-experiments/easy_uds_false_sharing_probe 100000000
 ./build-experiments/easy_uds_zero_copy_probe 16777216
 ./build-experiments/easy_uds_shm_transport_probe 4096 10000
@@ -26,8 +27,13 @@ cmake --build build-experiments --parallel
 `easy_uds_fd_passing_probe` transfers a `memfd_create()` descriptor with
 `SCM_RIGHTS` over a Unix socketpair and validates the received contents.
 `easy_uds_io_uring_probe` only calls `io_uring_setup`; it is a capability probe,
-not an alternate reactor. The current production backend remains epoll until a
-complete io_uring implementation demonstrates a measurable benefit.
+not an alternate reactor. `easy_uds_io_uring_echo_probe` is the matched A/B:
+the same exact-I/O client harness drives either a level-triggered epoll echo
+state machine or a basic re-armed io_uring accept/receive/send state machine.
+It reports p50/p95/p99/p99.9, throughput, process CPU, context switches, and
+backend wait calls. Reproduce c1/c2/c8/c32 with `scripts/io_backend_sweep.sh`;
+set `EASY_UDS_IO_SWEEP_STRACE=1` to append syscall counts. This is a transport
+ceiling, not a full alternate easy-uds reactor.
 
 `easy_uds_shm_transport_probe` is a control-plane/data-plane experiment. It
 passes a `memfd` and an `eventfd` over a Unix socketpair, maps an eight-slot

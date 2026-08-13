@@ -222,6 +222,48 @@ but ownership lifetime, peer crash recovery, ring leases, backpressure, and
 multi-producer ordering would add substantially more complexity. The result is
 enough to inform a future opt-in design without expanding the final 0.6 API.
 
+### Basic io_uring versus epoll A/B (2026-08-13)
+
+The original io_uring echo probe had no matched epoll baseline and assumed that
+every send and receive completed all eight bytes. The final probe now uses one
+correctness-checking exact-I/O client harness for both backends, handles partial
+server I/O, keeps pending io_uring buffers alive through ring teardown, and
+reports p99.9 plus process CPU and context switches. The server work is kept
+deliberately equivalent: re-armed accept followed by receive and echo send. It
+is a transport ceiling, not the full production parser/dispatcher.
+
+Medians of three WSL2 `g++ -O3` runs were:
+
+| Load | Backend | Throughput | p50 | p99 | p99.9 | CPU-s / 1M |
+|---:|---|---:|---:|---:|---:|---:|
+| c1 | epoll | 18.9k req/s | 38.7 us | 255 us | 502 us | 44.3 |
+| c1 | io_uring | 20.1k req/s | 41.6 us | 234 us | 413 us | 42.3 |
+| c2 | epoll | 49.8k req/s | 27.6 us | 182 us | 331 us | 26.4 |
+| c2 | io_uring | 27.1k req/s | 54.3 us | 267 us | 507 us | 44.1 |
+| c8 | epoll | 51.3k req/s | 126 us | 587 us | 1110 us | 32.0 |
+| c8 | io_uring | 35.9k req/s | 211 us | 584 us | 1063 us | 39.0 |
+| c32 | epoll | 63.5k req/s | 411 us | 1424 us | 2423 us | 25.2 |
+| c32 | io_uring | 31.9k req/s | 877 us | 3190 us | 4465 us | 47.0 |
+
+The c1 result is mixed and within this host's large run-to-run variance. From
+c2 upward the basic io_uring state machine loses decisively: at c32 throughput
+falls about 50%, p50 more than doubles, and CPU cost rises about 86%.
+
+`strace -f -c` at c8/16,000 requests counted about 4.13 steady-state calls per
+request for epoll (client and server send/receive plus epoll wait), versus 2.25
+for io_uring (client send/receive plus `io_uring_enter`). Timing under strace is
+not comparable because interception penalizes the syscall-heavier backend, but
+the counts establish the useful negative result: fewer syscalls did not produce
+lower untraced latency or CPU cost. The completion handoff remains the dominant
+cost for this tiny synchronous exchange.
+
+Decision: **REJECT A BASIC IO_URING BACKEND FOR 0.6.x; KEEP PRODUCTION EPOLL**.
+Multishot accept cannot affect the steady-state request result, provided buffers
+do not help fixed per-connection eight-byte storage, and zero-copy send is aimed
+at large payloads rather than this RPC path. Those features may be isolated in
+a future workload-specific experiment, but the result does not justify reactor
+complexity in the closing 0.6 release.
+
 ### Read-ahead batch size sweep (2026-08-12)
 
 `reactor_read_batch_size` (256 KiB default) caps how much the reactor parses

@@ -19,6 +19,13 @@ All notable changes to this project are documented here.
 - Added raw and protocol-v2-framed `memfd + eventfd` transport probes. The
   framed request/response result remains experimental and does not justify a
   public shared-memory transport yet.
+- Completed a real process-to-process SHM follow-up with post-fork `SCM_RIGHTS`
+  setup, direct mapped slots, conditional eventfd wakeups, hot/idle spin sweeps,
+  and a fixed lost-wakeup regression. The result stays experimental because its
+  large hot-SPSC win does not cover ownership and crash-recovery complexity.
+- Reworked the io_uring echo probe into a correctness-checked epoll/io_uring A/B.
+  Basic io_uring reduced syscall count but regressed concurrent throughput,
+  latency, and CPU cost, so the production backend remains epoll.
 
 ## 0.6.3 — ⚙️ Experimental Closure
 

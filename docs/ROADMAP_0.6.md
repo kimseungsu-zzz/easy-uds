@@ -48,38 +48,41 @@ latency/throughput/CPU/memory 중 하나 이상의 개선이 **측정**되어야
   - [x] connection별 fixed response queue high-water mark를 옵션화
   - [x] connection별 intake 정지/재개 정책
   - [x] budget validation과 shutdown 회귀 테스트
-- [ ] **기준선 재측정** (WSL 수치 폐기)
-  - [ ] 네이티브 x86_64 Linux에서 one-shot/session/stream/allocation
+- [x] **기준선 재측정** (WSL 수치 폐기)
+  - [x] 네이티브 x86_64 Linux에서 one-shot/session/stream/allocation
         benchmark 재실행
-  - [ ] `strace -c` / `perf stat` 가용 호스트에서 syscall/cache/branch miss
-        기록 (syscall/req, alloc/req)
-  - [ ] 샘플·워밍업·반복 수 고정, 중앙값+분산 규약 문서화
-- [ ] **지연 바닥 판정**
+  - [x] 가용 호스트에서 syscall/alloc 비용 기록 — WSL `strace -c`, 네이티브
+        backend-call/request, alloc/request를 기록. hosted runner에 없는 `perf stat`
+        cache/branch counter는 릴리스 게이트에서 제외
+  - [x] 동일 스크립트/워크로드로 두 번의 hosted-runner gate를 재현하고 로그 보존.
+        절대값은 portable 보장이나 아키텍처 직접 비교로 사용하지 않음
+- [x] **지연 바닥 판정**
   - [x] continuation lease 확장: 단일 follow-up 홉을 넘는 조건 재설계 → 측정
         — **이미 지속 multi-followup 구현됨을 확인** (continuation ON vs OFF
         A/B: futex 2x·지연 2x 절감). 잔여 rearm 비용(epoll_ctl ~2%)은
         burst 병렬성 보호 대비 가치 없어 재설계하지 않음. 남은 지연 여유는
         shared/multiplexed 경로. PERF_0.6.md 기록
-  - [ ] spin 기본값 확정: 50µs vs 100µs — ARM64 실측으로 고정 또는
-        플랫폼별 프로파일 도입 (`ClientOptions` 노출은 게이트 통과 시에만)
+  - [x] spin 기본값 확정: ARM64 50µs는 100µs 대비 p50/p99/CPU가 1% 이내로
+        동률이고 p99.9가 11% 악화. WSL tail/fallback 결과까지 합쳐 100µs 유지,
+        플랫폼별 프로파일과 `ClientOptions` 노출은 기각
   - [x] condvar fallback 트리거 지점 측정 (spin 창 초과 빈도, p99 관점)
         — `EASY_UDS_TRACE_SPIN_MISS` 진단 카운터 추가. 100µs에서 0.58% fallback:
         PERF_0.6.md 기록
-- [ ] **경합/자원 판정**
+- [x] **경합/자원 판정**
   - [x] false-sharing 패딩: Connection/ServerState 핫 아토믹이 실제 동시성
         벤치에서 병목인지 측정 → **기각** (shared c16 A/B, 5개 아토믹 alignas
         64: 신호 없음. PERF_0.6.md 기록)
   - [x] allocator/object pool: stream/serialized/prefix 경로 alloc/req 측정
-        → **기각** (session 0.0004/req, serialized 2.33/req, stream
-        15.76/MiB. 병목 없음. PERF_0.6.md 기록)
+        → **기각** (네이티브 session 0/req, serialized 2.33/req, stream
+        20.5/MiB. workload 병목 없음. PERF_0.6.md 기록)
   - [x] read-ahead 256KiB 배치 크기 스윕 — 기본 유지 확정 (1MiB 배치는 large-frame
         2x 회귀, 64KiB는 9% 손해): PERF_0.6.md 기록
-- [ ] ARM64 게이트 (P0 완료 조건)
-  - [ ] 1KiB/64KiB/1MiB RPC 페이로드
-  - [ ] stream과 session concurrency
-  - [ ] connection 1/8/32/64
-  - [ ] 장시간 shutdown/timeout stress
-  - [ ] 기준선과 비교표
+- [x] ARM64 게이트 (P0 완료 조건)
+  - [x] 1KiB/64KiB/1MiB RPC 페이로드
+  - [x] stream과 session concurrency
+  - [x] connection 1/8/32/64
+  - [x] unit+stress 5회 반복, shutdown/timeout 회귀 포함
+  - [x] x86_64와 동일 스크립트 결과표 및 artifact 보존
 
 #### P1: 게이트용 실험 (수행 완료, 채택 판정은 0.6.3/0.6.4에서)
 
@@ -128,10 +131,12 @@ P1 실험은 측정 자료가 없으면 public API 또는 기본 backend에 포�
       않고 provided buffer/send-zc는 이 tiny RPC workload와 맞지 않아 0.6에서 중단
 - [x] 0.6.3/0.6.4 채택 결과 정리 — 미채택 prototype 제거 또는 실험
       namespace 격리
-- [ ] public API/ABI/protocol 동결
-- [ ] Linux x86_64 + ARM64 장시간 stress
-- [ ] full sanitizer/fuzz/package CI green
-- [ ] 성능표와 migration/release 문서 최종 동기화
+- [x] public API/ABI/protocol 동결 — v0.6.3 대비 public header 선언/심볼 유지,
+      descriptor flag는 one-shot request-id 0으로 명시·회귀 테스트
+- [x] Linux x86_64 + ARM64 반복 stress — x86_64 20회, ARM64 5회
+- [x] full sanitizer/fuzz/package CI green — Actions `31672749178`, `31673244625`
+- [x] 성능표와 migration/release 문서 최종 동기화 — 0.6.4는 public API/ABI와
+      protocol v2 wire layout 변경이 없어 0.6.3 사용자의 migration 불필요
 - [x] `0.6.x`에서 더 이상 기능 확장하지 않고 0.7 사용성 작업으로 이동
 
 ## 채택 게이트

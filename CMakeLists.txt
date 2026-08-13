@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.20)
 
-project(easy_uds VERSION 0.6.3 LANGUAGES CXX)
+project(easy_uds VERSION 0.6.4 LANGUAGES CXX)
 
 if(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
     message(FATAL_ERROR "easy-uds 0.6 currently requires Linux (epoll and SO_PEERCRED)")

@@ -2,7 +2,7 @@
 
 All notable changes to this project are documented here.
 
-## Unreleased 0.6.x experiments
+## 0.6.4 — ⚙️ Final Experimental Closure
 
 - Split the multiplexed client Session's in-flight request table into 16
   cache-line-separated shards and made request-id allocation atomic. Release
@@ -32,6 +32,19 @@ All notable changes to this project are documented here.
 - Hardened the v2 descriptor flag to the documented one-shot request-id `0`
   path, added a nonzero-id rejection regression, and extended codec fuzz
   round-trips to preserve and verify flags.
+- Kept the 100-microsecond Session spin default after a native ARM64 50/100
+  microsecond A/B: p50, p99, throughput, and CPU were effectively tied while
+  the shorter candidate regressed p99.9 by about 11%.
+- Closed the allocation gate on native x86_64 and ARM64: the warm Session path
+  performs zero heap allocations per request. Serialized and stream pooling
+  remain rejected because the measured allocations are not a workload-level
+  bottleneck.
+- Repeated the complete release gate after protocol hardening: GCC/Clang
+  static/shared builds, ASan/UBSan, TSan, 200k protocol fuzz executions, 20k
+  stateful Session fuzz executions, package consumers, x86_64 and ARM64
+  benchmarks, and repeated unit/stress soaks all passed.
+- Public API declarations, public ABI symbols, and the protocol-v2 wire layout
+  remain unchanged from 0.6.3; no source or wire migration is required.
 
 ## 0.6.3 — ⚙️ Experimental Closure
 
@@ -117,8 +130,9 @@ and lower hot-path overhead. The public API and protocol remain unchanged from
 
 - Split the reactor into parser, event loop, dispatch, flow-control, output,
   streaming, and worker-executor modules under `src/reactor/`.
-- Split the unit suite by subsystem under `tests/easy_uds_test/`; all C/C++ source
-  files are now below 600 lines.
+- Split the unit suite by subsystem under `tests/easy_uds_test/` and the reactor
+  by responsibility under `src/reactor/`, keeping production and test modules
+  reviewable as later experiments evolve.
 - Validated with GCC and Clang static/shared builds, 37 unit tests, stress tests,
   ASan/UBSan, TSan, protocol/session fuzz smoke tests, and installed-package
   consumers.

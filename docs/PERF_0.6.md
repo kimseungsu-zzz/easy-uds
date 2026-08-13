@@ -24,8 +24,12 @@ at the cost of a worse p99. Zero spin falls through on essentially every request
 The residual ~2 futex calls and ~2 voluntary context switches per request at
 100 µs are server-side (worker-pool queueing, reactor dispatch, reader-thread
 scheduling), not the client response wait — the client spin is already near
-optimal, so the next latency lever is server-side. This is x86-WSL evidence only;
-the `ROADMAP_0.6.md` decision is finalized with an ARM64 run.
+optimal, so the next latency lever is server-side. The ARM64 final gate compared
+the same c1 workload at 50 µs and 100 µs. The 50 µs candidate changed p50 by
+less than 1% and left p99 effectively tied, but worsened p99.9 by 11% (39.4 µs
+versus 35.5 µs). Together with the WSL fallback and tail result, this finalizes
+100 µs as the cross-platform default. A runtime or architecture-specific public
+knob is not justified.
 
 The benchmark also reports `getrusage()` user/system CPU time and voluntary /
 involuntary context switches. `strace -c` is used for syscall counts on the
@@ -44,6 +48,112 @@ runs observed roughly `1.26x–2.59x` for `sendfile()` and `1.58x–2.88x` for
 `splice()`; the result is host-sensitive. This is enough to keep the probe,
 but not enough to add a public file-source API without an end-to-end framed
 stream measurement.
+
+## Native Linux final gate (2026-08-13)
+
+GitHub Actions runs `31672749178` and `31673244625` executed the same release
+binaries on hosted Ubuntu 24.04 x86_64 (4-vCPU AMD EPYC 7763) and ARM64
+(4-vCPU Neoverse-N2). These are hosted-runner release gates, not an
+architecture-only CPU comparison or portable guarantee. Their value is
+identical commands, real Linux kernels, complete resource reporting, a repeat
+after protocol hardening, and reproducible artifacts.
+
+### End-to-end library paths
+
+| Host / workload | Throughput | p50 | p99 | p99.9 | CPU-s / 1M |
+|---|---:|---:|---:|---:|---:|
+| x86_64 one-shot c1, empty | 15.1k req/s | 63.7 us | 110 us | 166 us | 79.5* |
+| ARM64 one-shot c1, empty | 25.3k req/s | 37.7 us | 61.1 us | 118 us | 39.5* |
+| x86_64 one-shot c1, 1 MiB | 2.10k req/s | 473 us | 528 us | 529 us | 750* |
+| ARM64 one-shot c1, 1 MiB | 2.32k req/s | 431 us | 469 us | 476 us | 700* |
+| x86_64 shared session c1 | 26.1k req/s | 38.4 us | 48.8 us | 59.8 us | 70.0 |
+| ARM64 shared session c1 | 47.4k req/s | 21.0 us | 23.7 us | 34.9 us | 33.8 |
+| x86_64 shared session c8 | 32.3k req/s | 232 us | 821 us | 3.01 ms | 107.5 |
+| ARM64 shared session c8 | 42.2k req/s | 164 us | 784 us | 2.57 ms | 78.6 |
+| x86_64 shared session c32 | 30.8k req/s | 1.00 ms | 2.48 ms | 3.97 ms | 123.2 |
+| ARM64 shared session c32 | 36.0k req/s | 851 us | 2.56 ms | 4.68 ms | 106.0 |
+
+`*` One-shot CPU is total `/usr/bin/time` user+system time divided by requests,
+so it includes short process/setup overhead. Session CPU is the benchmark's
+in-window `getrusage()` value. The x86_64 stream measured 6.19/5.65 GiB/s
+upload/download; ARM64 measured 8.79/8.36 GiB/s. The ARM64 c64 shared-session
+point remained stable at 34.6k req/s, 1.82 ms p50, 4.00 ms p99, and 111.7
+CPU-s/1M.
+
+### Allocation closure
+
+The second native run measured ordinary heap operations on the warmed paths:
+
+| Host | Path | Work | Allocations |
+|---|---|---:|---:|
+| x86_64 | warm Session | 20,000 requests | 0/request |
+| ARM64 | warm Session | 20,000 requests | 0/request |
+| x86_64 | serialized executor | 5,000 requests | 2.3332/request |
+| ARM64 | serialized executor | 5,000 requests | 2.3334/request |
+| x86_64 | 1 MiB stream | 50 exchanges | 20.5/MiB |
+| ARM64 | 1 MiB stream | 50 exchanges | 20.5/MiB |
+
+The latency-critical warm Session already performs no heap allocation per
+request. Pooling the remaining serialized/stream allocations is rejected for
+0.6: earlier allocator A/B showed no workload-level win, while ownership and
+reclamation complexity would increase substantially.
+
+### Session spin default
+
+| ARM64 c1 | Throughput | p50 | p99 | p99.9 | CPU-s / 1M |
+|---|---:|---:|---:|---:|---:|
+| 100 µs (default) | 46.7k req/s | 21.217 µs | 24.673 µs | 35.465 µs | 33.99 |
+| 50 µs candidate | 46.9k req/s | 21.097 µs | 24.616 µs | 39.401 µs | 33.67 |
+
+The throughput, p50, p99, and CPU differences are below 1%; the 50 µs
+candidate instead regresses p99.9 by about 11%. The default remains 100 µs,
+with no public runtime option added.
+
+### Process SHM is architecture/workload specific
+
+| Host / payload | Path | Throughput | p50 | p99 | CPU-s / 1M | eventfd / exchange |
+|---|---|---:|---:|---:|---:|---:|
+| x86_64 / 4 KiB | direct + conditional | 2.74 GiB/s | 2.35 us | 3.52 us | 5.51 | 0.0095 |
+| x86_64 / 4 KiB | socketpair | 0.354 GiB/s | 21.3 us | 38.4 us | 24.4 | n/a |
+| ARM64 / 4 KiB | direct + conditional | 0.436 GiB/s | 17.1 us | 20.7 us | 12.4 | 2.00 |
+| ARM64 / 4 KiB | socketpair | 0.501 GiB/s | 14.1 us | 21.1 us | 16.6 | n/a |
+| x86_64 / 1 MiB | direct + always | 2.75 GiB/s | 475 us | 1.23 ms | 707 | 2.00 |
+| x86_64 / 1 MiB | socketpair | 2.80 GiB/s | 676 us | 716 us | 901 | n/a |
+| ARM64 / 1 MiB | direct + always | 3.36 GiB/s | 451 us | 885 us | 576 | 2.00 |
+| ARM64 / 1 MiB | socketpair | 2.73 GiB/s | 694 us | 732 us | 917 | n/a |
+
+The 256-iteration conditional window covers the hot 4 KiB exchange on x86_64
+but almost never covers it on this ARM64 runner. At 1 MiB direct slots reduce
+copy CPU and p50, while p99/throughput vary by host. This confirms the decision
+to retain the result as an experiment rather than expose a 0.6 public transport.
+
+### Native io_uring decision
+
+| Host / load | Backend | Throughput | p50 | p99 | p99.9 | CPU-s / 1M |
+|---|---|---:|---:|---:|---:|---:|
+| x86_64 c2 | epoll | 64.1k req/s | 34.0 us | 41.7 us | 52.4 us | 22.7 |
+| x86_64 c2 | io_uring | 66.8k req/s | 31.3 us | 44.9 us | 52.1 us | 22.8 |
+| x86_64 c8 | epoll | 152.5k req/s | 37.6 us | 93.0 us | 2.94 ms | 16.2 |
+| x86_64 c8 | io_uring | 110.2k req/s | 51.3 us | 145 us | 3.00 ms | 22.2 |
+| x86_64 c32 | epoll | 157.1k req/s | 168 us | 428 us | 2.77 ms | 16.2 |
+| x86_64 c32 | io_uring | 125.4k req/s | 254 us | 300 us | 335 us | 21.4 |
+| ARM64 c2 | epoll | 138.8k req/s | 14.0 us | 18.8 us | 24.4 us | 10.2 |
+| ARM64 c2 | io_uring | 120.5k req/s | 17.0 us | 23.8 us | 29.3 us | 11.2 |
+| ARM64 c8 | epoll | 241.4k req/s | 23.8 us | 60.7 us | 2.42 ms | 8.35 |
+| ARM64 c8 | io_uring | 183.5k req/s | 32.6 us | 52.9 us | 2.93 ms | 11.4 |
+| ARM64 c32 | epoll | 256.4k req/s | 115 us | 236 us | 2.50 ms | 7.96 |
+| ARM64 c32 | io_uring | 209.0k req/s | 152 us | 172 us | 205 us | 11.0 |
+
+io_uring improves high-concurrency extreme tail on the c32 hosted runs, but
+costs 18-28% throughput, 32-51% p50, and 32-38% CPU. The isolated c2 x86_64
+point is approximately tied. Under the 0.6 gate (clear latency/CPU win without
+a c1 regression), that trade is insufficient: production epoll remains the
+lower-complexity and more CPU-efficient backend.
+
+Both final dispatches passed. The repeated gate includes 20 complete x86_64
+unit+stress repetitions, five on ARM64, ASan/UBSan, TSan, 200,000 protocol fuzz
+executions, 20,000 stateful session fuzz executions, GCC/Clang static/shared
+builds, and static/shared installed-package consumers.
 
 ## WSL reference baseline (2026-08-12)
 

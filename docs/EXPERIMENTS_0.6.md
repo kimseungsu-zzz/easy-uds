@@ -19,6 +19,7 @@ cmake --build build-experiments --parallel
 ./build-experiments/easy_uds_false_sharing_probe 100000000
 ./build-experiments/easy_uds_zero_copy_probe 16777216
 ./build-experiments/easy_uds_shm_transport_probe 4096 10000
+./build-experiments/easy_uds_shm_framed_probe 4096 1000
 ```
 
 `easy_uds_fd_passing_probe` transfers a `memfd_create()` descriptor with
@@ -33,6 +34,15 @@ single-producer/single-consumer ring, and compares fixed-payload throughput and
 send-side latency with a plain `SOCK_STREAM` socketpair. It does not claim
 multi-producer ordering, crash recovery, ownership leases, or a stable public
 transport API; those are prerequisites for any future shared-memory design.
+
+`easy_uds_shm_framed_probe` extends that experiment to a complete synchronous
+request/response exchange. Both sides validate the real protocol-v2 20-byte
+big-endian header, request id, route/status field, and body before measuring a
+round trip. The shared-memory path transfers two rings and two eventfds through
+an SCM_RIGHTS control message; the socketpair path is the same framed exchange
+over a normal byte stream. This isolates transport overhead, not the reactor,
+handler dispatch, multiplexing, or backpressure, so it must not be read as an
+in-library performance claim.
 
 `easy_uds_false_sharing_probe` compares two adjacent relaxed atomics with two
 64-byte-aligned atomics. It is a hardware-sensitive diagnostic; it does not

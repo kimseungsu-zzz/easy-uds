@@ -93,6 +93,26 @@ comparison with one producer and one consumer; it excludes crash recovery,
 multi-producer ordering, leases, and application framing. It is therefore
 evidence for an experimental data-plane direction, not a public API decision.
 
+The follow-up `easy_uds_shm_framed_probe` adds the production v2 20-byte
+big-endian header and validates an echo response for every request. It compares
+a two-ring memfd/eventfd data plane (with SCM_RIGHTS setup) against the same
+framed request/response over a `SOCK_STREAM` socketpair. Run it at 4 KiB,
+64 KiB, and 1 MiB before considering a shared-memory transport API; it still
+omits reactor scheduling, handler work, multiplexing, and failure recovery.
+
+One WSL2 smoke sweep (2026-08-13, g++ `-O3`, 1000/100/10 rounds) produced:
+
+| Payload | Shared p50 / p99 | Socketpair p50 / p99 | Shared throughput | Socketpair throughput |
+|---:|---:|---:|---:|---:|
+| 4 KiB | 91.7 / 208 us | 44.0 / 226 us | 0.079 GiB/s | 0.104 GiB/s |
+| 64 KiB | 236 / 386 us | 359 / 562 us | 0.503 GiB/s | 0.337 GiB/s |
+| 1 MiB | 2.19 / 2.51 ms | 1.34 / 2.11 ms | 0.862 GiB/s | 1.073 GiB/s |
+
+The crossover is workload-sensitive: shared memory helps this 64 KiB point,
+but its extra ring copies and eventfd wakeups lose at 4 KiB and 1 MiB. These
+numbers are an experiment result, not a transport selection or a release
+performance guarantee.
+
 ### Read-ahead batch size sweep (2026-08-12)
 
 `reactor_read_batch_size` (256 KiB default) caps how much the reactor parses

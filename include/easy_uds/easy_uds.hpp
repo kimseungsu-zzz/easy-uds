@@ -1,5 +1,6 @@
 #pragma once
 
+#include "easy_uds/fd.hpp"
 #include "easy_uds/version.hpp"
 
 #include <chrono>
@@ -55,12 +56,11 @@ struct Request {
     // order. Handlers that mutate shared state must not rely on it being
     // sequential.
     std::uint32_t request_id = 0;
-    // Descriptor passed with the request via `request_fd()`, or -1 when the
-    // request carried none. The server closes its duplicate after the handler
-    // returns, so a handler that wants to keep it must dup() it. The received
-    // descriptor shares the same open file description, so it observes the
-    // caller's current file offset and sees writes made after the pass.
-    int fd = -1;
+    // Descriptor passed with the request via `request_fd()`, or an empty value
+    // when the request carried none. Request owns the received descriptor and
+    // closes it automatically. A handler that wants to retain access beyond
+    // its return must store `fd.duplicate()`.
+    OwnedFd fd;
 };
 
 struct Response {
@@ -255,12 +255,12 @@ class Client {
     // closes. Multiple threads may call request() concurrently.
     [[nodiscard]] Response request(std::string_view route, std::string_view body = {}) const;
 
-    // One-shot request that also passes `fd` (a duplicate is sent via
-    // SCM_RIGHTS; the caller keeps ownership of `fd`). The server delivers the
-    // duplicate to the handler as `Request::fd` and closes it after the
-    // handler returns. `fd` must be >= 0. The response is read as a normal
+    // One-shot request that also passes a borrowed descriptor (a duplicate is
+    // sent via SCM_RIGHTS; the caller keeps ownership). The server delivers an
+    // owning `Request::fd` to the handler. The response is read as a normal
     // fixed response.
-    [[nodiscard]] Response request_fd(std::string_view route, int fd, std::string_view body = {}) const;
+    [[nodiscard]] Response request_fd(std::string_view route, BorrowedFd fd,
+                                      std::string_view body = {}) const;
 
     // One-shot streamed exchange over a dedicated connection.
     [[nodiscard]] Status request_stream(std::string_view route, const StreamReader& request_body,

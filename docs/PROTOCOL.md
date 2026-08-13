@@ -74,8 +74,9 @@ The route must contain at least one byte. Route and body are length-delimited an
 
 `Client::request_fd()` sets flag bit 0 and attaches one descriptor with
 `SCM_RIGHTS` to the fixed request. The server exposes the received duplicate as
-`Request::fd` and closes it after the handler returns. The caller retains
-ownership of its original descriptor. Descriptor passing is not supported on
+the move-only `Request::fd`. The `Request` owns and automatically closes that
+descriptor; a handler calls `duplicate()` to retain access beyond the request
+lifetime. The caller retains ownership of its original descriptor. Descriptor passing is not supported on
 sessions or stream frames; malformed, truncated, or mismatched ancillary data
 is a protocol error.
 

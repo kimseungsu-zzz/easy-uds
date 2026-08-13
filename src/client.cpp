@@ -215,8 +215,8 @@ Response Client::request(std::string_view route, std::string_view body) const {
     return read_response(reader, options_.max_message_size, options_.io_timeout, deadline);
 }
 
-Response Client::request_fd(std::string_view route, int fd, std::string_view body) const {
-    if (fd < 0) {
+Response Client::request_fd(std::string_view route, BorrowedFd fd, std::string_view body) const {
+    if (!fd.valid()) {
         throw std::invalid_argument("request_fd requires a valid descriptor");
     }
     validate_request_lengths(route, body, options_.max_message_size);
@@ -226,7 +226,7 @@ Response Client::request_fd(std::string_view route, int fd, std::string_view bod
     const sockaddr_un address = make_address(socket_path_);
     connect_nonblocking(socket_fd.get(), address, options_.connect_timeout, deadline);
 
-    write_request_frame_with_fd(socket_fd.get(), 0, fd, route, body, options_.io_timeout, deadline);
+    write_request_frame_with_fd(socket_fd.get(), 0, fd.get(), route, body, options_.io_timeout, deadline);
     BufferedReader reader(socket_fd.get());
     return read_response(reader, options_.max_message_size, options_.io_timeout, deadline);
 }

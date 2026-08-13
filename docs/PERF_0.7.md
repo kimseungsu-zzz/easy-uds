@@ -5,6 +5,49 @@ entry compares against tag `v0.6.4` with the same compiler, host, build flags,
 workload, and repeated runs. Absolute values are development measurements, not
 portable guarantees.
 
+## Typed FD ownership (2026-08-13)
+
+Change: replace raw server-side `Request::fd` ownership with a one-`int`,
+move-only `OwnedFd`; make the client input an explicit `BorrowedFd`. Request
+queue moves now transfer ownership automatically, and normal, rejected,
+expired, disconnected, and exception paths share the same destructor cleanup.
+The wrapper adds no allocation, lock, or syscall unless a handler explicitly
+calls `duplicate()`.
+
+### Default hot-path A/B
+
+WSL2, g++ 15.2, CMake Release, empty payload. Each row is the median of three
+alternating runs from separately built `v0.6.4` and current trees. Session runs
+use 30,000 requests and one shared Session; one-shot runs use 10,000 requests.
+
+| Workload / revision | Throughput | p50 | p99 | CPU-s / 1M |
+|---|---:|---:|---:|---:|
+| Session c1 / v0.6.4 | 25.50k req/s | 34.929 us | 132.185 us | 59.45 |
+| Session c1 / typed FD | 25.52k req/s | 34.507 us | 125.268 us | 58.91 |
+| c1 delta | +0.1% | -1.2% | -5.2% | -0.9% |
+| Session c8 / v0.6.4 | 33.81k req/s | 218.234 us | 646.283 us | 168.26 |
+| Session c8 / typed FD | 33.93k req/s | 217.256 us | 664.320 us | 168.68 |
+| c8 delta | +0.3% | -0.4% | +2.8% | +0.3% |
+| One-shot c1 / v0.6.4 | 14.96k req/s | 57.075 us | 181.735 us | n/a |
+| One-shot c1 / typed FD | 15.38k req/s | 58.311 us | 185.155 us | n/a |
+| one-shot delta | +2.8% | +2.2% | +1.9% | n/a |
+
+All medians remain inside the 0.7 gate. The extra invalid-descriptor branch in
+the request destructor is below measurement noise; the ownership abstraction
+is retained.
+
+### Correctness gates
+
+- Release/Werror unit and stress suites passed.
+- ASan/UBSan unit and stress binaries passed with leak detection (the direct
+  unit run was used because the instrumented CTest run hit its 20-second
+  harness limit without a sanitizer report).
+- Static and shared install-package consumers built and ran with the installed
+  `fd.hpp`.
+- Ownership transfer, invalid duplication, caller retention, close-on-exec,
+  explicit retained lifetime, rejected frame, and repeated leak paths have
+  dedicated regressions.
+
 ## Strict partial-request accounting (2026-08-13)
 
 Change: when `ServerOptions::max_total_inflight_bytes` is nonzero, a validated

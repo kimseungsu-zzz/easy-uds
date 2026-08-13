@@ -441,7 +441,7 @@ For pre-1.0 shared builds, the ELF `SOVERSION` tracks the major and minor releas
 
 - `Client(std::string socket_path, ClientOptions options = {})`
 - `request(std::string_view route, std::string_view body = {})`
-- `request_fd(std::string_view route, int fd, std::string_view body = {})` — sends a duplicate of `fd` via `SCM_RIGHTS`
+- `request_fd(std::string_view route, BorrowedFd fd, std::string_view body = {})` — sends a duplicate of a caller-owned descriptor via `SCM_RIGHTS`
 - `request_stream(std::string_view route, const StreamReader&, response_chunk)`
 - `session()`
 - `socket_path()`
@@ -466,7 +466,7 @@ struct Request {
     std::string body;
     PeerCredentials peer;
     std::uint32_t request_id;
-    int fd = -1;  // received descriptor; server closes it after the handler
+    OwnedFd fd;  // received descriptor; closes automatically with Request
 };
 
 struct Response {
@@ -481,6 +481,10 @@ struct StreamResponse {
 …
 };
 ```
+
+FD ownership and retention semantics are documented in
+[`docs/api/fd-passing.md`](docs/api/fd-passing.md). Source changes from 0.6 are
+listed in [`docs/migration/0.6-to-0.7.md`](docs/migration/0.6-to-0.7.md).
 
 ## Security scope
 

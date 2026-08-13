@@ -4,6 +4,13 @@ All notable changes to this project are documented here.
 
 ## Unreleased 0.7.0 — 🌱 Usability Foundation
 
+- Replaced raw `Request::fd` ownership with allocation-free, move-only
+  `OwnedFd`, eliminating manual close/reset paths across reactor, worker, and
+  serialized queues. Handlers use `valid()`, `get()`, and `duplicate()`; a
+  retained duplicate explicitly outlives the request.
+- Changed `Client::request_fd()` to accept `BorrowedFd`, making it explicit
+  that the caller retains its descriptor. Added ownership, move, invalid-input,
+  retained-lifetime, and leak regressions plus a 0.6-to-0.7 migration guide.
 - Made `max_total_inflight_bytes` a strict declared request-byte budget. Fixed
   requests and stream routes reserve route+body bytes after header validation
   and before parser buffers are allocated, so partial parsing, queued work, and

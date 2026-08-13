@@ -57,30 +57,24 @@ bool serve_fixed_request(const std::shared_ptr<ServerState>& state,
     }
     if (handler->serialized) {
         if (!ensure_serialized_worker(state)) {
-            close_request_fd(request);
             connection->closing.store(true, std::memory_order_release);
             return true;
         }
         SerializedJob job;
         job.connection = connection;
         job.request = std::move(request);
-        request.fd = -1;
         job.deadline = deadline;
         job.handler = std::move(handler);
         job.request_bytes = job.request.route.size() + job.request.body.size();
         {
             std::unique_lock<std::mutex> lock(state->serialized_mutex);
             if (state->serialized_stopping || !state->running.load()) {
-                close_request_fd(job.request);
-                request.fd = -1;
                 connection->closing.store(true, std::memory_order_release);
                 return true;
             }
             try {
                 state->pending_serialized.push_back(std::move(job));
             } catch (...) {
-                close_request_fd(job.request);
-                request.fd = -1;
                 throw;
             }
             connection->pending_serialized.fetch_add(1, std::memory_order_relaxed);
@@ -223,9 +217,6 @@ void continue_connection(const std::shared_ptr<ServerState>& state,
             rearm_connection(state, connection, std::move(buffered), buffered_offset);
             const bool completed_inline =
                 serve_fixed_request(state, connection, request, request_deadline);
-            if (completed_inline) {
-                close_request_fd(request);
-            }
             if (!complete_regular_request(state, connection, request_bytes,
                                           completed_inline)) {
                 return;
@@ -378,8 +369,6 @@ void worker_loop(const std::shared_ptr<ServerState>& state) {
         } catch (...) {
             job.connection->closing.store(true, std::memory_order_release);
         }
-        close_request_fd(job.request);
-
         if (complete_regular_request(state, job.connection, job.request_bytes)) {
             continue_connection(state, job.connection, std::move(job.buffered),
                                 job.buffered_offset);
@@ -425,13 +414,6 @@ void serialized_worker_loop(const std::shared_ptr<ServerState>& state) {
                 wake_reactor(state);
             }
         } completion{state, job.connection, job.request_bytes};
-
-        // Serialized requests own any descriptor passed with them until the
-        // handler (or the expiry path) is done with it.
-        struct RequestFdCloser {
-            easy_uds::Request& request;
-            ~RequestFdCloser() { close_request_fd(request); }
-        } request_fd_closer{job.request};
 
         try {
             if (Clock::now() >= job.deadline) {

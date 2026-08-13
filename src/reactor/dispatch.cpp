@@ -67,10 +67,6 @@ bool enqueue_worker_job(const std::shared_ptr<ServerState>& state, std::shared_p
     PendingJob job;
     job.connection = std::move(connection);
     job.request = std::move(request);
-    // Request's implicit move constructor copies the raw descriptor.  Make
-    // ownership explicit so a failed enqueue cannot leave two apparent
-    // owners (or cause a later double close).
-    request.fd = -1;
     job.deadline = deadline;
     job.handler = std::move(handler);
     job.is_stream = is_stream;
@@ -83,7 +79,6 @@ bool enqueue_worker_job(const std::shared_ptr<ServerState>& state, std::shared_p
     {
         std::lock_guard<std::mutex> lock(state->work_mutex);
         if (state->workers_stopping) {
-            close_request_fd(job.request);
             if (request_bytes_reserved) {
                 release_connection_request_bytes(state, accounting_connection,
                                                  accounting_bytes);
@@ -93,7 +88,6 @@ bool enqueue_worker_job(const std::shared_ptr<ServerState>& state, std::shared_p
         try {
             state->pending_jobs.push_back(std::move(job));
         } catch (...) {
-            close_request_fd(job.request);
             if (request_bytes_reserved) {
                 release_connection_request_bytes(state, accounting_connection,
                                                  accounting_bytes);
@@ -173,8 +167,8 @@ bool dispatch_request(const std::shared_ptr<ServerState>& state,
     request.body = std::move(reactor_connection->body_buffer);
     request.peer = reactor_connection->conn->peer;
     request.request_id = reactor_connection->request_id;
-    request.fd = reactor_connection->request_fd;
-    reactor_connection->request_fd = -1;
+    request.fd = easy_uds::OwnedFd::adopt(
+        std::exchange(reactor_connection->request_fd, -1));
 
     std::shared_ptr<const HandlerEntry> handler;
     if (!find_request_handler(state, request.route, handler)) {
@@ -185,14 +179,12 @@ bool dispatch_request(const std::shared_ptr<ServerState>& state,
 
     if (handler->serialized) {
         if (!ensure_serialized_worker(state)) {
-            close_request_fd(request);
             reactor_connection->conn->closing.store(true, std::memory_order_release);
             return false;
         }
         SerializedJob job;
         job.connection = reactor_connection->conn;
         job.request = std::move(request);
-        request.fd = -1;
         job.deadline = reactor_connection->deadline;
         job.handler = std::move(handler);
         job.request_bytes = job.request.route.size() + job.request.body.size();
@@ -202,7 +194,6 @@ bool dispatch_request(const std::shared_ptr<ServerState>& state,
         {
             std::unique_lock<std::mutex> lock(state->serialized_mutex);
             if (state->serialized_stopping || !state->running.load()) {
-                close_request_fd(job.request);
                 if (request_bytes_reserved) {
                     release_connection_request_bytes(state, job.connection,
                                                      job.request_bytes);
@@ -213,7 +204,6 @@ bool dispatch_request(const std::shared_ptr<ServerState>& state,
             try {
                 state->pending_serialized.push_back(std::move(job));
             } catch (...) {
-                close_request_fd(job.request);
                 if (request_bytes_reserved) {
                     release_connection_request_bytes(state, reactor_connection->conn,
                                                      reactor_connection->payload_total);

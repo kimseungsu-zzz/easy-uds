@@ -51,7 +51,7 @@ static/shared package consumer는 모든 phase의 필수 gate다.
   - 예산 부족 peer만 `EPOLLIN` pause, partial close/completion 후 global resume
   - strict mode에서 worker continuation이 reactor admission을 우회하지 않음
   - header-only partial frame과 cross-connection resume 회귀 테스트
-- [ ] FD ownership을 타입으로 표현
+- [x] FD ownership을 타입으로 표현
   - `BorrowedFd`/`OwnedFd` 또는 동등한 move-only 설계
   - `valid()`, `get()`, `duplicate()`와 handler lifetime 문서화
   - raw descriptor 이중 소유처럼 보이는 수동 `fd = -1` 제거

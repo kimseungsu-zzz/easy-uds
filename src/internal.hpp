@@ -143,17 +143,6 @@ class FileDescriptor {
     int fd_;
 };
 
-// Request::fd is an owned descriptor once it has crossed the public API
-// boundary.  Keep the cleanup operation in shared infrastructure so every
-// queue/enqueue failure path can release it without duplicating ownership
-// rules.
-inline void close_request_fd(easy_uds::Request& request) noexcept {
-    if (request.fd >= 0) {
-        (void)::close(request.fd);
-        request.fd = -1;
-    }
-}
-
 inline void set_close_on_exec(int fd) {
     const int flags = ::fcntl(fd, F_GETFD);
     if (flags < 0) {

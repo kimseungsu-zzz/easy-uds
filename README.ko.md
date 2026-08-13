@@ -492,7 +492,7 @@ pre-1.0 shared build에서는 minor release 사이 ABI 변경 가능성이 있�
 
 - `Client(std::string socket_path, ClientOptions options = {})`
 - `request(std::string_view route, std::string_view body = {})`
-- `request_fd(std::string_view route, int fd, std::string_view body = {})` — `SCM_RIGHTS`로 descriptor 복사본 전달
+- `request_fd(std::string_view route, BorrowedFd fd, std::string_view body = {})` — caller 소유 descriptor의 복사본을 `SCM_RIGHTS`로 전달
 - `request_stream(std::string_view route, const StreamReader&, response_chunk)`
 - `session()`
 - `socket_path()`
@@ -517,7 +517,7 @@ struct Request {
     std::string body;
     PeerCredentials peer;
     std::uint32_t request_id;
-    int fd = -1;  // handler가 반환하면 server가 닫는 수신 descriptor
+    OwnedFd fd;  // Request와 함께 자동으로 닫히는 수신 descriptor
 };
 
 struct Response {

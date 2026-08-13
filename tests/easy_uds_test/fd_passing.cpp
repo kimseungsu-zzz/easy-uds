@@ -2,6 +2,8 @@
 
 #include <cstdio>
 #include <dirent.h>
+#include <future>
+#include <type_traits>
 #include <sys/uio.h>
 
 namespace easy_uds::test {
@@ -50,6 +52,33 @@ std::size_t fd_passing_count_open_fds() {
 void test_fd_passing() {
     using namespace easy_uds;
 
+    static_assert(!std::is_copy_constructible_v<OwnedFd>);
+    static_assert(!std::is_copy_assignable_v<OwnedFd>);
+    static_assert(std::is_nothrow_move_constructible_v<OwnedFd>);
+    static_assert(std::is_nothrow_move_assignable_v<OwnedFd>);
+    static_assert(!std::is_copy_constructible_v<Request>);
+
+    // Ownership transfer invalidates the source and release() makes the
+    // caller responsible for closing the descriptor again.
+    {
+        int descriptors[2] = {-1, -1};
+        if (::pipe(descriptors) < 0) {
+            throw std::system_error(errno, std::generic_category(), "pipe failed");
+        }
+        OwnedFd first = OwnedFd::adopt(descriptors[0]);
+        OwnedFd second = std::move(first);
+        expect(!first.valid() && second.valid(),
+               "OwnedFd move should transfer unique ownership");
+        const int released = second.release();
+        expect(!second.valid() && released == descriptors[0],
+               "OwnedFd release should relinquish ownership");
+        (void)::close(released);
+        (void)::close(descriptors[1]);
+    }
+    expect_throws<std::system_error>(
+        [] { (void)OwnedFd{}.duplicate(); },
+        "duplicating an empty OwnedFd should report EBADF");
+
     const std::string payload = "fd-passing-content";
     const std::string path = socket_path("fd-passing");
 
@@ -59,18 +88,29 @@ void test_fd_passing() {
     server_options.stale_socket_grace_period = 0ms;
     Server server(path, server_options);
     server.on("read-fd", [payload](const Request& request) {
-        if (request.fd < 0) {
+        if (!request.fd.valid()) {
             return Response{500, "no-descriptor"};
         }
         std::string content;
         std::array<char, 32> buffer{};
-        while (const ssize_t count = ::read(request.fd, buffer.data(), buffer.size())) {
+        while (const ssize_t count = ::read(request.fd.get(), buffer.data(), buffer.size())) {
             if (count < 0) {
                 return Response{500, "read-failed"};
             }
             content.append(buffer.data(), static_cast<std::size_t>(count));
         }
         return content == payload ? Response{200, "ok"} : Response{500, "content-mismatch"};
+    });
+    std::promise<OwnedFd> retained_promise;
+    std::future<OwnedFd> retained_future = retained_promise.get_future();
+    server.on("retain-fd", [&retained_promise](const Request& request) {
+        try {
+            retained_promise.set_value(request.fd.duplicate());
+            return Response{200, "retained"};
+        } catch (...) {
+            retained_promise.set_exception(std::current_exception());
+            return Response{500, "duplicate-failed"};
+        }
     });
 
     std::thread server_thread([&] { server.run(); });
@@ -81,11 +121,16 @@ void test_fd_passing() {
     client_options.io_timeout = 2s;
     client_options.request_timeout = 5s;
     Client client(path, client_options);
+    OwnedFd retained;
 
     // A failing expectation must stop and join the server first, or the
     // joinable thread destructor would std::terminate before the message is
     // reported; the wrapper keeps failures diagnosable.
     try {
+        expect_throws<std::invalid_argument>(
+            [&client] { (void)client.request_fd("read-fd", BorrowedFd{}); },
+            "request_fd should reject an empty BorrowedFd");
+
         // Round trip: the server receives a duplicate and reads its content.
         {
             FILE* const file = ::tmpfile();
@@ -94,19 +139,23 @@ void test_fd_passing() {
                 ::lseek(::fileno(file), 0, SEEK_SET) < 0) {
                 throw std::runtime_error("prepare tmpfile failed");
             }
-            const Response response = client.request_fd("read-fd", ::fileno(file));
+            const int caller_fd = ::fileno(file);
+            const Response response = client.request_fd("read-fd", borrow_fd(caller_fd));
             expect(response.status == 200 && response.body == "ok",
                    "request_fd should deliver a readable descriptor");
+            expect(::fcntl(caller_fd, F_GETFD) >= 0,
+                   "request_fd should not consume the caller's descriptor");
             (void)::fclose(file);
         }
 
         // Missing route: the descriptor is still closed by the server.
         {
             FILE* const file = ::tmpfile();
-            if (::write(::fileno(file), payload.data(), payload.size()) < 0) {
+            if (file == nullptr ||
+                ::write(::fileno(file), payload.data(), payload.size()) < 0) {
                 throw std::runtime_error("write tmpfile failed");
             }
-            const Response response = client.request_fd("missing-route", ::fileno(file));
+            const Response response = client.request_fd("missing-route", borrow_fd(::fileno(file)));
             expect(response.status == 404, "request_fd to a missing route should return 404");
             (void)::fclose(file);
         }
@@ -120,12 +169,32 @@ void test_fd_passing() {
                 ::lseek(::fileno(file), 0, SEEK_SET) < 0) {
                 throw std::runtime_error("prepare tmpfile failed");
             }
-            const Response response = client.request_fd("read-fd", ::fileno(file));
+            const Response response = client.request_fd("read-fd", borrow_fd(::fileno(file)));
             expect(response.status == 200, "repeated request_fd should succeed");
             (void)::fclose(file);
         }
         const std::size_t fds_after = fd_passing_count_open_fds();
         expect(fds_after <= fds_before + 20, "server should close passed descriptors");
+
+        // Retaining a descriptor beyond the handler is explicit. The
+        // duplicate must survive both the request-owned and caller-owned
+        // descriptors being closed.
+        {
+            FILE* const file = ::tmpfile();
+            if (file == nullptr || ::write(::fileno(file), payload.data(), payload.size()) !=
+                                       static_cast<ssize_t>(payload.size()) ||
+                ::lseek(::fileno(file), 0, SEEK_SET) < 0) {
+                throw std::runtime_error("prepare retained tmpfile failed");
+            }
+            const Response response =
+                client.request_fd("retain-fd", borrow_fd(::fileno(file)));
+            expect(response.status == 200 && response.body == "retained",
+                   "handler should be able to duplicate its request descriptor");
+            retained = retained_future.get();
+            expect((::fcntl(retained.get(), F_GETFD) & FD_CLOEXEC) != 0,
+                   "duplicated request descriptor should have close-on-exec set");
+            (void)::fclose(file);
+        }
 
         // FD passing is deliberately one-shot only. A nonzero request id is a
         // multiplexed/session frame and must be rejected even when the peer
@@ -152,11 +221,21 @@ void test_fd_passing() {
         }
 
         server.stop();
-        server_thread.join();
+        if (server_thread.joinable()) {
+            server_thread.join();
+        }
+        std::array<char, 32> retained_buffer{};
+        const ssize_t retained_size =
+            ::read(retained.get(), retained_buffer.data(), retained_buffer.size());
+        expect(retained_size == static_cast<ssize_t>(payload.size()) &&
+                   std::string_view(retained_buffer.data(), payload.size()) == payload,
+               "duplicated request descriptor should outlive the handler and server");
         cleanup_socket_artifacts(path);
     } catch (...) {
         server.stop();
-        server_thread.join();
+        if (server_thread.joinable()) {
+            server_thread.join();
+        }
         cleanup_socket_artifacts(path);
         throw;
     }

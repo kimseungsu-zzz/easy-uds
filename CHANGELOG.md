@@ -29,6 +29,9 @@ All notable changes to this project are documented here.
 - Added matching native x86_64 and hosted ARM64 final benchmark gates with
   payload/concurrency sweeps, CPU/RSS/context-switch reporting, uploaded logs,
   repeated unit/stress soaks, and longer dispatch-only fuzz runs.
+- Hardened the v2 descriptor flag to the documented one-shot request-id `0`
+  path, added a nonzero-id rejection regression, and extended codec fuzz
+  round-trips to preserve and verify flags.
 
 ## 0.6.3 — ⚙️ Experimental Closure
 

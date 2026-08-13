@@ -30,7 +30,7 @@ if(NOT EASY_UDS_SESSION_SPIN_US MATCHES "^[0-9]+$")
     message(FATAL_ERROR "EASY_UDS_SESSION_SPIN_US must be a non-negative integer")
 endif()
 set(EASY_UDS_SESSION_INFLIGHT_SHARDS "16" CACHE STRING
-    "Experimental client Session in-flight table shard count (1-64)")
+    "Client Session in-flight table shard count (1-64)")
 if(NOT EASY_UDS_SESSION_INFLIGHT_SHARDS MATCHES "^[1-9][0-9]*$" OR
    EASY_UDS_SESSION_INFLIGHT_SHARDS GREATER 64)
     message(FATAL_ERROR "EASY_UDS_SESSION_INFLIGHT_SHARDS must be an integer from 1 to 64")

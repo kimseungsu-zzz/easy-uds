@@ -56,12 +56,10 @@ struct Request {
     // sequential.
     std::uint32_t request_id = 0;
     // Descriptor passed with the request via `request_fd()`, or -1 when the
-    // request carried none. The descriptor is a duplicate of the client's; the
-    // server closes it after the handler returns, so a handler that wants to
-    // keep it must dup() it.
-    // The descriptor is delivered as a duplicate of the caller's copy, sharing
-    // the same open file description, so it observes the caller's current file
-    // offset and sees writes made after the pass.
+    // request carried none. The server closes its duplicate after the handler
+    // returns, so a handler that wants to keep it must dup() it. The received
+    // descriptor shares the same open file description, so it observes the
+    // caller's current file offset and sees writes made after the pass.
     int fd = -1;
 };
 
@@ -103,8 +101,9 @@ struct ServerOptions {
     // Zero disables the global limit; per-connection backpressure remains.
     std::size_t max_total_inflight_bytes = 0;
 
-    // Aggregate queued fixed-response payload budget across all connections.
-    // Zero disables the global limit; per-connection output limits remain.
+    // Aggregate unsent fixed-response wire-byte budget (header + remaining
+    // body) across all connections. Zero disables the global limit;
+    // per-connection output limits remain.
     std::size_t max_total_output_bytes = 0;
 
     // Maximum number of queued or executing fixed requests per connection.
@@ -116,7 +115,7 @@ struct ServerOptions {
     std::size_t max_inflight_request_bytes_per_connection =
         default_max_inflight_request_bytes_per_connection;
 
-    // Maximum queued fixed-response bytes for one connection. A slow peer
+    // Maximum unsent fixed-response wire bytes for one connection. A slow peer
     // exceeding this limit is closed; the default preserves the 4 MiB cap.
     std::size_t max_output_bytes_per_connection = default_max_output_bytes_per_connection;
 
@@ -189,9 +188,9 @@ struct SessionState;
 }
 
 // A request/response server over a Unix Domain Socket. Internally an epoll
-// reactor accepts connections and parses frames; a fixed worker pool executes
-// handlers; responses are written back under a per-connection lock, so
-// long-lived connections never occupy a worker while idle.
+// reactor accepts connections, parses frames, and drains bounded output queues;
+// a fixed worker pool executes handlers. Long-lived connections and peers that
+// stop reading never occupy a worker while idle or blocked on output.
 class Server {
   public:
     using Handler = std::function<Response(const Request&)>;

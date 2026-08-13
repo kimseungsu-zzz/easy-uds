@@ -34,6 +34,7 @@ fi
 require_binary easy_uds_rpc_benchmark
 require_binary easy_uds_session_benchmark
 require_binary easy_uds_stream_benchmark
+require_binary easy_uds_allocation_benchmark
 
 echo "easy-uds 0.6.x final benchmark"
 echo "utc: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
@@ -69,6 +70,13 @@ run_timed "one shared session c64" \
 
 run_timed "streaming, 64 KiB chunks" \
     "${build_dir}/easy_uds_stream_benchmark" 256 65536
+
+run_timed "allocation, warm session" \
+    "${build_dir}/easy_uds_allocation_benchmark" 20000
+run_timed "allocation, serialized executor" \
+    "${build_dir}/easy_uds_allocation_benchmark" 5000 serialized
+run_timed "allocation, 1 MiB stream" \
+    "${build_dir}/easy_uds_allocation_benchmark" 50 stream 1048576
 
 if [[ -x "${build_dir}/easy_uds_shm_process_probe" ]]; then
     run_timed "process SHM A/B, 4 KiB" \

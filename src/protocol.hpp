@@ -8,7 +8,7 @@
 //   0       4     magic "EUDS"
 //   4       1     version = 2
 //   5       1     message type
-//   6       2     reserved flags (zero)
+//   6       2     flags (bit 0 = one descriptor on a fixed one-shot request)
 //   8       4     request id
 //   12      4     argument 1
 //   16      4     argument 2
@@ -105,10 +105,12 @@ inline DecodedHeader decode_header(const HeaderBytes& header) {
         raw_type > static_cast<std::uint8_t>(WireType::stream_response_end)) {
         throw std::runtime_error("unknown protocol message type");
     }
-    if ((flags & carries_fd_flag) != 0 && raw_type != static_cast<std::uint8_t>(WireType::request)) {
-        throw std::runtime_error("descriptor flag is only valid on fixed requests");
+    const std::uint32_t request_id = get_u32(header, header_field_offset);
+    if ((flags & carries_fd_flag) != 0 &&
+        (raw_type != static_cast<std::uint8_t>(WireType::request) || request_id != 0)) {
+        throw std::runtime_error("descriptor flag is only valid on one-shot fixed requests");
     }
-    return {static_cast<WireType>(raw_type), get_u32(header, header_field_offset), get_u32(header, arg1_offset),
+    return {static_cast<WireType>(raw_type), request_id, get_u32(header, arg1_offset),
             get_u32(header, arg2_offset), flags};
 }
 

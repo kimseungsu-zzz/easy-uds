@@ -2,8 +2,8 @@
 
 The standalone probe targets do not change the default epoll backend. They
 answer whether Linux/UDS capabilities are available before we consider a
-production design. The separately documented `request_fd()` API is an
-experimental protocol-v2 feature; the probes themselves are not required by
+production design. The separately documented `request_fd()` API is a
+Linux-gated protocol-v2 extension; the probes themselves are not required by
 the library's normal build.
 
 Build them with:

@@ -24,8 +24,8 @@ Every message begins with exactly 20 bytes:
 | 12 | 4 | Argument 1 | Type-specific, unsigned 32-bit |
 | 16 | 4 | Argument 2 | Type-specific, unsigned 32-bit |
 
-Only bit 0 is currently defined, and it is valid only on a fixed request. All
-other flag bits must be zero. A peer may close the connection when the magic,
+Only bit 0 is currently defined, and it is valid only on a fixed request with
+request id `0` (the one-shot path). All other flag bits must be zero. A peer may close the connection when the magic,
 version, type, or flags are invalid. A v1 header (version byte `1`) is rejected.
 
 | Type | Value |

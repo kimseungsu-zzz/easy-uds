@@ -39,9 +39,11 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t* data, std::size_t size
             }
 
             // Round-trip through the encoder, exercising request-id preservation.
-            const HeaderBytes round_trip = encode_header(type, decoded.request_id, decoded.arg1, decoded.arg2);
+            const HeaderBytes round_trip =
+                encode_header(type, decoded.request_id, decoded.arg1, decoded.arg2, decoded.flags);
             const DecodedHeader decoded_again = decode_header(round_trip, type);
-            if (decoded_again.request_id != decoded.request_id) {
+            if (decoded_again.request_id != decoded.request_id ||
+                decoded_again.flags != decoded.flags) {
                 return 1;
             }
         } catch (...) {

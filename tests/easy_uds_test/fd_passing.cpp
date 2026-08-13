@@ -2,8 +2,39 @@
 
 #include <cstdio>
 #include <dirent.h>
+#include <sys/uio.h>
 
 namespace easy_uds::test {
+namespace {
+
+void send_frame_with_fd(int socket, const std::vector<unsigned char>& bytes, int passed_fd) {
+    iovec vector{const_cast<unsigned char*>(bytes.data()), bytes.size()};
+    msghdr message{};
+    message.msg_iov = &vector;
+    message.msg_iovlen = 1;
+    char control[CMSG_SPACE(sizeof(int))]{};
+    message.msg_control = control;
+    message.msg_controllen = sizeof(control);
+    cmsghdr* const header = CMSG_FIRSTHDR(&message);
+    header->cmsg_level = SOL_SOCKET;
+    header->cmsg_type = SCM_RIGHTS;
+    header->cmsg_len = CMSG_LEN(sizeof(int));
+    std::memcpy(CMSG_DATA(header), &passed_fd, sizeof(passed_fd));
+
+    ssize_t sent = -1;
+    do {
+        sent = ::sendmsg(socket, &message, MSG_NOSIGNAL);
+    } while (sent < 0 && errno == EINTR);
+    if (sent <= 0) {
+        throw std::system_error(errno, std::generic_category(), "sendmsg test frame failed");
+    }
+    const std::size_t consumed = static_cast<std::size_t>(sent);
+    if (consumed < bytes.size()) {
+        send_exact(socket, bytes.data() + consumed, bytes.size() - consumed);
+    }
+}
+
+} // namespace
 
 std::size_t fd_passing_count_open_fds() {
     std::size_t count = 0;
@@ -95,6 +126,30 @@ void test_fd_passing() {
         }
         const std::size_t fds_after = fd_passing_count_open_fds();
         expect(fds_after <= fds_before + 20, "server should close passed descriptors");
+
+        // FD passing is deliberately one-shot only. A nonzero request id is a
+        // multiplexed/session frame and must be rejected even when the peer
+        // supplies a syntactically valid descriptor.
+        {
+            FILE* const file = ::tmpfile();
+            if (file == nullptr) {
+                throw std::runtime_error("prepare nonzero-id tmpfile failed");
+            }
+            const int raw = connect_raw(path);
+            auto request = fixed_request(7, "read-fd");
+            request[7] = 1; // carries_fd_flag, big-endian bit 0
+            try {
+                send_frame_with_fd(raw, request, ::fileno(file));
+                expect_peer_closed(raw, 2s,
+                                   "nonzero request-id descriptor frame should be rejected");
+            } catch (...) {
+                (void)::close(raw);
+                (void)::fclose(file);
+                throw;
+            }
+            (void)::close(raw);
+            (void)::fclose(file);
+        }
 
         server.stop();
         server_thread.join();

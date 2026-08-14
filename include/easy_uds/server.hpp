@@ -9,6 +9,7 @@
 
 #include <functional>
 #include <memory>
+#include <stdexcept>
 #include <string>
 #include <utility>
 
@@ -18,19 +19,67 @@ namespace detail {
 struct ServerState;
 }
 
+enum class QueuePolicy {
+    fifo = 0,
+    latest_wins = 1,
+    reject_if_busy = 2,
+};
+
 // Advanced fixed-route registration. Keeping contextual handlers behind one
 // options object leaves room for later scheduling and queue-policy controls
 // without multiplying the beginner-facing Server methods.
 class RouteOptions {
   public:
-    using Handler =
+    using SimpleHandler = std::function<Response(const Request&)>;
+    using ContextHandler =
         std::function<Response(const Request&, const RequestContext&)>;
+    // Compatibility alias from the initial RequestContext API.
+    using Handler = ContextHandler;
 
-    explicit RouteOptions(Handler handler) : handler_(std::move(handler)) {}
+    explicit RouteOptions(SimpleHandler handler)
+        : simple_handler_(std::move(handler)) {}
+    explicit RouteOptions(ContextHandler handler)
+        : context_handler_(std::move(handler)) {}
+
+    RouteOptions& serialize_in(
+        std::string domain, QueuePolicy policy = QueuePolicy::fifo) & {
+        set_serialization(std::move(domain), policy);
+        return *this;
+    }
+
+    RouteOptions&& serialize_in(
+        std::string domain, QueuePolicy policy = QueuePolicy::fifo) && {
+        set_serialization(std::move(domain), policy);
+        return std::move(*this);
+    }
+
+    [[nodiscard]] bool serialized() const noexcept { return serialized_; }
+    [[nodiscard]] const std::string& serialization_domain() const noexcept {
+        return serialization_domain_;
+    }
+    [[nodiscard]] QueuePolicy queue_policy() const noexcept {
+        return queue_policy_;
+    }
 
   private:
     friend class Server;
-    Handler handler_;
+
+    void set_serialization(std::string domain, QueuePolicy policy) {
+        if (policy != QueuePolicy::fifo &&
+            policy != QueuePolicy::latest_wins &&
+            policy != QueuePolicy::reject_if_busy) {
+            throw std::invalid_argument("unknown queue policy");
+        }
+        serialized_ = true;
+        serialization_domain_ = std::move(domain);
+        queue_policy_ = policy;
+    }
+
+    SimpleHandler simple_handler_;
+    ContextHandler context_handler_;
+    std::string serialization_domain_;
+    QueuePolicy queue_policy_ = QueuePolicy::fifo;
+    bool serialized_ = false;
 };
 
 // A request/response server over a Unix Domain Socket. Internally an epoll
@@ -39,7 +88,7 @@ class RouteOptions {
 // stop reading never occupy a worker while idle or blocked on output.
 class Server {
   public:
-    using Handler = std::function<Response(const Request&)>;
+    using Handler = RouteOptions::SimpleHandler;
     using StreamHandler = std::function<StreamResponse(const StreamReader&, const Request&)>;
 
     explicit Server(std::string socket_path, ServerOptions options = {});
@@ -74,8 +123,8 @@ class Server {
     // Streaming route. Prefix-match variant.
     void on_stream_prefix(std::string prefix, StreamHandler handler);
 
-    // Runs `task` on the same FIFO executor as serialized handlers, strictly
-    // ordered against them. Throws std::logic_error when the server is not
+    // Runs `task` in the default FIFO domain, strictly ordered with
+    // on_serialized() handlers. Throws std::logic_error when the server is not
     // running.
     void enqueue_maintenance(std::function<void()> task);
 

@@ -47,8 +47,12 @@ int main(int argc, char** argv) {
         argc > 3 ? static_cast<std::size_t>(std::strtoull(argv[3], nullptr, 10)) : 1024U * 1024U;
     const bool stream_mode = mode == "stream";
     const bool serialized_mode = mode == "serialized";
-    if (iterations == 0 || (!mode.empty() && !stream_mode && !serialized_mode) || argc > 4) {
-        std::cerr << "usage: easy_uds_allocation_benchmark [iterations] [stream|serialized] [payload_bytes]\n";
+    const bool domain_mode = mode == "domain";
+    if (iterations == 0 ||
+        (!mode.empty() && !stream_mode && !serialized_mode && !domain_mode) ||
+        argc > 4) {
+        std::cerr << "usage: easy_uds_allocation_benchmark "
+                     "[iterations] [stream|serialized|domain] [payload_bytes]\n";
         return 2;
     }
 
@@ -64,6 +68,11 @@ int main(int argc, char** argv) {
     server.on_serialized("serial", [](const easy_uds::Request&) {
         return easy_uds::Response{200, "ok"};
     });
+    server.on(
+        "domain",
+        easy_uds::RouteOptions{[](const easy_uds::Request&) {
+            return easy_uds::Response{200, "ok"};
+        }}.serialize_in("robot.drivetrain.primary-command-domain"));
     server.on_stream("upload", [](const easy_uds::StreamReader& body, const easy_uds::Request&) {
         std::array<char, 64U * 1024U> buffer{};
         while (body(buffer.data(), buffer.size())) {
@@ -104,7 +113,8 @@ int main(int argc, char** argv) {
             (void)client.request_stream("upload", upload, [](std::string_view) {});
         }
     } else {
-        const std::string route = serialized_mode ? "serial" : "ping";
+        const std::string route =
+            serialized_mode ? "serial" : domain_mode ? "domain" : "ping";
         for (std::size_t index = 0; index < 2000; ++index) {
             (void)session.request(route);
         }
@@ -132,7 +142,8 @@ int main(int argc, char** argv) {
             }
         }
     } else {
-        const std::string route = serialized_mode ? "serial" : "ping";
+        const std::string route =
+            serialized_mode ? "serial" : domain_mode ? "domain" : "ping";
         for (std::size_t index = 0; index < iterations; ++index) {
             const auto response = session.request(route);
             if (response.status != 200) {
@@ -155,7 +166,12 @@ int main(int argc, char** argv) {
 
     const std::size_t allocations = allocation_count.load(std::memory_order_relaxed);
     const double per_exchange = static_cast<double>(allocations) / static_cast<double>(iterations);
-    std::cout << "mode=" << (stream_mode ? "stream" : serialized_mode ? "serialized" : "session") << ", ";
+    std::cout << "mode="
+              << (stream_mode       ? "stream"
+                  : serialized_mode ? "serialized"
+                  : domain_mode     ? "domain"
+                                    : "session")
+              << ", ";
     if (stream_mode) {
         const double exchange_mib = static_cast<double>(payload_bytes) / (1024.0 * 1024.0);
         std::cout << "exchanges=" << iterations << ", payload=" << payload_bytes

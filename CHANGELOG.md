@@ -4,20 +4,31 @@ All notable changes to this project are documented here.
 
 ## Unreleased 0.7.0 — 🌱 Usability Foundation
 
+- Added opt-in serialized scheduling domains through
+  `RouteOptions::serialize_in()`. Different domains execute concurrently while
+  each domain remains one-at-a-time; the executor grows lazily up to
+  `ServerOptions::max_concurrent_serialized_domains` without permanent per-domain
+  threads.
+- Added `QueuePolicy::latest_wins` and `reject_if_busy`. Superseded or busy
+  requests receive `409` without breaking their connection or Session, and
+  running handlers are never interrupted.
+- Extended `RouteOptions` to accept both simple and contextual handlers while
+  preserving the existing `on()` and default-domain `on_serialized()` entry
+  points. Regular route entries and dispatch keep their previous layout.
+- Added active-domain, superseded, and busy-rejection observability plus
+  concurrent-domain, shared-Session policy, FIFO compatibility, and installed
+  package regressions. The allocation benchmark now has a long-key `domain`
+  mode, also exercised by the native x86_64 and ARM64 closing scripts.
 - Added `Server::stats()` and `Session::stats()` snapshots in a self-contained
   `stats.hpp`. Server gauges reuse connection/backpressure/executor accounting;
   cumulative server events are explicitly enabled with `StatsMode::basic`.
 - Kept cumulative counters off the default server hot path. Enabled fixed RPC
-  performs one relaxed, thread-sharded event increment, while Session outcomes reuse existing
-  in-flight shard locks without a new mutex or atomic RMW.
+  performs one relaxed, thread-sharded event increment, while Session outcomes
+  reuse existing in-flight shard locks without a new mutex or atomic RMW.
 - Documented non-transactional snapshot semantics and exact connection,
   request-byte, output-byte, queue, timeout, rejection, and Session outcome
   accounting. Added concurrent gauge/counter, timeout, stream-limit,
   moved-from, and installed-package coverage.
-- Locked the planned Phase 3 `RouteOptions` shape before implementation:
-  simple and contextual handlers share one advanced options object, with
-  serialization domain and FIFO/LatestWins/RejectIfBusy policy as one semantic
-  tuple rather than new overload families.
 - Added non-owning, non-copyable `RequestContext` observations for request
   id, peer credentials, first-byte arrival, absolute deadline, connection
   closing, server shutdown, and cooperative stop. Handlers remain responsible
@@ -25,8 +36,8 @@ All notable changes to this project are documented here.
   code or claims that an apparently open connection is live.
 - Added explicit `RouteOptions` registration for contextual exact, prefix, and
   serialized fixed handlers. The original `Handler(const Request&)` form is
-  unchanged, while future scheduling controls can extend one options object
-  instead of multiplying `on_*` overload families.
+  unchanged, while scheduling controls use the same options object instead of
+  multiplying `on_*` overload families.
 - Preserved the basic handler hot path without per-request context allocation
   or `Request`/regular-worker-job layout growth, and added deadline-disabled,
   deadline-expiry, disconnect, shutdown, prefix, serialized, and lifetime

@@ -21,6 +21,8 @@ struct ServerStatsCounters {
     std::uint64_t stream_requests_started = 0;
     std::uint64_t stream_requests_rejected = 0;
     std::uint64_t requests_timed_out_before_execution = 0;
+    std::uint64_t serialized_requests_superseded = 0;
+    std::uint64_t serialized_requests_rejected_busy = 0;
 };
 
 // A best-effort operational snapshot. Fields are individually race-free but
@@ -35,6 +37,7 @@ struct ServerStats {
     std::size_t queued_output_bytes = 0;
     std::size_t worker_queue_depth = 0;
     std::size_t serialized_queue_depth = 0;
+    std::size_t active_serialized_domains = 0;
     std::optional<ServerStatsCounters> counters;
 };
 

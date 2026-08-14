@@ -63,6 +63,12 @@ struct ServerOptions {
     // be between 1 and worker_threads.
     std::size_t max_concurrent_streams = 0;
 
+    // Maximum number of serialization domains that may execute concurrently.
+    // Zero uses worker_threads. The executor starts lazily and only grows when
+    // independent domains need parallel service; the default domain still
+    // executes exactly one handler at a time.
+    std::size_t max_concurrent_serialized_domains = 0;
+
     // Maximum idle time between successful socket-I/O progress events.
     // Zero disables the inactivity timeout.
     std::chrono::milliseconds io_timeout{5000};

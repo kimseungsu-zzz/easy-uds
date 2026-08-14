@@ -184,10 +184,6 @@ bool dispatch_request(const std::shared_ptr<ServerState>& state,
     }
 
     if (handler->serialized()) {
-        if (!ensure_serialized_worker(state)) {
-            reactor_connection->conn->closing.store(true, std::memory_order_release);
-            return false;
-        }
         SerializedJob job;
         job.connection = reactor_connection->conn;
         job.request = std::move(request);
@@ -198,34 +194,42 @@ bool dispatch_request(const std::shared_ptr<ServerState>& state,
         const bool request_bytes_reserved =
             state->options.max_total_inflight_bytes != 0;
         reactor_connection->reserved_request_bytes = 0;
-        {
-            std::unique_lock<std::mutex> lock(state->serialized_mutex);
-            if (state->serialized_stopping || !state->running.load()) {
-                if (request_bytes_reserved) {
-                    release_connection_request_bytes(state, job.connection,
-                                                     job.request_bytes);
-                }
-                reactor_connection->conn->closing.store(true, std::memory_order_release);
-                return false;
-            }
-            try {
-                state->pending_serialized.push_back(std::move(job));
-            } catch (...) {
-                if (request_bytes_reserved) {
-                    release_connection_request_bytes(state, reactor_connection->conn,
-                                                     reactor_connection->payload_total);
-                }
-                throw;
-            }
-            reactor_connection->conn->pending_serialized.fetch_add(1, std::memory_order_relaxed);
-            const auto& queued = state->pending_serialized.back();
+        const std::uint32_t request_id = job.request.request_id;
+        SerializedAdmission admission;
+        try {
+            admission = enqueue_serialized_job(
+                state, std::move(job), true, request_bytes_reserved);
+        } catch (...) {
             if (request_bytes_reserved) {
-                account_connection_request_count(queued.connection);
-            } else {
-                account_connection_request(state, queued.connection, queued.request_bytes);
+                release_connection_request_bytes(
+                    state, reactor_connection->conn,
+                    reactor_connection->payload_total);
             }
+            throw;
         }
-        state->serialized_cv.notify_one();
+        if (admission == SerializedAdmission::busy) {
+            if (request_bytes_reserved) {
+                release_connection_request_bytes(
+                    state, reactor_connection->conn,
+                    reactor_connection->payload_total);
+            }
+            write_error_response(state, reactor_connection->conn, request_id,
+                                 "serialization domain is busy",
+                                 state->options.io_timeout, Deadline::max(),
+                                 easy_uds::status_conflict);
+            return pause_connection_reads_if_needed(state,
+                                                     reactor_connection);
+        }
+        if (admission == SerializedAdmission::stopping) {
+            if (request_bytes_reserved) {
+                release_connection_request_bytes(
+                    state, reactor_connection->conn,
+                    reactor_connection->payload_total);
+            }
+            reactor_connection->conn->closing.store(true,
+                                                     std::memory_order_release);
+            return false;
+        }
         return pause_connection_reads_if_needed(state, reactor_connection);
     }
 

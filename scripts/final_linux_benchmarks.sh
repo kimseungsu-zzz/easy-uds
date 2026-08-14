@@ -75,6 +75,8 @@ run_timed "allocation, warm session" \
     "${build_dir}/easy_uds_allocation_benchmark" 20000
 run_timed "allocation, serialized executor" \
     "${build_dir}/easy_uds_allocation_benchmark" 5000 serialized
+run_timed "allocation, named serialized domain" \
+    "${build_dir}/easy_uds_allocation_benchmark" 5000 domain
 run_timed "allocation, 1 MiB stream" \
     "${build_dir}/easy_uds_allocation_benchmark" 50 stream 1048576
 

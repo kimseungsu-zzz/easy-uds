@@ -15,7 +15,7 @@
 - Peer credentials (`pid`/`uid`/`gid`) via Linux `SO_PEERCRED`
 - Exact and longest-prefix route registration (`on()` / `on_prefix()`)
 - Copy-on-write immutable handler snapshots: request dispatch takes no global handler-table mutex and does not copy `std::function`
-- FIFO serialized request handlers for exclusive hardware/resources, without occupying the normal worker pool while waiting
+- FIFO serialized handlers plus opt-in named domains, `LatestWins`, and `RejectIfBusy` policies without occupying the normal worker pool while waiting
 - Incremental, constant-memory upload/download streams with configurable chunk sizes and total limits
 - `Server::enqueue_maintenance()` for safe server-side state cleanup from external threads
 - Natural flow control through Unix-socket backpressure
@@ -84,7 +84,7 @@ A `Client` instance can safely be used for concurrent `request()` calls because 
 
 ### Exclusive hardware or robot commands
 
-Use `Server::on_serialized()` for commands that must never overlap. Every serialized route shares one FIFO executor, so commands from multiple processes wait their turn while normal `on()` routes remain available on the regular worker pool.
+Use `Server::on_serialized()` for commands that must never overlap. Every such route shares the default FIFO domain, so commands from multiple processes wait their turn while normal `on()` routes remain available on the regular worker pool.
 
 ```cpp
 easy_uds::Server server("/tmp/robot-driver.sock");
@@ -109,16 +109,40 @@ server.on("status", [](const easy_uds::Request&) {
 server.run();
 ```
 
-The FIFO order is the order in which complete serialized requests are enqueued by the server. Queue time counts toward the server's existing `request_timeout`. If that deadline expires before a queued command begins execution, the command is answered with `408` and its handler is **not** called. `stop()` also discards commands that are still waiting in the serialized queue. A serialized handler that has already started has the same cooperative-cancellation limitation as a regular handler and cannot be forcibly interrupted by portable C++.
+When independent resources may run in parallel, opt in through `RouteOptions`:
 
-`Server::enqueue_maintenance()` runs a task on the same FIFO executor, strictly ordered with serialized handlers, so server-side state that serialized handlers touch (for example the driver instance map) can be cleaned up safely from any thread when a client disappears:
+```cpp
+server.on(
+    "velocity/set",
+    easy_uds::RouteOptions{[](const easy_uds::Request& request) {
+        robot_drive(request.body);
+        return easy_uds::Response{easy_uds::status_ok, "ok"};
+    }}.serialize_in("drivetrain", easy_uds::QueuePolicy::latest_wins));
+
+server.on(
+    "arm/move",
+    easy_uds::RouteOptions{[](const easy_uds::Request& request) {
+        robot_arm(request.body);
+        return easy_uds::Response{easy_uds::status_ok, "ok"};
+    }}.serialize_in("arm"));
+```
+
+Each domain remains one-at-a-time, while different domains may execute in
+parallel. `latest_wins` answers an older queued command for the same concrete
+route with `409`; `reject_if_busy` immediately answers `409` when its domain is
+already executing or queued. Neither policy interrupts a running handler or
+retries a request.
+
+FIFO order is per domain and follows the order in which complete requests are enqueued by the server. Queue time counts toward the server's existing `request_timeout`. If that deadline expires before a queued command begins execution, the command is answered with `408` and its handler is **not** called. `stop()` also discards commands that are still waiting in the serialized queue. A serialized handler that has already started has the same cooperative-cancellation limitation as a regular handler and cannot be forcibly interrupted by portable C++.
+
+`Server::enqueue_maintenance()` runs a task in the default FIFO domain, strictly ordered with `on_serialized()` handlers. Server-side state that those handlers touch (for example the driver instance map) can therefore be cleaned up safely from any thread when a client disappears:
 
 ```cpp
 // Called from a sweeper thread when a client is detected dead.
 server.enqueue_maintenance([&] { drivers.erase(dead_driver_name); });
 ```
 
-Tasks run exactly once, in FIFO order with serialized commands, and a throwing task is caught so the executor keeps running. `enqueue_maintenance()` throws `std::logic_error` when the server is not running.
+Tasks run exactly once, in FIFO order with default-domain serialized commands, and a throwing task is caught so the executor keeps running. `enqueue_maintenance()` throws `std::logic_error` when the server is not running.
 
 ### Large or continuous bodies
 
@@ -181,15 +205,17 @@ options.stream_timeout = std::chrono::milliseconds(0);
 options.stale_socket_grace_period = std::chrono::milliseconds(250);
 options.listen_backlog = 64;
 options.socket_permissions = 0600;
-
-easy_uds::Server server("/tmp/easy-uds.sock", options);
 // Optional override; auto mode reserves one RPC worker.
 options.max_concurrent_streams = 3;
+// Optional serialization-domain parallelism cap; 0 uses worker_threads.
+options.max_concurrent_serialized_domains = 3;
+
+easy_uds::Server server("/tmp/easy-uds.sock", options);
 ```
 
 | Option | Default | Meaning |
 | --- | ---: | --- |
-| `worker_threads` | `4` | Worker threads executing handlers |
+| `worker_threads` | `4` | Worker threads executing regular and stream handlers |
 | `max_connections` | `64` | Maximum concurrently open client connections |
 | `max_message_size` | `1 MiB` | Maximum request route+body size and maximum response body size |
 | `stream_chunk_size` | `64 KiB` | Reusable buffer and outgoing frame size for streamed bodies |
@@ -200,6 +226,7 @@ options.max_concurrent_streams = 3;
 | `max_inflight_request_bytes_per_connection` | `4 MiB` | Per-connection queued/executing route+body byte high-water mark |
 | `max_output_bytes_per_connection` | `4 MiB` | Per-connection unsent fixed-response wire-byte limit |
 | `max_concurrent_streams` | `0` (auto) | Maximum simultaneous streams; auto uses `worker_threads - 1`, or `1` when only one worker exists. Explicit values must be between `1` and `worker_threads` |
+| `max_concurrent_serialized_domains` | `0` (auto) | Maximum serialization domains executing concurrently; auto uses `worker_threads`. Threads start lazily as independent domains need them |
 | `io_timeout` | `5000 ms` | Maximum idle time between successful socket-I/O progress events; `0` disables it |
 | `request_timeout` | `30000 ms` | Absolute deadline per regular request; a request that expires before a worker runs it is answered `408`. `0` disables it |
 | `stream_timeout` | `0` | Absolute streaming-exchange deadline after the stream header; `0` disables it |
@@ -252,7 +279,7 @@ Applications should place sockets in a directory whose permissions match their t
 
 ## Concurrency and shutdown
 
-`Server::run()` starts the epoll reactor and fixed worker pool, then blocks until shutdown. The serialized executor starts lazily when first needed. `run()` is intended to be called once per `Server` object. `Server::stop()` is idempotent and may be called concurrently from other threads.
+`Server::run()` starts the epoll reactor and fixed worker pool, then blocks until shutdown. The serialized executor starts empty and grows lazily as independent domains need concurrency. `run()` is intended to be called once per `Server` object. `Server::stop()` is idempotent and may be called concurrently from other threads.
 
 During shutdown:
 
@@ -265,7 +292,7 @@ During shutdown:
 
 The listener is not closed by another thread while the reactor may still be polling it, eliminating descriptor-number reuse races in the accept loop.
 
-Handlers registered with `on()` run concurrently on worker threads. The same registered function object may be invoked by several workers at once, so mutable captures and other shared state must provide their own synchronization. Handler-table updates are copy-on-write and become visible atomically without invalidating in-flight requests. Handlers registered with `on_serialized()` instead share one dedicated FIFO executor across all serialized routes; queued serialized requests therefore do not occupy regular workers, allowing routes such as health/status RPCs to remain responsive while a hardware command is in progress.
+Handlers registered with plain `on()` run concurrently on worker threads. The same registered function object may be invoked by several workers at once, so mutable captures and other shared state must provide their own synchronization. Handler-table updates are copy-on-write and become visible atomically without invalidating in-flight requests. Handlers registered with `on_serialized()` share the default FIFO domain. Advanced `RouteOptions::serialize_in()` routes serialize per named domain and may run across domains in parallel; queued serialized requests never occupy regular workers.
 
 ## Wire protocol
 
@@ -281,6 +308,7 @@ Fixed requests may be pipelined on a persistent connection and are correlated by
 - Handler throws: `500` with the exception's `what()` as the response body (bounded by `max_message_size`; a non-`std::exception` throw yields the generic `Internal Server Error` body). Set `include_handler_error_messages = false` to always use the generic body
 - Handler returns a negative status or oversized body: `500` with the rejection reason as the response body (likewise gated by `include_handler_error_messages`)
 - A request that waits past its server-side `request_timeout` before a worker executes it: `408` (handler not invoked)
+- A `LatestWins` request superseded while queued, or a `RejectIfBusy` request arriving at a busy domain: `409` (connection and Session remain usable)
 - Malformed/timed-out/disconnected peer: that connection is closed; the server continues running
 - Connection/request deadline exceeded: `ErrorCode::timeout`, with `ETIMEDOUT` in `system_code()` on the side observing the timeout
 - Invalid local arguments/configuration: `std::invalid_argument` or `std::length_error`
@@ -361,6 +389,8 @@ cmake --build build-bench --parallel
 ./build-bench/easy_uds_session_benchmark 200000 8 shared
 # Warmed-up tiny session RPC: total ordinary heap allocations
 ./build-bench/easy_uds_allocation_benchmark 20000
+# Named serialized-domain steady-state allocations (long domain key)
+./build-bench/easy_uds_allocation_benchmark 20000 domain
 ```
 
 The streaming benchmark generates bytes on demand and discards them at the receiver, so it measures the library and local socket path without disk-I/O effects. The RPC benchmarks measure client-side latency on the one-connection-per-request API and on the persistent `Client::session()` API respectively, reporting aggregate throughput plus average, p50, p95, p99, p99.9, and maximum request latency. The session benchmark gives each caller its own session by default; pass `shared` to measure request-id multiplexing and client-side contention on one session.
@@ -439,7 +469,7 @@ are also self-contained; see the [public header map](docs/api/headers.md).
 
 - `Server(std::string socket_path, ServerOptions options = {})`
 - `on(std::string route, Handler handler)`
-- `on(std::string route, RouteOptions options)` — advanced fixed handler with `RequestContext`
+- `on(std::string route, RouteOptions options)` — simple/contextual fixed handler with optional domain and queue policy
 - `on_prefix(std::string prefix, Handler handler)`
 - `on_prefix(std::string prefix, RouteOptions options)`
 - `on_serialized(std::string route, Handler handler)`
@@ -473,6 +503,7 @@ are also self-contained; see the [public header map](docs/api/headers.md).
 ### Data types
 
 - `StatsMode` — `disabled` (default) or opt-in `basic` cumulative counters
+- `QueuePolicy` — `fifo`, `latest_wins`, or `reject_if_busy`
 
 ```cpp
 using Status = std::int32_t;  // status_ok=200, status_request_timeout=408, status_not_found=404, ...
@@ -521,8 +552,8 @@ Advanced request timing, connection observation, and cooperative cancellation
 are documented in
 [`docs/api/request-context.md`](docs/api/request-context.md).
 Runtime gauge, counter-cost, and snapshot-consistency semantics are documented
-in [`docs/api/stats.md`](docs/api/stats.md). The planned Phase 3 domain/policy
-shape is recorded in
+in [`docs/api/stats.md`](docs/api/stats.md). Serialized domain and queue-policy
+semantics are documented in
 [`docs/api/route-options-design.md`](docs/api/route-options-design.md).
 
 ## Security scope

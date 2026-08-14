@@ -24,6 +24,7 @@ namespace easy_uds::detail {
 
 inline constexpr unsigned char handler_serialized_flag = 0x01U;
 inline constexpr unsigned char handler_contextual_flag = 0x02U;
+inline constexpr unsigned char handler_advanced_options_flag = 0x04U;
 
 struct HandlerEntry {
     easy_uds::Server::Handler handler;
@@ -39,10 +40,29 @@ struct HandlerEntry {
     [[nodiscard]] bool contextual() const noexcept {
         return (flags & handler_contextual_flag) != 0;
     }
+
+    [[nodiscard]] bool advanced_options() const noexcept {
+        return (flags & handler_advanced_options_flag) != 0;
+    }
+};
+
+struct RouteScheduling {
+    std::string domain;
+    easy_uds::QueuePolicy policy = easy_uds::QueuePolicy::fifo;
+};
+
+struct SimpleRouteOptionsAdapter {
+    easy_uds::RouteOptions::SimpleHandler handler;
+    RouteScheduling scheduling;
+
+    easy_uds::Response operator()(const easy_uds::Request& request) const {
+        return handler(request);
+    }
 };
 
 struct ContextHandlerAdapter {
-    easy_uds::RouteOptions::Handler handler;
+    easy_uds::RouteOptions::ContextHandler handler;
+    RouteScheduling scheduling;
 
     easy_uds::Response operator()(const easy_uds::Request&) const {
         throw std::logic_error("context handler invoked without RequestContext");
@@ -175,6 +195,17 @@ struct SerializedJob {
     std::size_t request_bytes = 0;
 };
 
+struct SerializedDomainActivity {
+    bool active = false;
+    std::size_t queued = 0;
+};
+
+enum class SerializedAdmission {
+    accepted,
+    busy,
+    stopping,
+};
+
 struct ServerCounterState {
     struct alignas(64) FixedRequestShard {
         std::atomic<std::uint64_t> value{0};
@@ -187,6 +218,8 @@ struct ServerCounterState {
     std::atomic<std::uint64_t> stream_requests{0};
     std::atomic<std::uint64_t> stream_rejections{0};
     std::atomic<std::uint64_t> queue_timeouts{0};
+    std::atomic<std::uint64_t> serialized_superseded{0};
+    std::atomic<std::uint64_t> serialized_busy_rejections{0};
 };
 
 inline std::size_t server_counter_shard_index() noexcept {
@@ -238,9 +271,19 @@ struct ServerState {
     std::mutex serialized_mutex;
     std::condition_variable serialized_cv;
     std::deque<SerializedJob> pending_serialized;
+    // The legacy/default domain stays allocation-free. Named domains retain
+    // one cold-path map node after first use so steady-state execution only
+    // toggles a bool instead of allocating and freeing per request.
+    SerializedDomainActivity default_serialized_domain_activity;
+    std::unordered_map<std::string, SerializedDomainActivity>
+        serialized_named_domain_activity;
+    std::size_t active_serialized_domain_count = 0;
+    std::size_t busy_serialized_domain_count = 0;
     std::atomic<bool> serialized_stopping{false};
     std::mutex serialized_thread_mutex;
-    std::thread serialized_thread;
+    std::vector<std::thread> serialized_threads;
+    std::atomic<std::size_t> serialized_worker_count{0};
+    std::size_t max_serialized_concurrency = 1;
 
     std::thread reactor_thread;
     std::exception_ptr reactor_error;
@@ -296,6 +339,22 @@ inline void record_queue_timeout(const std::shared_ptr<ServerState>& state) noex
     }
 }
 
+inline void record_serialized_superseded(
+    const std::shared_ptr<ServerState>& state) noexcept {
+    if (state->counters) {
+        state->counters->serialized_superseded.fetch_add(
+            1, std::memory_order_relaxed);
+    }
+}
+
+inline void record_serialized_busy_rejection(
+    const std::shared_ptr<ServerState>& state) noexcept {
+    if (state->counters) {
+        state->counters->serialized_busy_rejections.fetch_add(
+            1, std::memory_order_relaxed);
+    }
+}
+
 struct RequestContextFactory {
     static easy_uds::RequestContext make(
         const easy_uds::Request& request, Clock::time_point arrival_time,
@@ -335,11 +394,15 @@ void worker_loop(const std::shared_ptr<ServerState>& state);
 // Serialized/maintenance FIFO executor loop.
 void serialized_worker_loop(const std::shared_ptr<ServerState>& state);
 
-// Starts the serialized executor on first use; false when not running.
-bool ensure_serialized_worker(const std::shared_ptr<ServerState>& state);
+// Admits one serialized job and applies its domain queue policy. Reactor jobs
+// can transfer request accounting atomically with queue insertion; worker
+// continuation jobs pass false because they are already accounted.
+SerializedAdmission enqueue_serialized_job(
+    const std::shared_ptr<ServerState>& state, SerializedJob&& job,
+    bool account_request, bool request_bytes_reserved);
 
-// Joins the lazily-created serialized executor after stop.
-void join_serialized_worker(const std::shared_ptr<ServerState>& state) noexcept;
+// Joins the lazily-grown serialized executor after stop.
+void join_serialized_workers(const std::shared_ptr<ServerState>& state) noexcept;
 
 // Concurrent stream admission; false when the limit is reached.
 bool try_acquire_stream_slot(const std::shared_ptr<ServerState>& state) noexcept;

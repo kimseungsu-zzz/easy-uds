@@ -347,3 +347,55 @@ The largest unfavorable median is c1 p99 at +1.2%; c8 throughput is -0.4%,
 p50 +0.9%, p99 -1.7%, and CPU +0.3%. No enabled-mode contention regression is
 visible. Decision: retain opt-in, sharded cumulative counters and the existing
 accounting gauges.
+
+## Serialized domains and queue policies (2026-08-14)
+
+Change: extend `RouteOptions` with named serialization domains plus FIFO,
+LatestWins, and RejectIfBusy admission. Plain `on()` still stores the original
+handler entry and does not inspect scheduling metadata. The default
+`on_serialized()` domain uses allocation-free activity state; named-domain
+state allocates only on first use and is then retained. Executor threads grow
+lazily from actual active/queued domain counts rather than queue length.
+
+### Plain-handler regression gate
+
+WSL2, g++ 15.2, CMake Release, empty payload, one shared Session, continuation
+grace disabled. Four 40,000-request runs per revision were warmed first and
+balanced old/new execution order. Values are medians; baseline `950dc9e` is the
+pre-domain runtime-statistics commit.
+
+| Workload / revision | Throughput | p50 | p99 | CPU-s / 1M |
+|---|---:|---:|---:|---:|
+| Session c1 / `950dc9e` | 14.61k req/s | 53.996 us | 232.868 us | 107.66 |
+| Session c1 / domain-policy tree | 15.56k req/s | 51.691 us | 218.915 us | 101.45 |
+| c1 delta | +6.5% | -4.3% | -6.0% | -5.8% |
+| Session c8 / `950dc9e` | 30.12k req/s | 250.450 us | 661.644 us | 193.60 |
+| Session c8 / domain-policy tree | 29.05k req/s | 262.123 us | 673.516 us | 198.38 |
+| c8 delta | -3.5% | +4.7% | +1.8% | +2.5% |
+
+Every unfavorable median remains inside the roadmap gate. WSL scheduling
+showed substantial absolute drift, so the balanced median rather than an
+individual pair is the decision value. The regular route lookup, job layout,
+Session framing, and protocol are unchanged.
+
+### Allocation and compatibility gate
+
+The existing steady-state allocation benchmark was run from separately built
+baseline/current trees after its warm-up region. A 50,000-request plain Session
+run reported 14 versus four total allocations (both effectively zero per
+request). Four balanced 50,000-request default-FIFO runs produced medians of
+2.4966 allocations/request for the baseline and 1.9742 for the domain-policy
+tree, a 20.9% reduction. Absolute counts vary with how often continuation wins
+the dispatch race, so the balanced median rather than one run is the gate.
+
+A new `domain` benchmark mode uses a deliberately non-SSO domain key. Two
+back-to-back 50,000-request runs measured 1.9976 and 1.9966 allocations/request,
+matching the same-build default FIFO results (1.9983 and 1.9967). Named-domain
+tracking therefore adds no steady-state string allocation after first use.
+
+Decision: keep the bounded logical-domain executor. It preserves the legacy
+default-domain semantics and allocation gate while adding concurrency only for
+routes that opt in. Shared-Session regressions cover two domains executing in
+parallel, an explicit two-domain cap holding back a third, prefix-route
+LatestWins replacement, immediate RejectIfBusy, 409 correlation, cumulative
+policy counters, and the active-domain gauge returning to zero.

@@ -25,11 +25,16 @@ static_assert(!std::is_copy_constructible_v<easy_uds::RequestContext>);
 static_assert(!std::is_move_constructible_v<easy_uds::RequestContext>);
 static_assert(std::is_constructible_v<
               easy_uds::RouteOptions, easy_uds::RouteOptions::Handler>);
+static_assert(std::is_constructible_v<
+              easy_uds::RouteOptions,
+              easy_uds::RouteOptions::SimpleHandler>);
 static_assert(std::is_same_v<decltype(std::declval<const easy_uds::Server&>().stats()),
                              easy_uds::ServerStats>);
 static_assert(std::is_same_v<decltype(std::declval<const easy_uds::Session&>().stats()),
                              easy_uds::SessionStats>);
 static_assert(easy_uds::ServerOptions{}.stats == easy_uds::StatsMode::disabled);
+static_assert(
+    easy_uds::ServerOptions{}.max_concurrent_serialized_domains == 0);
 static_assert(easy_uds::ClientOptions{}.stats == easy_uds::StatsMode::disabled);
 
 void register_context_routes(easy_uds::Server& server) {
@@ -41,6 +46,16 @@ void register_context_routes(easy_uds::Server& server) {
     server.on_prefix("context.prefix.", easy_uds::RouteOptions{handler});
     server.on_serialized("context.serialized",
                          easy_uds::RouteOptions{handler});
+    server.on(
+        "simple.latest",
+        easy_uds::RouteOptions{[](const easy_uds::Request&) {
+            return easy_uds::Response{easy_uds::status_ok, "ok"};
+        }}.serialize_in("drivetrain",
+                        easy_uds::QueuePolicy::latest_wins));
+    server.on(
+        "context.busy",
+        easy_uds::RouteOptions{handler}.serialize_in(
+            "arm", easy_uds::QueuePolicy::reject_if_busy));
 }
 
 void inspect_runtime_stats(const easy_uds::Server& server,

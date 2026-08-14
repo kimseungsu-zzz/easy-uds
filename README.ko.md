@@ -14,7 +14,7 @@
 - route 기반 request/response RPC
 - handler table copy-on-write snapshot(요청 dispatch 시 전역 table lock·`std::function` 복사 없음)
 - request/response body에 NUL, 개행 등을 포함한 임의 바이너리 데이터 사용 가능
-- `on_serialized()`를 이용한 전역 FIFO 직렬 명령 큐
+- `on_serialized()` 전역 FIFO와 opt-in named domain, `LatestWins`, `RejectIfBusy` 정책
 - 직렬 명령 대기 중에도 일반 `on()` RPC worker는 점유하지 않음
 - 큰 데이터를 메모리에 전부 올리지 않는 chunk streaming
 - Unix socket backpressure를 통한 자연스러운 흐름 제어
@@ -132,6 +132,31 @@ Process C: status ─────────> 일반 worker pool에서 별도�
 
 모든 `on_serialized()` route는 하나의 FIFO executor를 공유합니다. 따라서 `drive`, `arm`, `motor/set`처럼 route가 서로 달라도 직렬 route끼리는 동시에 실행되지 않습니다.
 
+서로 독립적인 resource는 `RouteOptions`로 domain을 명시하면 병렬 실행할 수
+있습니다.
+
+```cpp
+server.on(
+    "velocity/set",
+    easy_uds::RouteOptions{[](const easy_uds::Request& request) {
+        execute_drive_command(request.body);
+        return easy_uds::Response{easy_uds::status_ok, "ok"};
+    }}.serialize_in("drivetrain", easy_uds::QueuePolicy::latest_wins));
+
+server.on(
+    "arm/move",
+    easy_uds::RouteOptions{[](const easy_uds::Request& request) {
+        execute_arm_command(request.body);
+        return easy_uds::Response{easy_uds::status_ok, "ok"};
+    }}.serialize_in("arm"));
+```
+
+같은 domain에서는 handler가 한 번에 하나만 실행되고, 다른 domain은 병렬로
+실행될 수 있습니다. `latest_wins`는 같은 concrete route의 이전 대기 명령을
+`409`로 교체하며, `reject_if_busy`는 domain이 실행 또는 대기 중이면 즉시
+`409`를 반환합니다. 이미 실행을 시작한 handler는 중단하지 않으며 자동
+retry/replay도 하지 않습니다.
+
 FIFO 순서는 server가 완전한 request를 serialized executor에 넣은 순서입니다. 연결된 순서 자체가 아니라 **완전히 수신되어 queue에 들어온 순서**라는 점에 주의하십시오.
 
 ### 오래 기다린 명령의 안전 처리
@@ -221,13 +246,13 @@ while (true) {
 
 `Session`은 동시 `request()` 호출을 **멀티플렉싱**합니다(request id로 상관관계를 매기고 응답은 무순서로 도착). 서버는 유휴 grace 동안 연결을 처리한 워커가 직접 이어 읽는 고속 경로를 쓰므로 고주파 폴링의 단일 요청 왕복 지연이 WSL 원시 바닥(~38 µs p50)에 근접합니다. I/O 오류, request timeout 또는 peer close 이후에는 영구적으로 사용할 수 없습니다(재연결하려면 새 세션). serialized route 요청도 응답 후 세션을 유지합니다. `request_stream()`은 독립된 전용 연결을 사용하므로 fixed request나 다른 stream 호출을 막지 않습니다.
 
-`Server::enqueue_maintenance()`는 serialized handler와 같은 FIFO 실행기에서, 그리고 그들과 엄격한 순서로 실행되는 작업을 등록합니다. serialized handler가 접근하는 서버 측 상태(예: 드라이버 인스턴스 맵)를 외부 스레드(스위퍼 등)에서 안전하게 정리할 때 사용합니다:
+`Server::enqueue_maintenance()`는 기본 FIFO domain에서 `on_serialized()` handler와 엄격한 순서로 실행되는 작업을 등록합니다. 이 handler가 접근하는 서버 측 상태(예: 드라이버 인스턴스 맵)를 외부 스레드(스위퍼 등)에서 안전하게 정리할 때 사용합니다:
 
 ```cpp
 server.enqueue_maintenance([&] { drivers.erase(dead_driver_name); });
 ```
 
-작업은 정확히 한 번, FIFO 순서로 실행되며, 예외를 던져도 실행기가 계속 동작합니다. server가 실행 중이 아니면 `std::logic_error`를 던집니다.
+작업은 정확히 한 번, 기본 domain의 serialized command와 FIFO 순서로 실행되며, 예외를 던져도 실행기가 계속 동작합니다. server가 실행 중이 아니면 `std::logic_error`를 던집니다.
 
 ## Server 설정
 
@@ -249,11 +274,12 @@ options.stream_timeout = 0ms;
 options.stale_socket_grace_period = 250ms;
 options.listen_backlog = 64;
 options.socket_permissions = 0600;
-
-easy_uds::Server server("/tmp/easy-uds.sock", options);
-
 // 선택 사항: 자동 모드는 가능하면 일반 RPC worker 하나를 예약합니다.
 options.max_concurrent_streams = 3;
+// 선택 사항: 동시 실행할 serialized domain 상한. 0은 worker_threads 사용.
+options.max_concurrent_serialized_domains = 3;
+
+easy_uds::Server server("/tmp/easy-uds.sock", options);
 ```
 
 | 옵션 | 기본값 | 의미 |
@@ -273,6 +299,7 @@ options.max_concurrent_streams = 3;
 | `stream_timeout` | `0` | stream 전체 absolute deadline. `0`은 비활성 |
 | `session_idle_grace` | `1 ms` | 마지막 요청을 마친 워커가 이 시간 동안 후속 요청 하나를 직접 기다려 리액터 디스패치 홉을 줄입니다. 핸들러 실행 전에는 연결을 리액터에 반환해 멀티플렉싱을 유지합니다. `0`은 고속 경로 비활성 |
 | `max_concurrent_streams` | `0` (자동) | 동시 stream 수 상한. 자동값은 `worker_threads - 1`이며 worker가 하나뿐이면 `1`. 명시값은 `1`~`worker_threads` |
+| `max_concurrent_serialized_domains` | `0` (자동) | 동시에 실행할 serialized domain 수 상한. 자동값은 `worker_threads`이며 독립 domain이 필요할 때만 thread를 lazy 생성 |
 | `include_handler_error_messages` | `true` | `500` body에 handler 예외 메시지 포함. 내부 정보 노출을 피하려면 `false` |
 | `stats` | `StatsMode::disabled` | 운영 gauge는 항상 조회 가능. `basic`은 누적 서버 event counter도 기록 |
 | `stale_socket_grace_period` | `250 ms` | refused socket을 stale로 판단하기 전 대기 시간 |
@@ -327,11 +354,11 @@ easy_uds::Client client("/tmp/easy-uds.sock", options);
 
 ## 동시성과 종료
 
-`Server::run()`은 epoll reactor와 고정 worker pool을 시작한 뒤 종료될 때까지 block됩니다. serialized executor thread는 처음 필요할 때 지연 시작됩니다. 하나의 `Server` 객체에서 `run()`은 한 번만 호출할 수 있습니다.
+`Server::run()`은 epoll reactor와 고정 worker pool을 시작한 뒤 종료될 때까지 block됩니다. serialized executor는 thread 없이 시작하고 독립 domain의 병렬 실행이 실제로 필요할 때 `max_concurrent_serialized_domains`까지 지연 확장됩니다. 하나의 `Server` 객체에서 `run()`은 한 번만 호출할 수 있습니다.
 
 일반 `on()` handler는 여러 worker thread에서 동시에 실행될 수 있습니다. 동일하게 등록된 함수 객체가 여러 worker에서 동시에 호출될 수 있으므로 mutable capture와 공유 state는 애플리케이션이 직접 동기화해야 합니다. Handler table 갱신은 copy-on-write이며 진행 중인 요청을 무효화하지 않고 원자적으로 공개됩니다.
 
-`on_serialized()` handler는 모든 serialized route가 하나의 executor를 공유하므로 한 번에 정확히 하나만 실행됩니다. reactor가 serialized request의 header/body를 읽어 전용 queue로 넘기므로 일반 worker pool을 점유하지 않습니다.
+`on_serialized()` handler는 기본 FIFO domain을 공유하므로 한 번에 정확히 하나만 실행됩니다. `RouteOptions::serialize_in()`으로 지정한 named domain은 domain별로 직렬화되며 서로 병렬 실행할 수 있습니다. reactor가 serialized request의 header/body를 전용 scheduler로 넘기므로 대기 작업은 일반 worker pool을 점유하지 않습니다.
 
 종료 시에는 다음 순서로 정리됩니다.
 
@@ -359,6 +386,7 @@ reactor가 listener를 poll하는 동안 `stop()` thread가 listener FD를 직�
 - handler가 음수 status 또는 너무 큰 body 반환: `500`, response body에 거부 사유 포함
 - malformed/timed-out/disconnected peer: 해당 connection만 종료, server는 계속 실행
 - serialized queue에서 server `request_timeout` 초과: handler를 실행하지 않고 `408` 응답
+- 대기 중 `LatestWins`로 교체되거나 busy domain의 `RejectIfBusy` 요청: `409` 응답, connection과 Session은 계속 사용 가능
 - connection/request deadline 초과: `ErrorCode::timeout`, `system_code()`에는 `ETIMEDOUT`
 - 잘못된 로컬 argument/configuration: `std::invalid_argument` 또는 `std::length_error`
 - socket/OS 오류: `easy_uds::Error` (`std::system_error`로도 catch 가능)
@@ -433,6 +461,8 @@ cmake --build build-bench --parallel
 ./build-bench/easy_uds_session_benchmark 200000 8 shared
 # 워밍업 이후 tiny session RPC의 일반 heap 할당 수
 ./build-bench/easy_uds_allocation_benchmark 20000
+# 긴 이름을 사용한 named serialized domain의 steady-state 할당 수
+./build-bench/easy_uds_allocation_benchmark 20000 domain
 ```
 
 세션 벤치마크는 기본적으로 호출자마다 독립 세션을 사용합니다. 마지막 인수로 `shared`를 주면 하나의 세션에서 request-id 멀티플렉싱과 클라이언트 내부 경합을 측정합니다.
@@ -489,7 +519,7 @@ header도 각각 독립적으로 include할 수 있습니다. 자세한 매핑�
 
 - `Server(std::string socket_path, ServerOptions options = {})`
 - `on(std::string route, Handler handler)`
-- `on(std::string route, RouteOptions options)` — `RequestContext`를 받는 고급 fixed handler
+- `on(std::string route, RouteOptions options)` — simple/contextual handler와 선택적 domain/queue policy
 - `on_prefix(std::string prefix, Handler handler)`
 - `on_prefix(std::string prefix, RouteOptions options)`
 - `on_serialized(std::string route, Handler handler)`
@@ -523,6 +553,7 @@ header도 각각 독립적으로 include할 수 있습니다. 자세한 매핑�
 ### 데이터 타입
 
 - `StatsMode` — 기본 `disabled` 또는 누적 counter를 켜는 `basic`
+- `QueuePolicy` — `fifo`, `latest_wins`, `reject_if_busy`
 
 ```cpp
 using Status = std::int32_t;  // status_ok=200, status_request_timeout=408, status_not_found=404, ...
@@ -568,7 +599,7 @@ FD 소유권은 [`docs/api/fd-passing.md`](docs/api/fd-passing.md), 오류 의�
 요청 시각, 연결 관찰, cooperative cancellation 의미는
 [`docs/api/request-context.md`](docs/api/request-context.md)에 정리되어 있습니다.
 Stats의 비용, accounting 경계, snapshot 일관성은
-[`docs/api/stats.md`](docs/api/stats.md), Phase 3의 domain/policy API 사전 설계는
+[`docs/api/stats.md`](docs/api/stats.md), serialized domain/policy 의미는
 [`docs/api/route-options-design.md`](docs/api/route-options-design.md)에 정리되어 있습니다.
 
 ## 보안 범위

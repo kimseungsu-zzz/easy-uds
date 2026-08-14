@@ -33,6 +33,7 @@ int main() {
         RUN(test_stream_timeout_is_independent);
         RUN(test_back_to_back_streams);
         RUN(test_serialized_handlers);
+        RUN(test_serialized_domains_and_policies);
         RUN(test_serialized_queue_expiry);
         RUN(test_enqueue_maintenance);
         RUN(test_client_request_deadline);

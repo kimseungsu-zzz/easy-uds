@@ -17,7 +17,8 @@ Operational gauges are always available:
 | `retained_request_bytes` | Logical request bytes already tracked for backpressure. In strict aggregate-budget mode this also includes admitted partial frames; stream chunks are not retained and are excluded. |
 | `queued_output_bytes` | Unsent fixed-response wire bytes in reactor output queues. |
 | `worker_queue_depth` | Fixed and stream jobs waiting in the normal worker queue; executing jobs are excluded. |
-| `serialized_queue_depth` | Requests and maintenance tasks waiting in the current serialized FIFO; the executing item is excluded. |
+| `serialized_queue_depth` | Requests and maintenance tasks waiting across all serialization domains; executing items are excluded. |
+| `active_serialized_domains` | Serialization domains currently executing a request or maintenance task. |
 
 These fields reuse accounting required by connection limits, backpressure, and
 executor operation. Calling `stats()` briefly takes the connection, worker,
@@ -52,6 +53,8 @@ contains:
 | `stream_requests_started` | Complete stream openings that acquired a stream slot. |
 | `stream_requests_rejected` | Complete stream openings closed because no stream slot was available. |
 | `requests_timed_out_before_execution` | Fixed requests whose server deadline elapsed before their normal or serialized handler began. |
+| `serialized_requests_superseded` | Queued `LatestWins` requests answered with 409 because a newer request with the same domain and concrete route arrived. |
+| `serialized_requests_rejected_busy` | `RejectIfBusy` requests answered with 409 because their domain was executing or already had queued work. |
 
 The common enabled fixed-RPC path increments one cache-line-separated,
 thread-assigned relaxed counter shard. Rare rejection and timeout paths update

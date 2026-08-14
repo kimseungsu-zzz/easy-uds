@@ -84,25 +84,26 @@ static/shared package consumer는 모든 phase의 필수 gate다.
   - active connections/streams, requests, timeout/rejection
   - retained input/output bytes, worker/serialized queue depth
   - snapshot 비용과 thread-safety semantics 문서화
-- [ ] option 구조 정리
+- [x] option 구조 정리
   - `Server(path)` / `Client(path)` 기본 진입점 유지
   - advanced option은 명시적이며 숨은 retry나 workload 추측 금지
   - profile은 실측된 값 묶음일 때만 고려
-- [ ] Response helper와 naming consistency review
+- [x] Response helper와 naming consistency review
+  - `Response{status, body}` aggregate와 `status_*` 상수를 유지하고 중복 factory helper는 추가하지 않음
 - [x] 0.6 → 0.7 migration guide 시작
 
 ## Phase 3 — Advanced usability
 
-- [ ] serialized domain
+- [x] serialized domain
   - 기존 `on_serialized(route, handler)`는 default domain FIFO
   - drivetrain/arm처럼 독립적인 domain은 서로 병렬 진행
   - domain lifecycle, fairness, shutdown semantics 명시
-- [ ] queue policy
+- [x] queue policy
   - `FIFO` 기본
   - `LatestWins`: 실행 전 대기 중인 같은 key의 오래된 command 교체
   - `RejectIfBusy`: 실행/대기 상태를 명확한 error/status로 반환
   - 교체·거부된 request의 response와 stats semantics 회귀 테스트
-- [ ] advanced route options
+- [x] advanced route options
   - domain, policy, deadline/cancellation 관찰을 한 options 구조로 확장
   - overload 폭증 방지
   - [x] simple/contextual handler, domain/policy, replacement key와 409 semantics 사전 설계

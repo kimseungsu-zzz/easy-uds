@@ -3,6 +3,7 @@
 #include "common.hpp"
 #include "stream_io.hpp"
 
+#include <algorithm>
 #include <cerrno>
 #include <chrono>
 #include <exception>
@@ -22,6 +23,30 @@ namespace {
 
 using protocol::HeaderBytes;
 using protocol::WireType;
+
+const RouteScheduling& route_scheduling(
+    const std::shared_ptr<const HandlerEntry>& handler) {
+    static const RouteScheduling default_scheduling{};
+    if (!handler || !handler->advanced_options()) {
+        return default_scheduling;
+    }
+    if (handler->contextual()) {
+        const auto* adapter = handler->handler.target<ContextHandlerAdapter>();
+        if (adapter == nullptr) {
+            throw std::logic_error("invalid contextual route options entry");
+        }
+        return adapter->scheduling;
+    }
+    const auto* adapter = handler->handler.target<SimpleRouteOptionsAdapter>();
+    if (adapter == nullptr) {
+        throw std::logic_error("invalid simple route options entry");
+    }
+    return adapter->scheduling;
+}
+
+const std::string& serialized_job_domain(const SerializedJob& job) {
+    return route_scheduling(job.handler).domain;
+}
 
 easy_uds::Response invoke_request_handler(
     const std::shared_ptr<const HandlerEntry>& handler,
@@ -70,10 +95,6 @@ bool serve_fixed_request(const std::shared_ptr<ServerState>& state,
         return true;
     }
     if (handler->serialized()) {
-        if (!ensure_serialized_worker(state)) {
-            connection->closing.store(true, std::memory_order_release);
-            return true;
-        }
         SerializedJob job;
         job.connection = connection;
         job.request = std::move(request);
@@ -81,20 +102,29 @@ bool serve_fixed_request(const std::shared_ptr<ServerState>& state,
         job.deadline = deadline;
         job.handler = std::move(handler);
         job.request_bytes = job.request.route.size() + job.request.body.size();
-        {
-            std::unique_lock<std::mutex> lock(state->serialized_mutex);
-            if (state->serialized_stopping || !state->running.load()) {
-                connection->closing.store(true, std::memory_order_release);
-                return true;
-            }
-            try {
-                state->pending_serialized.push_back(std::move(job));
-            } catch (...) {
-                throw;
-            }
-            connection->pending_serialized.fetch_add(1, std::memory_order_relaxed);
+        const std::uint32_t request_id = job.request.request_id;
+        SerializedAdmission admission;
+        try {
+            admission = enqueue_serialized_job(
+                state, std::move(job), false, false);
+        } catch (...) {
+            // The continuation request was accounted before this call. Return
+            // it to complete_regular_request instead of leaking the count or
+            // retained-byte budget on executor allocation failure.
+            connection->closing.store(true, std::memory_order_release);
+            return true;
         }
-        state->serialized_cv.notify_one();
+        if (admission == SerializedAdmission::busy) {
+            write_error_response(state, connection, request_id,
+                                 "serialization domain is busy",
+                                 state->options.io_timeout, Deadline::max(),
+                                 easy_uds::status_conflict);
+            return true;
+        }
+        if (admission == SerializedAdmission::stopping) {
+            connection->closing.store(true, std::memory_order_release);
+            return true;
+        }
         return false;
     }
 
@@ -401,24 +431,254 @@ void worker_loop(const std::shared_ptr<ServerState>& state) {
     }
 }
 
+namespace {
+
+const SerializedDomainActivity* find_serialized_domain_activity(
+    const ServerState& state, const std::string& domain) {
+    if (domain.empty()) {
+        return &state.default_serialized_domain_activity;
+    }
+    const auto found = state.serialized_named_domain_activity.find(domain);
+    return found == state.serialized_named_domain_activity.end()
+               ? nullptr
+               : &found->second;
+}
+
+SerializedDomainActivity& serialized_domain_activity(
+    ServerState& state, const std::string& domain) {
+    if (domain.empty()) {
+        return state.default_serialized_domain_activity;
+    }
+    return state.serialized_named_domain_activity.try_emplace(domain).first
+        ->second;
+}
+
+bool serialized_domain_active(const ServerState& state,
+                              const std::string& domain) {
+    const SerializedDomainActivity* activity =
+        find_serialized_domain_activity(state, domain);
+    return activity && activity->active;
+}
+
+bool serialized_domain_busy(const ServerState& state,
+                            const std::string& domain) {
+    const SerializedDomainActivity* activity =
+        find_serialized_domain_activity(state, domain);
+    return activity && (activity->active || activity->queued != 0);
+}
+
+void activate_serialized_domain(ServerState& state,
+                                SerializedDomainActivity& activity) {
+    activity.active = true;
+    ++state.active_serialized_domain_count;
+}
+
+void deactivate_serialized_domain(ServerState& state,
+                                  SerializedDomainActivity& activity) {
+    if (activity.active) {
+        activity.active = false;
+        --state.active_serialized_domain_count;
+        if (activity.queued == 0) {
+            --state.busy_serialized_domain_count;
+        }
+    }
+}
+
+bool has_runnable_serialized_job(const ServerState& state) {
+    return std::any_of(
+        state.pending_serialized.begin(), state.pending_serialized.end(),
+        [&state](const SerializedJob& job) {
+            return !serialized_domain_active(state,
+                                             serialized_job_domain(job));
+        });
+}
+
+bool ensure_serialized_worker_count(
+    const std::shared_ptr<ServerState>& state, std::size_t desired) {
+    std::lock_guard<std::mutex> lock(state->serialized_thread_mutex);
+    if (!state->running.load(std::memory_order_acquire) ||
+        state->serialized_stopping.load(std::memory_order_acquire)) {
+        return false;
+    }
+    desired = std::min(desired, state->max_serialized_concurrency);
+    while (state->serialized_threads.size() < desired) {
+        state->serialized_threads.emplace_back(serialized_worker_loop, state);
+        state->serialized_worker_count.store(
+            state->serialized_threads.size(), std::memory_order_release);
+    }
+    return true;
+}
+
+std::size_t desired_serialized_worker_count(
+    const ServerState& state, const std::string& incoming_domain) {
+    const std::size_t current = state.serialized_worker_count.load(
+        std::memory_order_acquire);
+    std::size_t demand = state.busy_serialized_domain_count;
+    if (!serialized_domain_busy(state, incoming_domain)) {
+        ++demand;
+    }
+    return std::max(current,
+                    std::min(demand, state.max_serialized_concurrency));
+}
+
+void finish_superseded_job(const std::shared_ptr<ServerState>& state,
+                           SerializedJob& job) noexcept {
+    record_serialized_superseded(state);
+    try {
+        write_error_response(state, job.connection, job.request.request_id,
+                             "superseded by a newer request",
+                             state->options.io_timeout, Deadline::max(),
+                             easy_uds::status_conflict);
+    } catch (...) {
+        job.connection->closing.store(true, std::memory_order_release);
+    }
+    job.connection->pending_serialized.fetch_sub(1,
+                                                  std::memory_order_release);
+    release_connection_request(state, job.connection, job.request_bytes);
+    wake_reactor(state);
+}
+
+struct SerializedDomainGuard {
+    std::shared_ptr<ServerState> state;
+    SerializedDomainActivity* activity;
+
+    ~SerializedDomainGuard() {
+        {
+            std::lock_guard<std::mutex> lock(state->serialized_mutex);
+            deactivate_serialized_domain(*state, *activity);
+        }
+        state->serialized_cv.notify_all();
+    }
+};
+
+} // namespace
+
+SerializedAdmission enqueue_serialized_job(
+    const std::shared_ptr<ServerState>& state, SerializedJob&& job,
+    bool account_request, bool request_bytes_reserved) {
+    const RouteScheduling& scheduling = route_scheduling(job.handler);
+    std::vector<SerializedJob> superseded;
+    {
+        std::lock_guard<std::mutex> lock(state->serialized_mutex);
+        if (state->serialized_stopping.load(std::memory_order_acquire) ||
+            !state->running.load(std::memory_order_acquire)) {
+            return SerializedAdmission::stopping;
+        }
+
+        // Materialize the named-domain state before queue insertion. This is
+        // the only potentially allocating domain-state operation, so an
+        // allocation failure cannot leave a queued but unaccounted request.
+        SerializedDomainActivity& incoming_activity =
+            serialized_domain_activity(*state, scheduling.domain);
+        const std::size_t desired_workers =
+            desired_serialized_worker_count(*state, scheduling.domain);
+        // serialized_mutex -> serialized_thread_mutex is the only nested
+        // scheduler lock order. Newly created workers wait on
+        // serialized_mutex, so publication and admission stay one decision.
+        if (!ensure_serialized_worker_count(state, desired_workers) ||
+            !state->running.load(std::memory_order_acquire)) {
+            return SerializedAdmission::stopping;
+        }
+
+        const auto same_domain = [&scheduling](const SerializedJob& queued) {
+            return serialized_job_domain(queued) == scheduling.domain;
+        };
+        if (scheduling.policy == easy_uds::QueuePolicy::reject_if_busy &&
+            serialized_domain_busy(*state, scheduling.domain)) {
+            record_serialized_busy_rejection(state);
+            return SerializedAdmission::busy;
+        }
+
+        if (scheduling.policy == easy_uds::QueuePolicy::latest_wins) {
+            const std::size_t replacement_count = static_cast<std::size_t>(
+                std::count_if(
+                    state->pending_serialized.begin(),
+                    state->pending_serialized.end(),
+                    [&](const SerializedJob& queued) {
+                        return same_domain(queued) && queued.connection &&
+                               queued.request.route == job.request.route;
+                    }));
+            superseded.reserve(replacement_count);
+        }
+
+        state->pending_serialized.push_back(std::move(job));
+        if (!incoming_activity.active && incoming_activity.queued == 0) {
+            ++state->busy_serialized_domain_count;
+        }
+        ++incoming_activity.queued;
+        if (scheduling.policy == easy_uds::QueuePolicy::latest_wins) {
+            for (std::size_t index = 0;
+                 index + 1 < state->pending_serialized.size();) {
+                auto& queued = state->pending_serialized[index];
+                if (same_domain(queued) && queued.connection &&
+                    queued.request.route ==
+                        state->pending_serialized.back().request.route) {
+                    superseded.push_back(std::move(queued));
+                    state->pending_serialized.erase(
+                        state->pending_serialized.begin() +
+                        static_cast<std::ptrdiff_t>(index));
+                    --incoming_activity.queued;
+                } else {
+                    ++index;
+                }
+            }
+        }
+
+        const auto& admitted = state->pending_serialized.back();
+        if (admitted.connection) {
+            admitted.connection->pending_serialized.fetch_add(
+                1, std::memory_order_relaxed);
+            if (account_request) {
+                if (request_bytes_reserved) {
+                    account_connection_request_count(admitted.connection);
+                } else {
+                    account_connection_request(
+                        state, admitted.connection, admitted.request_bytes);
+                }
+            }
+        }
+    }
+
+    for (auto& replaced : superseded) {
+        finish_superseded_job(state, replaced);
+    }
+    state->serialized_cv.notify_all();
+    return SerializedAdmission::accepted;
+}
+
 void serialized_worker_loop(const std::shared_ptr<ServerState>& state) {
     while (true) {
         SerializedJob job;
+        SerializedDomainActivity* activity = nullptr;
         {
             std::unique_lock<std::mutex> lock(state->serialized_mutex);
             state->serialized_cv.wait(lock, [&state] {
-                return state->serialized_stopping ||
-                       !state->pending_serialized.empty();
+                return state->serialized_stopping.load(
+                           std::memory_order_acquire) ||
+                       has_runnable_serialized_job(*state);
             });
-            if (state->pending_serialized.empty()) {
-                if (state->serialized_stopping) {
+            const auto next = std::find_if(
+                state->pending_serialized.begin(),
+                state->pending_serialized.end(),
+                [&state](const SerializedJob& queued) {
+                    return !serialized_domain_active(
+                        *state, serialized_job_domain(queued));
+                });
+            if (next == state->pending_serialized.end()) {
+                if (state->serialized_stopping.load(
+                        std::memory_order_acquire)) {
                     return;
                 }
                 continue;
             }
-            job = std::move(state->pending_serialized.front());
-            state->pending_serialized.pop_front();
+            const std::string& domain = serialized_job_domain(*next);
+            activity = &serialized_domain_activity(*state, domain);
+            --activity->queued;
+            activate_serialized_domain(*state, *activity);
+            job = std::move(*next);
+            state->pending_serialized.erase(next);
         }
+        SerializedDomainGuard domain_guard{state, activity};
 
         if (job.maintenance) {
             try {
@@ -433,8 +693,8 @@ void serialized_worker_loop(const std::shared_ptr<ServerState>& state) {
             std::shared_ptr<Connection> connection;
             std::size_t request_bytes;
             ~CompletionGuard() {
-                connection->pending_serialized.fetch_sub(1,
-                                                         std::memory_order_release);
+                connection->pending_serialized.fetch_sub(
+                    1, std::memory_order_release);
                 release_connection_request(state, connection, request_bytes);
                 wake_reactor(state);
             }
@@ -443,24 +703,29 @@ void serialized_worker_loop(const std::shared_ptr<ServerState>& state) {
         try {
             if (Clock::now() >= job.deadline) {
                 record_queue_timeout(state);
-                write_error_response(state, job.connection, job.request.request_id,
+                write_error_response(state, job.connection,
+                                     job.request.request_id,
                                      "request timed out before execution",
-                                     state->options.io_timeout, Deadline::max(), 408);
+                                     state->options.io_timeout,
+                                     Deadline::max(),
+                                     easy_uds::status_request_timeout);
                 continue;
             }
             if (!state->running.load()) {
                 continue;
             }
-            easy_uds::Response response =
-                invoke_request_handler(job.handler, job.request, state,
-                                       job.connection, job.arrival_time,
-                                       job.deadline);
+            easy_uds::Response response = invoke_request_handler(
+                job.handler, job.request, state, job.connection,
+                job.arrival_time, job.deadline);
             try {
-                write_fixed_response(state, job.connection, job.request.request_id,
-                                     std::move(response), state->options.io_timeout,
+                write_fixed_response(state, job.connection,
+                                     job.request.request_id,
+                                     std::move(response),
+                                     state->options.io_timeout,
                                      job.deadline);
             } catch (...) {
-                job.connection->closing.store(true, std::memory_order_release);
+                job.connection->closing.store(true,
+                                               std::memory_order_release);
             }
         } catch (...) {
             job.connection->closing.store(true, std::memory_order_release);
@@ -468,26 +733,18 @@ void serialized_worker_loop(const std::shared_ptr<ServerState>& state) {
     }
 }
 
-bool ensure_serialized_worker(const std::shared_ptr<ServerState>& state) {
-    std::lock_guard<std::mutex> lock(state->serialized_thread_mutex);
-    if (state->serialized_thread.joinable()) {
-        return true;
-    }
-    if (!state->running.load() || state->serialized_stopping.load()) {
-        return false;
-    }
-    state->serialized_thread = std::thread(serialized_worker_loop, state);
-    return true;
-}
-
-void join_serialized_worker(const std::shared_ptr<ServerState>& state) noexcept {
-    std::thread worker;
+void join_serialized_workers(
+    const std::shared_ptr<ServerState>& state) noexcept {
+    std::vector<std::thread> workers;
     {
         std::lock_guard<std::mutex> lock(state->serialized_thread_mutex);
-        worker = std::move(state->serialized_thread);
+        workers = std::move(state->serialized_threads);
+        state->serialized_worker_count.store(0, std::memory_order_release);
     }
-    if (worker.joinable()) {
-        worker.join();
+    for (auto& worker : workers) {
+        if (worker.joinable()) {
+            worker.join();
+        }
     }
 }
 

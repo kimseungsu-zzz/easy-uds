@@ -275,15 +275,34 @@ void update_handler_registry(const std::shared_ptr<detail::ServerState>& state, 
     std::atomic_store_explicit(&state->handler_registry, std::move(published), std::memory_order_release);
 }
 
-std::shared_ptr<const detail::HandlerEntry> make_context_handler_entry(
-    RouteOptions::Handler handler, bool serialized) {
-    const unsigned char flags = static_cast<unsigned char>(
-        detail::handler_contextual_flag |
-        (serialized ? detail::handler_serialized_flag : 0U));
+std::shared_ptr<const detail::HandlerEntry> make_route_options_entry(
+    RouteOptions::SimpleHandler simple_handler,
+    RouteOptions::ContextHandler context_handler, bool serialized,
+    bool advanced_options, std::string domain, QueuePolicy policy) {
+    unsigned char flags = serialized ? detail::handler_serialized_flag : 0U;
+    if (advanced_options) {
+        flags = static_cast<unsigned char>(
+            flags | detail::handler_advanced_options_flag);
+    }
+    detail::RouteScheduling scheduling{std::move(domain), policy};
+    if (context_handler) {
+        flags = static_cast<unsigned char>(
+            flags | detail::handler_contextual_flag);
+        return std::make_shared<const detail::HandlerEntry>(
+            detail::HandlerEntry{
+                Server::Handler{detail::ContextHandlerAdapter{
+                    std::move(context_handler), std::move(scheduling)}},
+                flags});
+    }
+    if (advanced_options) {
+        return std::make_shared<const detail::HandlerEntry>(
+            detail::HandlerEntry{
+                Server::Handler{detail::SimpleRouteOptionsAdapter{
+                    std::move(simple_handler), std::move(scheduling)}},
+                flags});
+    }
     return std::make_shared<const detail::HandlerEntry>(
-        detail::HandlerEntry{
-            Server::Handler{detail::ContextHandlerAdapter{std::move(handler)}},
-            flags});
+        detail::HandlerEntry{std::move(simple_handler), flags});
 }
 
 } // namespace
@@ -305,6 +324,10 @@ Server::Server(std::string socket_path, ServerOptions options) : state_(std::mak
     state_->max_concurrent_streams = options.max_concurrent_streams == 0
                                          ? std::max<std::size_t>(1, options.worker_threads - 1)
                                          : options.max_concurrent_streams;
+    state_->max_serialized_concurrency =
+        options.max_concurrent_serialized_domains == 0
+            ? options.worker_threads
+            : options.max_concurrent_serialized_domains;
 
     FileDescriptor instance_lock = acquire_instance_lock(state_->socket_path);
     remove_stale_socket(state_->socket_path, options.stale_socket_grace_period);
@@ -387,8 +410,8 @@ void Server::on(std::string route, Handler handler) {
 
 void Server::on(std::string route, RouteOptions options) {
     validate_route(route, state_->options.max_message_size);
-    if (!options.handler_) {
-        throw std::invalid_argument("context handler must not be empty");
+    if (!options.simple_handler_ && !options.context_handler_) {
+        throw std::invalid_argument("handler must not be empty");
     }
     update_handler_registry(state_, [&](detail::HandlerRegistry& registry) {
         if (registry.handlers.find(route) != registry.handlers.end()) {
@@ -396,7 +419,12 @@ void Server::on(std::string route, RouteOptions options) {
         }
         registry.handlers.emplace(
             std::move(route),
-            make_context_handler_entry(std::move(options.handler_), false));
+            make_route_options_entry(
+                std::move(options.simple_handler_),
+                std::move(options.context_handler_), options.serialized_,
+                options.serialized_,
+                std::move(options.serialization_domain_),
+                options.queue_policy_));
     });
 }
 
@@ -423,8 +451,8 @@ void Server::on_prefix(std::string prefix, Handler handler) {
 
 void Server::on_prefix(std::string prefix, RouteOptions options) {
     validate_route(prefix, state_->options.max_message_size);
-    if (!options.handler_) {
-        throw std::invalid_argument("context handler must not be empty");
+    if (!options.simple_handler_ && !options.context_handler_) {
+        throw std::invalid_argument("handler must not be empty");
     }
     update_handler_registry(state_, [&](detail::HandlerRegistry& registry) {
         for (const auto& entry : registry.handler_prefixes) {
@@ -434,7 +462,12 @@ void Server::on_prefix(std::string prefix, RouteOptions options) {
         }
         registry.handler_prefixes.emplace_back(
             std::move(prefix),
-            make_context_handler_entry(std::move(options.handler_), false));
+            make_route_options_entry(
+                std::move(options.simple_handler_),
+                std::move(options.context_handler_), options.serialized_,
+                options.serialized_,
+                std::move(options.serialization_domain_),
+                options.queue_policy_));
         std::sort(registry.handler_prefixes.begin(), registry.handler_prefixes.end(),
                   [](const auto& left, const auto& right) {
                       return left.first.size() > right.first.size();
@@ -459,8 +492,15 @@ void Server::on_serialized(std::string route, Handler handler) {
 
 void Server::on_serialized(std::string route, RouteOptions options) {
     validate_route(route, state_->options.max_message_size);
-    if (!options.handler_) {
-        throw std::invalid_argument("context handler must not be empty");
+    if (!options.simple_handler_ && !options.context_handler_) {
+        throw std::invalid_argument("handler must not be empty");
+    }
+    if (options.serialized_ &&
+        (!options.serialization_domain_.empty() ||
+         options.queue_policy_ != QueuePolicy::fifo)) {
+        throw std::invalid_argument(
+            "on_serialized uses the default FIFO domain; use on with "
+            "RouteOptions::serialize_in for advanced scheduling");
     }
     update_handler_registry(state_, [&](detail::HandlerRegistry& registry) {
         if (registry.handlers.find(route) != registry.handlers.end()) {
@@ -468,7 +508,10 @@ void Server::on_serialized(std::string route, RouteOptions options) {
         }
         registry.handlers.emplace(
             std::move(route),
-            make_context_handler_entry(std::move(options.handler_), true));
+            make_route_options_entry(
+                std::move(options.simple_handler_),
+                std::move(options.context_handler_), true, false, {},
+                QueuePolicy::fifo));
     });
 }
 
@@ -513,18 +556,12 @@ void Server::enqueue_maintenance(std::function<void()> task) {
         throw std::invalid_argument("maintenance task must not be empty");
     }
     const auto state = state_;
-    if (!detail::ensure_serialized_worker(state)) {
-        throw std::logic_error("server is not running");
-    }
-    std::unique_lock<std::mutex> lock(state->serialized_mutex);
-    if (state->serialized_stopping.load() || !state->running.load()) {
-        throw std::logic_error("server is not running");
-    }
     detail::SerializedJob job;
     job.maintenance = std::move(task);
-    state->pending_serialized.push_back(std::move(job));
-    lock.unlock();
-    state->serialized_cv.notify_one();
+    if (detail::enqueue_serialized_job(state, std::move(job), false, false) !=
+        detail::SerializedAdmission::accepted) {
+        throw std::logic_error("server is not running");
+    }
 }
 
 void Server::run() {
@@ -595,7 +632,7 @@ void Server::run() {
                 worker.join();
             }
         }
-        detail::join_serialized_worker(state);
+        detail::join_serialized_workers(state);
         throw;
     }
 
@@ -609,7 +646,7 @@ void Server::run() {
             worker.join();
         }
     }
-    detail::join_serialized_worker(state);
+    detail::join_serialized_workers(state);
 
     // Close every remaining connection now that no worker touches fds.
     {
@@ -664,6 +701,8 @@ ServerStats Server::stats() const {
     {
         std::lock_guard<std::mutex> lock(state_->serialized_mutex);
         snapshot.serialized_queue_depth = state_->pending_serialized.size();
+        snapshot.active_serialized_domains =
+            state_->active_serialized_domain_count;
     }
 
     if (state_->counters) {
@@ -682,6 +721,12 @@ ServerStats Server::stats() const {
             state_->counters->stream_rejections.load(std::memory_order_relaxed);
         counters.requests_timed_out_before_execution =
             state_->counters->queue_timeouts.load(std::memory_order_relaxed);
+        counters.serialized_requests_superseded =
+            state_->counters->serialized_superseded.load(
+                std::memory_order_relaxed);
+        counters.serialized_requests_rejected_busy =
+            state_->counters->serialized_busy_rejections.load(
+                std::memory_order_relaxed);
         snapshot.counters = counters;
     }
     return snapshot;

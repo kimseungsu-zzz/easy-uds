@@ -105,6 +105,7 @@ void test_stream_limit_reserves_worker();
 void test_stream_timeout_is_independent();
 void test_back_to_back_streams();
 void test_serialized_handlers();
+void test_serialized_domains_and_policies();
 void test_serialized_queue_expiry();
 void test_enqueue_maintenance();
 void test_client_request_deadline();

@@ -395,6 +395,21 @@ cmake --build build-bench --parallel
 
 The streaming benchmark generates bytes on demand and discards them at the receiver, so it measures the library and local socket path without disk-I/O effects. The RPC benchmarks measure client-side latency on the one-connection-per-request API and on the persistent `Client::session()` API respectively, reporting aggregate throughput plus average, p50, p95, p99, p99.9, and maximum request latency. The session benchmark gives each caller its own session by default; pass `shared` to measure request-id multiplexing and client-side contention on one session.
 
+### Robot HAL composition example
+
+`examples/robot_hal_server.cpp` is a hardware-free driver-shaped example that
+combines a short `health` probe, a `diagnostics` snapshot, contextual handlers,
+independent `drivetrain`/`arm` domains, `LatestWins` velocity commands, and
+`RejectIfBusy` calibration. Build it with the examples target and see the
+[full walkthrough](docs/examples/robot-hal.md):
+
+```bash
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release \
+  -DEASY_UDS_BUILD_EXAMPLES=ON
+cmake --build build --target easy_uds_robot_hal_server_example
+./build/easy_uds_robot_hal_server_example
+```
+
 For the reproducible 0.6.x closing gate, enable experiment targets and run the
 architecture-neutral benchmark plus repeated test soak:
 
@@ -572,7 +587,7 @@ src/reactor/            Reactor core, parser, dispatch, flow control, output,
                         streaming, and worker executors
 src/protocol/           Protocol-v2 codec boundary
 src/detail/             Descriptor, deadline, socket, and exact-I/O utilities
-examples/               Minimal server/client examples
+examples/               Minimal server/client plus robot HAL composition example
 tests/easy_uds_test/     Unit tests grouped by subsystem
 tests/                  Stress, fuzz, benchmark, and package-consumer tests
 cmake/                  Installed-package CMake config

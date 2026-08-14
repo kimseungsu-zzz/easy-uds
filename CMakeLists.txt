@@ -106,6 +106,19 @@ if(EASY_UDS_BUILD_EXAMPLES)
 
     add_executable(easy_uds_client_example examples/client.cpp)
     target_link_libraries(easy_uds_client_example PRIVATE easy_uds::easy_uds)
+
+    add_executable(easy_uds_robot_hal_server_example
+        examples/robot_hal_server.cpp)
+    target_link_libraries(easy_uds_robot_hal_server_example PRIVATE
+        easy_uds::easy_uds)
+    target_compile_options(easy_uds_robot_hal_server_example PRIVATE
+        $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Wall;-Wextra;-Wpedantic>
+    )
+    if(EASY_UDS_WARNINGS_AS_ERRORS)
+        target_compile_options(easy_uds_robot_hal_server_example PRIVATE
+            $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Werror>
+        )
+    endif()
 endif()
 
 if(EASY_UDS_BUILD_TESTS)

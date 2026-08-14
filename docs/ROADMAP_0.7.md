@@ -107,9 +107,12 @@ static/shared package consumer는 모든 phase의 필수 gate다.
   - domain, policy, deadline/cancellation 관찰을 한 options 구조로 확장
   - overload 폭증 방지
   - [x] simple/contextual handler, domain/policy, replacement key와 409 semantics 사전 설계
-- [ ] production diagnostics
-  - 운영 중 원인을 찾을 수 있는 stats와 optional tracing
-  - 기본 비활성 시 hot-path 비용 0 또는 측정 불가 수준
+- [x] production diagnostics (bounded snapshot scope)
+  - `Server::stats()`/`Session::stats()`와 opt-in cumulative counters로 운영
+    상태를 관찰하고, 기본 비활성 시 request hot path에 counter RMW가 없음
+  - exporter는 라이브러리에 강제하지 않고 application-owned health/
+    diagnostics RPC 예제로 연결
+  - low-level optional tracing은 build-time diagnostic scope로 유지
 
 ## Phase 4 — Examples / documentation
 
@@ -126,7 +129,8 @@ static/shared package consumer는 모든 phase의 필수 gate다.
 - [ ] examples 확대
   - hello world, persistent session, concurrent requests, serialized commands
   - streaming, FD passing, peer credentials, stats, production server
-  - `motor/set`, `encoder/get`, `status`, `arm/move`를 포함한 robot HAL
+  - [x] `drive/velocity`, `arm/position`, `health`, `diagnostics`를 포함한
+        컴파일 가능한 robot HAL composition example
 - [ ] 0.6 실험은 `experiments/0.6/`와 history 문서로 이동하되 삭제하지 않음
 
 ## Phase 5 — Stabilization

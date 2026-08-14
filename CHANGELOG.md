@@ -38,6 +38,10 @@ All notable changes to this project are documented here.
   serialized fixed handlers. The original `Handler(const Request&)` form is
   unchanged, while scheduling controls use the same options object instead of
   multiplying `on_*` overload families.
+- Added a compile-checked robot HAL server example and walkthrough combining
+  health/diagnostics RPCs, contextual deadlines, independent domains, and
+  queue policies. Diagnostics remain application-owned rather than imposing a
+  metrics exporter on the library.
 - Preserved the basic handler hot path without per-request context allocation
   or `Request`/regular-worker-job layout growth, and added deadline-disabled,
   deadline-expiry, disconnect, shutdown, prefix, serialized, and lifetime

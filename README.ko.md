@@ -467,6 +467,22 @@ cmake --build build-bench --parallel
 
 세션 벤치마크는 기본적으로 호출자마다 독립 세션을 사용합니다. 마지막 인수로 `shared`를 주면 하나의 세션에서 request-id 멀티플렉싱과 클라이언트 내부 경합을 측정합니다.
 
+### Robot HAL 조합 예제
+
+[`examples/robot_hal_server.cpp`](examples/robot_hal_server.cpp)는 실제
+하드웨어 없이도 driver 경계를 보여주는 예제입니다. 짧은 `health` probe,
+`diagnostics` snapshot, contextual handler, `drivetrain`/`arm` domain,
+`LatestWins` velocity command, `RejectIfBusy` calibration을 함께 사용합니다.
+전체 설명은 [Robot HAL walkthrough](docs/examples/robot-hal.md)를
+참조하십시오.
+
+```bash
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release \
+  -DEASY_UDS_BUILD_EXAMPLES=ON
+cmake --build build --target easy_uds_robot_hal_server_example
+./build/easy_uds_robot_hal_server_example
+```
+
 session spin window는 latency 실험을 위한 build-time 조정값이며 기본값은 `100` microseconds입니다. `-DEASY_UDS_SESSION_SPIN_US=0`, `10`, `25`, `50`, `100`으로 benchmark 변형을 빌드해 p50/p95/p99, throughput, CPU, context switch를 비교합니다. session benchmark는 `getrusage()`로 user/system CPU 시간과 voluntary/involuntary context switch도 출력합니다. 측정으로 안정적인 정책이 확인되기 전에는 public runtime 옵션으로 노출하지 않습니다. `perf` 또는 `strace`가 있는 환경에서는 같은 benchmark를 감싸 syscall/request, cache miss, branch miss를 추가 측정할 수 있습니다.
 
 ## 예제 실행
@@ -620,7 +636,7 @@ src/reactor/            reactor core, parser, dispatch, flow control, output,
                         streaming, worker executor
 src/protocol/           protocol v2 codec 경계
 src/detail/             descriptor, deadline, socket, exact-I/O utility
-examples/               최소 server/client 예제
+examples/               최소 server/client와 robot HAL 조합 예제
 tests/easy_uds_test/     기능별로 나눈 unit 테스트
 tests/                  stress, fuzz, benchmark, package-consumer 테스트
 cmake/                  설치용 CMake config

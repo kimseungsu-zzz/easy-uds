@@ -61,12 +61,14 @@ bool find_stream_handler(const std::shared_ptr<ServerState>& state, const std::s
 }
 
 bool enqueue_worker_job(const std::shared_ptr<ServerState>& state, std::shared_ptr<Connection> connection,
-                        easy_uds::Request request, Deadline deadline, std::shared_ptr<const HandlerEntry> handler,
+                        easy_uds::Request request, Clock::time_point arrival_time,
+                        Deadline deadline, std::shared_ptr<const HandlerEntry> handler,
                         bool is_stream, bool request_bytes_reserved, std::string buffered,
                         std::size_t buffered_offset) {
     PendingJob job;
     job.connection = std::move(connection);
     job.request = std::move(request);
+    job.arrival_time = arrival_time;
     job.deadline = deadline;
     job.handler = std::move(handler);
     job.is_stream = is_stream;
@@ -177,7 +179,7 @@ bool dispatch_request(const std::shared_ptr<ServerState>& state,
         handler = state->not_found_handler;
     }
 
-    if (handler->serialized) {
+    if (handler->serialized()) {
         if (!ensure_serialized_worker(state)) {
             reactor_connection->conn->closing.store(true, std::memory_order_release);
             return false;
@@ -185,6 +187,7 @@ bool dispatch_request(const std::shared_ptr<ServerState>& state,
         SerializedJob job;
         job.connection = reactor_connection->conn;
         job.request = std::move(request);
+        job.arrival_time = reactor_connection->arrival_time;
         job.deadline = reactor_connection->deadline;
         job.handler = std::move(handler);
         job.request_bytes = job.request.route.size() + job.request.body.size();
@@ -230,7 +233,8 @@ bool dispatch_request(const std::shared_ptr<ServerState>& state,
     const bool request_bytes_reserved =
         state->options.max_total_inflight_bytes != 0;
     reactor_connection->reserved_request_bytes = 0;
-    if (!enqueue_worker_job(state, reactor_connection->conn, std::move(request), reactor_connection->deadline,
+    if (!enqueue_worker_job(state, reactor_connection->conn, std::move(request),
+                            reactor_connection->arrival_time, reactor_connection->deadline,
                             std::move(handler), false, request_bytes_reserved, {}, 0)) {
         reactor_connection->conn->closing.store(true, std::memory_order_release);
         return false;
@@ -273,7 +277,8 @@ void dispatch_stream(const std::shared_ptr<ServerState>& state,
     const std::size_t leftover_offset = reactor_connection->pending_offset;
     reactor_connection->pending.clear();
     reactor_connection->pending_offset = 0;
-    if (!enqueue_worker_job(state, connection, std::move(request), stream_deadline, {}, true,
+    if (!enqueue_worker_job(state, connection, std::move(request),
+                            reactor_connection->arrival_time, stream_deadline, {}, true,
                             request_bytes_reserved,
                             std::move(leftover), leftover_offset)) {
         connection->closing.store(true, std::memory_order_release);

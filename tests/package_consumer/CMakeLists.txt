@@ -16,6 +16,7 @@ set(EASY_UDS_PUBLIC_HEADERS
     fd
     options
     request
+    request_context
     response
     server
     session

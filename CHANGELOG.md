@@ -4,6 +4,19 @@ All notable changes to this project are documented here.
 
 ## Unreleased 0.7.0 — 🌱 Usability Foundation
 
+- Added non-owning, non-copyable `RequestContext` observations for request
+  id, peer credentials, first-byte arrival, absolute deadline, connection
+  closing, server shutdown, and cooperative stop. Handlers remain responsible
+  for choosing safe cancellation points; the library never interrupts user
+  code or claims that an apparently open connection is live.
+- Added explicit `RouteOptions` registration for contextual exact, prefix, and
+  serialized fixed handlers. The original `Handler(const Request&)` form is
+  unchanged, while future scheduling controls can extend one options object
+  instead of multiplying `on_*` overload families.
+- Preserved the basic handler hot path without per-request context allocation
+  or `Request` layout growth, and added deadline-disabled, deadline-expiry,
+  disconnect, shutdown, prefix, serialized, and lifetime regressions.
+
 - Split the public umbrella into self-contained client, Session, server,
   request, response, stream, and options headers while preserving
   `easy_uds.hpp` as the complete beginner include. Installed-package coverage

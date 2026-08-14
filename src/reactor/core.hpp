@@ -12,6 +12,7 @@
 #include <exception>
 #include <memory>
 #include <mutex>
+#include <stdexcept>
 #include <string>
 #include <thread>
 #include <unordered_map>
@@ -20,9 +21,31 @@
 
 namespace easy_uds::detail {
 
+inline constexpr unsigned char handler_serialized_flag = 0x01U;
+inline constexpr unsigned char handler_contextual_flag = 0x02U;
+
 struct HandlerEntry {
     easy_uds::Server::Handler handler;
-    bool serialized = false;
+    // Preserve the original HandlerEntry layout: its former serialized bool
+    // becomes a bit field without growing the route entry or its basic hot
+    // cache footprint.
+    unsigned char flags = 0;
+
+    [[nodiscard]] bool serialized() const noexcept {
+        return (flags & handler_serialized_flag) != 0;
+    }
+
+    [[nodiscard]] bool contextual() const noexcept {
+        return (flags & handler_contextual_flag) != 0;
+    }
+};
+
+struct ContextHandlerAdapter {
+    easy_uds::RouteOptions::Handler handler;
+
+    easy_uds::Response operator()(const easy_uds::Request&) const {
+        throw std::logic_error("context handler invoked without RequestContext");
+    }
 };
 
 struct StreamHandlerEntry {
@@ -102,6 +125,7 @@ struct ReactorConnection {
     // budget while this frame is only partially received. Ownership transfers
     // to the queued/executing job at dispatch.
     std::size_t reserved_request_bytes = 0;
+    Clock::time_point arrival_time{};        // first byte observed for current frame
     Deadline deadline = Deadline::max();     // absolute deadline once a request starts
     bool reactor_busy = false;               // guarded by connections_mutex
     bool read_paused = false;                 // guarded by connections_mutex
@@ -117,6 +141,7 @@ struct ReactorConnection {
 struct PendingJob {
     std::shared_ptr<Connection> connection;
     easy_uds::Request request;
+    Clock::time_point arrival_time{};
     Deadline deadline = Deadline::max();
     std::shared_ptr<const HandlerEntry> handler;
     bool is_stream = false;
@@ -133,6 +158,7 @@ struct PendingJob {
 struct SerializedJob {
     std::shared_ptr<Connection> connection;  // null for maintenance jobs
     easy_uds::Request request;
+    Clock::time_point arrival_time{};
     Deadline deadline = Deadline::max();
     std::shared_ptr<const HandlerEntry> handler;
     std::function<void()> maintenance;
@@ -194,6 +220,16 @@ struct ServerState {
     std::mutex connections_mutex;
     std::unordered_map<int, std::shared_ptr<ReactorConnection>> connections;
     std::deque<std::shared_ptr<ReactorConnection>> resumed_connections;
+};
+
+struct RequestContextFactory {
+    static easy_uds::RequestContext make(
+        const easy_uds::Request& request, Clock::time_point arrival_time,
+        Deadline deadline, const std::atomic<bool>& connection_closing,
+        const std::atomic<bool>& server_running) noexcept {
+        return easy_uds::RequestContext(request, arrival_time, deadline,
+                                        connection_closing, server_running);
+    }
 };
 
 // ---- reactor subsystem boundaries ----------------------------------------
@@ -281,7 +317,8 @@ bool pause_connection_reads_if_needed(const std::shared_ptr<ServerState>& state,
 
 // Enqueues a parsed request for the regular worker pool.
 bool enqueue_worker_job(const std::shared_ptr<ServerState>& state, std::shared_ptr<Connection> connection,
-                        easy_uds::Request request, Deadline deadline, std::shared_ptr<const HandlerEntry> handler,
+                        easy_uds::Request request, Clock::time_point arrival_time,
+                        Deadline deadline, std::shared_ptr<const HandlerEntry> handler,
                         bool is_stream, bool request_bytes_reserved, std::string buffered,
                         std::size_t buffered_offset);
 

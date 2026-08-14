@@ -20,6 +20,21 @@ static_assert(std::is_same_v<decltype(std::declval<const easy_uds::Session&>().s
 static_assert(std::is_same_v<decltype(std::declval<const easy_uds::Session&>().valid()), bool>);
 static_assert(noexcept(std::declval<const easy_uds::Session&>().status()));
 static_assert(noexcept(std::declval<const easy_uds::Session&>().valid()));
+static_assert(!std::is_copy_constructible_v<easy_uds::RequestContext>);
+static_assert(!std::is_move_constructible_v<easy_uds::RequestContext>);
+static_assert(std::is_constructible_v<
+              easy_uds::RouteOptions, easy_uds::RouteOptions::Handler>);
+
+void register_context_routes(easy_uds::Server& server) {
+    const auto handler = [](const easy_uds::Request&,
+                            const easy_uds::RequestContext&) {
+        return easy_uds::Response{200, "ok"};
+    };
+    server.on("context", easy_uds::RouteOptions{handler});
+    server.on_prefix("context.prefix.", easy_uds::RouteOptions{handler});
+    server.on_serialized("context.serialized",
+                         easy_uds::RouteOptions{handler});
+}
 
 int main() {
     constexpr const char* socket_path =

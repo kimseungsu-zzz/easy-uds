@@ -230,6 +230,20 @@ inline Deadline deadline_from_now(std::chrono::milliseconds timeout) {
     return now + timeout;
 }
 
+inline Deadline deadline_from(Clock::time_point start,
+                              std::chrono::milliseconds timeout) {
+    if (timeout.count() == 0) {
+        return Deadline::max();
+    }
+    const auto max_remaining = Deadline::max() - start;
+    const auto max_ms =
+        std::chrono::duration_cast<std::chrono::milliseconds>(max_remaining);
+    if (timeout >= max_ms) {
+        return Deadline::max() - Clock::duration{1};
+    }
+    return start + timeout;
+}
+
 inline Deadline earlier_deadline(Deadline left, Deadline right) noexcept {
     return left < right ? left : right;
 }

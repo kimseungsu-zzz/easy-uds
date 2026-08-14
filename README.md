@@ -435,8 +435,11 @@ are also self-contained; see the [public header map](docs/api/headers.md).
 
 - `Server(std::string socket_path, ServerOptions options = {})`
 - `on(std::string route, Handler handler)`
+- `on(std::string route, RouteOptions options)` — advanced fixed handler with `RequestContext`
 - `on_prefix(std::string prefix, Handler handler)`
+- `on_prefix(std::string prefix, RouteOptions options)`
 - `on_serialized(std::string route, Handler handler)`
+- `on_serialized(std::string route, RouteOptions options)`
 - `enqueue_maintenance(std::function<void()> task)`
 - `on_stream(std::string route, StreamHandler handler)`
 - `on_stream_prefix(std::string prefix, StreamHandler handler)`
@@ -506,6 +509,9 @@ Error classification and preserved OS details are documented in
 [`docs/api/errors.md`](docs/api/errors.md). Session state, retry, and
 concurrency semantics are documented in
 [`docs/api/session.md`](docs/api/session.md).
+Advanced request timing, connection observation, and cooperative cancellation
+are documented in
+[`docs/api/request-context.md`](docs/api/request-context.md).
 
 ## Security scope
 

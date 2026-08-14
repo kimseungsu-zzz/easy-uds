@@ -74,8 +74,9 @@ static/shared package consumer는 모든 phase의 필수 gate다.
   - `client.hpp`, `session.hpp`, `server.hpp`, `request.hpp`, `response.hpp`
   - `stream.hpp`, `options.hpp`, `error.hpp`, `fd.hpp`, `version.hpp`
   - `easy_uds.hpp`는 위 header의 umbrella 역할만 수행
-- [ ] 기능 도입 시 `request_context.hpp`, `stats.hpp` 추가
-- [ ] `RequestContext`
+- [x] `request_context.hpp` 기능 header 추가
+- [ ] `stats.hpp` 기능 header 추가
+- [x] `RequestContext`
   - request id, peer, arrival time, deadline, connection/cancellation 상태
   - 기존 `Handler(const Request&)` 단순형 유지
   - context overload가 request hot path를 회귀시키지 않도록 A/B

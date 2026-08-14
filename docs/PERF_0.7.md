@@ -232,3 +232,52 @@ remain within about 2% for throughput, p50, p99, and CPU cost. The dispatch
 additionally passed 20 x86_64 and five ARM64 unit/stress repetitions, the
 longer protocol/session fuzz budgets, ASan/UBSan, TSan, experiments, and
 static/shared package consumers.
+
+## RequestContext foundation (2026-08-14)
+
+Change: add opt-in contextual fixed handlers through `RouteOptions`, carrying
+first-byte arrival, absolute deadline, and live cooperative-stop observations.
+The existing `Handler(const Request&)` path does not construct a context or
+allocate. Its immutable route entry keeps the original size and reuses the
+existing serialized flag byte for a contextual bit, so the basic invocation
+adds one predictable branch without reading the context callback storage.
+
+### Basic-handler hot-path A/B
+
+WSL2, g++ 15.2, CMake Release, empty payload, one shared Session. Runs alternate
+old/new order. c1 is the median of five 100,000-request runs per revision; c8
+is the median of four 100,000-request runs per revision. The baseline is the
+pre-context layout commit `7d30528`.
+
+The host showed visible run-to-run load drift, including one slow run on each
+side of different pairs. No sample was discarded; the repeated median is the
+gate value.
+
+| Workload / revision | Throughput | p50 | p99 | CPU-s / 1M |
+|---|---:|---:|---:|---:|
+| Session c1 / `7d30528` | 17.48k req/s | 44.877 us | 200.480 us | 81.85 |
+| Session c1 / RequestContext tree, basic handler | 17.69k req/s | 45.043 us | 199.220 us | 81.30 |
+| c1 delta | +1.2% | +0.4% | -0.6% | -0.7% |
+| Session c8 / `7d30528` | 24.84k req/s | 295.827 us | 917.577 us | 203.70 |
+| Session c8 / RequestContext tree, basic handler | 24.51k req/s | 301.242 us | 912.943 us | 205.95 |
+| c8 delta | -1.3% | +1.8% | -0.5% | +1.1% |
+
+Every basic-handler median remains well inside the 0.7 gate. Decision: keep
+the explicit context path and its single tagged-entry branch. The basic
+`Request` layout, protocol v2, socket framing, and Session path are unchanged.
+
+### Correctness gates
+
+- Exact, longest-prefix, and serialized contextual handlers have dedicated
+  registration and invocation regressions.
+- Context request id and peer match `Request`; arrival and deadline use the
+  server's steady clock and request-timeout boundary.
+- Disabled deadlines return an empty optional. Elapsed deadlines, peer
+  disconnect, and server shutdown independently make the cooperative stop
+  observation true.
+- `RequestContext` is non-copyable/non-movable and its documented lifetime is
+  exactly one callback. Installed headers compile it independently.
+- Release/Werror static and shared unit/stress suites passed. Both installed
+  package variants linked all three contextual registration overloads.
+- ASan/UBSan with leak detection and TSan passed the complete unit and stress
+  binaries. Existing public object layouts and protocol v2 are unchanged.

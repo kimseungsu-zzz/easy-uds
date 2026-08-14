@@ -24,6 +24,7 @@ int main() {
         RUN(test_idle_session_survives_io_timeout);
         RUN(test_session_move);
         RUN(test_error_model);
+        RUN(test_request_context);
         RUN(test_fd_passing);
         RUN(test_reactor_request_timeouts);
         RUN(test_streams);

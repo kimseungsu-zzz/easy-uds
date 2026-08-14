@@ -180,8 +180,11 @@ void consume(const std::shared_ptr<ServerState>& state,
     while (true) {
         const std::size_t available = rc->pending.size() - rc->pending_offset;
         if (rc->phase == ParsePhase::header) {
-            if (available != 0 && rc->deadline == Deadline::max()) {
-                rc->deadline = deadline_from_now(state->options.request_timeout);
+            if (available != 0 &&
+                rc->arrival_time == Clock::time_point{}) {
+                rc->arrival_time = Clock::now();
+                rc->deadline = deadline_from(rc->arrival_time,
+                                             state->options.request_timeout);
             }
             const std::size_t need = protocol::header_size - rc->header_received;
             const std::size_t take = std::min(available, need);
@@ -257,6 +260,7 @@ void consume(const std::shared_ptr<ServerState>& state,
             if (rc->payload_received == rc->payload_total) {
                 const bool read_paused = dispatch_request(state, rc);
                 rc->phase = ParsePhase::header;
+                rc->arrival_time = Clock::time_point{};
                 rc->deadline = Deadline::max();
                 if (read_paused) {
                     return;

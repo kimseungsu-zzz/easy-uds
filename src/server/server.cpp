@@ -275,6 +275,17 @@ void update_handler_registry(const std::shared_ptr<detail::ServerState>& state, 
     std::atomic_store_explicit(&state->handler_registry, std::move(published), std::memory_order_release);
 }
 
+std::shared_ptr<const detail::HandlerEntry> make_context_handler_entry(
+    RouteOptions::Handler handler, bool serialized) {
+    const unsigned char flags = static_cast<unsigned char>(
+        detail::handler_contextual_flag |
+        (serialized ? detail::handler_serialized_flag : 0U));
+    return std::make_shared<const detail::HandlerEntry>(
+        detail::HandlerEntry{
+            Server::Handler{detail::ContextHandlerAdapter{std::move(handler)}},
+            flags});
+}
+
 } // namespace
 
 Server::Server(std::string socket_path, ServerOptions options) : state_(std::make_shared<detail::ServerState>()) {
@@ -371,6 +382,21 @@ void Server::on(std::string route, Handler handler) {
     });
 }
 
+void Server::on(std::string route, RouteOptions options) {
+    validate_route(route, state_->options.max_message_size);
+    if (!options.handler_) {
+        throw std::invalid_argument("context handler must not be empty");
+    }
+    update_handler_registry(state_, [&](detail::HandlerRegistry& registry) {
+        if (registry.handlers.find(route) != registry.handlers.end()) {
+            throw std::runtime_error("route already exists");
+        }
+        registry.handlers.emplace(
+            std::move(route),
+            make_context_handler_entry(std::move(options.handler_), false));
+    });
+}
+
 void Server::on_prefix(std::string prefix, Handler handler) {
     validate_route(prefix, state_->options.max_message_size);
     if (!handler) {
@@ -392,6 +418,27 @@ void Server::on_prefix(std::string prefix, Handler handler) {
     });
 }
 
+void Server::on_prefix(std::string prefix, RouteOptions options) {
+    validate_route(prefix, state_->options.max_message_size);
+    if (!options.handler_) {
+        throw std::invalid_argument("context handler must not be empty");
+    }
+    update_handler_registry(state_, [&](detail::HandlerRegistry& registry) {
+        for (const auto& entry : registry.handler_prefixes) {
+            if (entry.first == prefix) {
+                throw std::runtime_error("prefix route already exists");
+            }
+        }
+        registry.handler_prefixes.emplace_back(
+            std::move(prefix),
+            make_context_handler_entry(std::move(options.handler_), false));
+        std::sort(registry.handler_prefixes.begin(), registry.handler_prefixes.end(),
+                  [](const auto& left, const auto& right) {
+                      return left.first.size() > right.first.size();
+                  });
+    });
+}
+
 void Server::on_serialized(std::string route, Handler handler) {
     validate_route(route, state_->options.max_message_size);
     if (!handler) {
@@ -404,6 +451,21 @@ void Server::on_serialized(std::string route, Handler handler) {
         registry.handlers.emplace(
             std::move(route),
             std::make_shared<const detail::HandlerEntry>(detail::HandlerEntry{std::move(handler), true}));
+    });
+}
+
+void Server::on_serialized(std::string route, RouteOptions options) {
+    validate_route(route, state_->options.max_message_size);
+    if (!options.handler_) {
+        throw std::invalid_argument("context handler must not be empty");
+    }
+    update_handler_registry(state_, [&](detail::HandlerRegistry& registry) {
+        if (registry.handlers.find(route) != registry.handlers.end()) {
+            throw std::runtime_error("route already exists");
+        }
+        registry.handlers.emplace(
+            std::move(route),
+            make_context_handler_entry(std::move(options.handler_), true));
     });
 }
 

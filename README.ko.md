@@ -485,8 +485,11 @@ header도 각각 독립적으로 include할 수 있습니다. 자세한 매핑�
 
 - `Server(std::string socket_path, ServerOptions options = {})`
 - `on(std::string route, Handler handler)`
+- `on(std::string route, RouteOptions options)` — `RequestContext`를 받는 고급 fixed handler
 - `on_prefix(std::string prefix, Handler handler)`
+- `on_prefix(std::string prefix, RouteOptions options)`
 - `on_serialized(std::string route, Handler handler)`
+- `on_serialized(std::string route, RouteOptions options)`
 - `enqueue_maintenance(std::function<void()> task)`
 - `on_stream(std::string route, StreamHandler handler)`
 - `on_stream_prefix(std::string prefix, StreamHandler handler)`
@@ -554,6 +557,8 @@ FD 소유권은 [`docs/api/fd-passing.md`](docs/api/fd-passing.md), 오류 의�
 변경된 코드는 [`docs/migration/0.6-to-0.7.md`](docs/migration/0.6-to-0.7.md)에
 정리되어 있습니다. Session 상태, 재시도, 동시성 의미는
 [`docs/api/session.md`](docs/api/session.md)에 정리되어 있습니다.
+요청 시각, 연결 관찰, cooperative cancellation 의미는
+[`docs/api/request-context.md`](docs/api/request-context.md)에 정리되어 있습니다.
 
 ## 보안 범위
 

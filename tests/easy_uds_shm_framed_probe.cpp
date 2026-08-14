@@ -7,7 +7,7 @@
 // UDS only for SCM_RIGHTS control-plane setup.  This is a benchmark probe,
 // not a transport implementation or a public API promise.
 
-#include "../src/protocol.hpp"
+#include "../src/protocol/codec.hpp"
 
 #include <algorithm>
 #include <array>

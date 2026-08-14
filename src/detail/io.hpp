@@ -1,10 +1,12 @@
 #pragma once
 
 // Shared implementation infrastructure for the reactor server and the client:
-// RAII descriptors, deadlines, non-blocking read-ahead I/O, and socket helpers.
+// RAII descriptors, deadlines, non-blocking read-ahead/exact I/O, and sockets.
 
-#include "easy_uds/easy_uds.hpp"
-#include "protocol.hpp"
+#include "easy_uds/error.hpp"
+#include "easy_uds/options.hpp"
+#include "easy_uds/request.hpp"
+#include "../protocol/codec.hpp"
 
 #include <algorithm>
 #include <array>

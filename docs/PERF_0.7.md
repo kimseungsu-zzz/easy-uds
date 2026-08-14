@@ -5,6 +5,46 @@ entry compares against tag `v0.6.4` with the same compiler, host, build flags,
 workload, and repeated runs. Absolute values are development measurements, not
 portable guarantees.
 
+## Functional public/internal layout (2026-08-14)
+
+Change: split the public umbrella into self-contained feature headers and move
+implementation files under client, server, protocol, reactor, and detail
+responsibility directories. Client, Session, and shared stream transport are
+separate translation units. The small fixed-request validation and frame-write
+helpers remain inline in an internal header so the compiler retains the same
+hot-path optimization opportunity.
+
+### Default hot-path A/B
+
+WSL2, g++ 15.2, CMake Release, empty payload, one shared Session. Runs alternate
+old/new order to reduce host drift. c1 is the median of five 100,000-request
+runs per revision; c8 is the median of four 100,000-request runs per revision.
+The baseline is pre-layout commit `67ce0ee`.
+
+| Workload / revision | Throughput | p50 | p99 | CPU-s / 1M |
+|---|---:|---:|---:|---:|
+| Session c1 / `67ce0ee` | 19.29k req/s | 38.969 us | 198.374 us | 77.26 |
+| Session c1 / functional layout | 19.30k req/s | 38.988 us | 197.881 us | 77.18 |
+| c1 delta | +0.0% | +0.0% | -0.2% | -0.1% |
+| Session c8 / `67ce0ee` | 26.12k req/s | 287.625 us | 819.739 us | 204.43 |
+| Session c8 / functional layout | 26.05k req/s | 287.053 us | 829.511 us | 204.44 |
+| c8 delta | -0.3% | -0.2% | +1.2% | +0.0% |
+
+Every median is effectively tied and remains well inside the 0.7 gate. The
+organization-only change is retained.
+
+### Compatibility and correctness gates
+
+- All 195 previously exported dynamic symbols are present with exactly the
+  same mangled names; the layout introduced no additional exported symbol.
+- Size and alignment are identical for 11 public types: peer credentials,
+  Request, Response, StreamResponse, both option structs, Client, Session,
+  Server, BorrowedFd, and OwnedFd. Protocol v2 is unchanged.
+- Every installed public header compiles independently under C++17. Static and
+  shared package consumers use the feature headers without the umbrella.
+- Release/Werror unit and stress, ASan/UBSan, TSan, and every portable
+  experimental probe pass after the move.
+
 ## Explicit Session state (2026-08-14)
 
 Change: add `Session::status()` and `valid()` as lock-free snapshots of the

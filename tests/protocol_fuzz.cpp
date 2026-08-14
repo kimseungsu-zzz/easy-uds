@@ -1,4 +1,4 @@
-#include "protocol.hpp"
+#include "protocol/codec.hpp"
 
 #include <algorithm>
 #include <array>

@@ -3,8 +3,8 @@
 // Server-side core types shared by the reactor, the worker pool, and the
 // public Server implementation.
 
-#include "easy_uds/easy_uds.hpp"
-#include "../internal.hpp"
+#include "easy_uds/server.hpp"
+#include "../detail/io.hpp"
 
 #include <atomic>
 #include <condition_variable>

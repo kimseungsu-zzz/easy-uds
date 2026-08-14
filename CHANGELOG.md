@@ -4,6 +4,14 @@ All notable changes to this project are documented here.
 
 ## Unreleased 0.7.0 — 🌱 Usability Foundation
 
+- Split the public umbrella into self-contained client, Session, server,
+  request, response, stream, and options headers while preserving
+  `easy_uds.hpp` as the complete beginner include. Installed-package coverage
+  now consumes the feature headers directly.
+- Grouped implementation files under `src/client`, `src/server`,
+  `src/protocol`, and `src/detail`. Client, Session, and shared stream transport
+  have distinct translation units; fixed-request hot helpers remain inline so
+  the organization change does not remove prior compiler optimization.
 - Added lock-free `Session::status()` and `valid()` snapshots with three
   explicit states: `active`, `broken`, and `moved_from`. The API does not probe
   the peer, reconnect, or replay requests; `active` means only that no failure

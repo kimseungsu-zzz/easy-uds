@@ -476,6 +476,11 @@ pre-1.0 shared build에서는 minor release 사이 ABI 변경 가능성이 있�
 
 ## Public API
 
+`#include <easy_uds/easy_uds.hpp>`는 초보자에게 권장하는 전체 umbrella로
+그대로 유지됩니다. `client.hpp`, `session.hpp`, `server.hpp` 같은 기능별
+header도 각각 독립적으로 include할 수 있습니다. 자세한 매핑은
+[public header 문서](docs/api/headers.md)를 참고하세요.
+
 ### `easy_uds::Server`
 
 - `Server(std::string socket_path, ServerOptions options = {})`
@@ -561,10 +566,13 @@ instance lock은 같은 pathname을 사용하는 easy-uds server끼리 startup/s
 ## 저장소 구조
 
 ```text
-include/easy_uds/       공개 header
-src/                    client/server facade와 내부 protocol codec
+include/easy_uds/       umbrella와 기능별 공개 header
+src/client/             one-shot Client, persistent Session, 공유 transport
+src/server/             Server lifecycle, routing, startup, shutdown
 src/reactor/            reactor core, parser, dispatch, flow control, output,
                         streaming, worker executor
+src/protocol/           protocol v2 codec 경계
+src/detail/             descriptor, deadline, socket, exact-I/O utility
 examples/               최소 server/client 예제
 tests/easy_uds_test/     기능별로 나눈 unit 테스트
 tests/                  stress, fuzz, benchmark, package-consumer 테스트

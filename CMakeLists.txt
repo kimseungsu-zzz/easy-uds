@@ -40,8 +40,12 @@ find_package(Threads REQUIRED)
 
 add_library(easy_uds
     src/error.cpp
-    src/server.cpp
-    src/client.cpp
+    src/server/server.cpp
+    src/client/client.cpp
+    src/client/session.cpp
+    src/client/transport.cpp
+    src/client/trace.hpp
+    src/client/transport.hpp
     src/reactor/dispatch.cpp
     src/reactor/event_loop.cpp
     src/reactor/flow_control.cpp
@@ -53,9 +57,8 @@ add_library(easy_uds
     src/reactor/core.hpp
     src/reactor/parser.hpp
     src/reactor/stream_io.hpp
-    src/protocol.hpp
-    src/internal.hpp
-    src/session_trace.hpp
+    src/protocol/codec.hpp
+    src/detail/io.hpp
 )
 add_library(easy_uds::easy_uds ALIAS easy_uds)
 

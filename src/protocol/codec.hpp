@@ -2,7 +2,7 @@
 
 #include "easy_uds/error.hpp"
 
-// Protocol version 2 wire codec.
+// Protocol version 2 wire codec boundary.
 //
 // Framing: every message begins with a fixed 20-byte, big-endian header:
 //

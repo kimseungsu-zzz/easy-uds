@@ -1,4 +1,4 @@
-#include "reactor/core.hpp"
+#include "../reactor/core.hpp"
 
 #include <algorithm>
 #include <array>

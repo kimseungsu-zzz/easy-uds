@@ -63,18 +63,18 @@ static/shared package consumer는 모든 phase의 필수 gate다.
   - lock-free `status()`/`valid()`로 `active`, `broken`, `moved_from` 조회
   - `active`는 liveness probe가 아닌 관찰 시점 snapshot으로 문서화
   - reconnect helper와 implicit retry/replay 없이 새 Session 생성을 명시적 결정으로 유지
-- [ ] 기능 기준 directory 재배치
+- [x] 기능 기준 directory 재배치
   - public umbrella include는 그대로 유지
   - 20줄 파일 남발 없이 client/session, server/lifecycle/routing,
     protocol, detail utility를 책임별로 분리
 
 ## Phase 2 — Public API foundation
 
-- [ ] public header 분할
+- [x] 현재 public API header 분할
   - `client.hpp`, `session.hpp`, `server.hpp`, `request.hpp`, `response.hpp`
-  - `stream.hpp`, `options.hpp`, `error.hpp`, `fd.hpp`
-  - `request_context.hpp`, `stats.hpp`, `version.hpp`
+  - `stream.hpp`, `options.hpp`, `error.hpp`, `fd.hpp`, `version.hpp`
   - `easy_uds.hpp`는 위 header의 umbrella 역할만 수행
+- [ ] 기능 도입 시 `request_context.hpp`, `stats.hpp` 추가
 - [ ] `RequestContext`
   - request id, peer, arrival time, deadline, connection/cancellation 상태
   - 기존 `Handler(const Request&)` 단순형 유지
@@ -88,7 +88,7 @@ static/shared package consumer는 모든 phase의 필수 gate다.
   - advanced option은 명시적이며 숨은 retry나 workload 추측 금지
   - profile은 실측된 값 묶음일 때만 고려
 - [ ] Response helper와 naming consistency review
-- [ ] 0.6 → 0.7 migration guide 시작
+- [x] 0.6 → 0.7 migration guide 시작
 
 ## Phase 3 — Advanced usability
 

@@ -427,6 +427,10 @@ For pre-1.0 shared builds, the ELF `SOVERSION` tracks the major and minor releas
 
 ## Public API
 
+`#include <easy_uds/easy_uds.hpp>` remains the complete beginner-friendly
+umbrella. Feature headers such as `client.hpp`, `session.hpp`, and `server.hpp`
+are also self-contained; see the [public header map](docs/api/headers.md).
+
 ### `easy_uds::Server`
 
 - `Server(std::string socket_path, ServerOptions options = {})`
@@ -512,10 +516,13 @@ The instance lock coordinates easy-uds servers using the same path. It cannot fo
 ## Repository layout
 
 ```text
-include/easy_uds/       Public headers
-src/                    Client/server facade and internal protocol codec
+include/easy_uds/       Umbrella plus feature-specific public headers
+src/client/             One-shot Client, persistent Session, shared transport
+src/server/             Server lifecycle, routing, startup, and shutdown
 src/reactor/            Reactor core, parser, dispatch, flow control, output,
                         streaming, and worker executors
+src/protocol/           Protocol-v2 codec boundary
+src/detail/             Descriptor, deadline, socket, and exact-I/O utilities
 examples/               Minimal server/client examples
 tests/easy_uds_test/     Unit tests grouped by subsystem
 tests/                  Stress, fuzz, benchmark, and package-consumer tests

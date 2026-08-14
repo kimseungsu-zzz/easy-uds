@@ -1,4 +1,7 @@
-#include <easy_uds/easy_uds.hpp>
+#include <easy_uds/client.hpp>
+#include <easy_uds/error.hpp>
+#include <easy_uds/server.hpp>
+#include <easy_uds/version.hpp>
 
 #include <chrono>
 #include <string_view>

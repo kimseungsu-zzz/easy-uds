@@ -5,7 +5,7 @@ request timing and cooperative-stop state. The original one-argument handler
 remains the default and does not construct a context:
 
 ```cpp
-server.on("ping", [](const easy_uds::Request&) {
+server.on("/ping", [](const easy_uds::Request&) {
     return easy_uds::Response{200, "pong"};
 });
 ```

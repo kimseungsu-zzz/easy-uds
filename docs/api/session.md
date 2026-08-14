@@ -8,7 +8,7 @@
 easy_uds::Session session = client.session();
 
 if (session.valid()) {
-    const auto response = session.request("encoder/read");
+    const auto response = session.request("/encoder/read");
 }
 
 switch (session.status()) {

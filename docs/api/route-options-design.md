@@ -4,11 +4,11 @@
 advanced serialized scheduling. The beginner API remains unchanged:
 
 ```cpp
-server.on("status", [](const easy_uds::Request&) {
+server.on("/status", [](const easy_uds::Request&) {
     return easy_uds::Response{easy_uds::status_ok, read_status()};
 });
 
-server.on_serialized("reset", [](const easy_uds::Request&) {
+server.on_serialized("/reset", [](const easy_uds::Request&) {
     reset_robot();
     return easy_uds::Response{easy_uds::status_ok, "ok"};
 });
@@ -24,7 +24,7 @@ Independent hardware resources can use independent domains:
 
 ```cpp
 server.on(
-    "velocity/set",
+    "/velocity/set",
     easy_uds::RouteOptions{
         [](const easy_uds::Request& request) {
             set_velocity(request.body);
@@ -34,7 +34,7 @@ server.on(
                       easy_uds::QueuePolicy::latest_wins));
 
 server.on(
-    "arm/move",
+    "/arm/move",
     easy_uds::RouteOptions{
         [](const easy_uds::Request& request,
            const easy_uds::RequestContext& context) {

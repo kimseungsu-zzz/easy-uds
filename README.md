@@ -42,6 +42,14 @@ The current implementation requires Linux (`epoll` and `SO_PEERCRED`). Windows, 
 
 ## Quick start
 
+For the five-minute build/run path and the example progression, see
+[`docs/getting-started/`](docs/getting-started/README.md). The sections below
+keep the complete reference close to the source for readers who want one page.
+
+Documentation map: [Getting started](docs/getting-started/README.md) ·
+[API reference](docs/api/README.md) · [Guides](docs/guides/README.md) ·
+[Internals and experiments](docs/internals/README.md)
+
 ### Server
 
 ```cpp
@@ -52,11 +60,11 @@ The current implementation requires Linux (`epoll` and `SO_PEERCRED`). Windows, 
 int main() {
     easy_uds::Server server("/tmp/easy-uds.sock");
 
-    server.on("ping", [](const easy_uds::Request&) {
+    server.on("/ping", [](const easy_uds::Request&) {
         return easy_uds::Response{200, "pong"};
     });
 
-    server.on("echo", [](const easy_uds::Request& request) {
+    server.on("/echo", [](const easy_uds::Request& request) {
         return easy_uds::Response{200, request.body};
     });
 
@@ -75,7 +83,7 @@ int main() {
 int main() {
     easy_uds::Client client("/tmp/easy-uds.sock");
 
-    const auto response = client.request("echo", "hello");
+    const auto response = client.request("/echo", "hello");
     std::cout << response.status << ' ' << response.body << '\n';
 }
 ```
@@ -89,19 +97,19 @@ Use `Server::on_serialized()` for commands that must never overlap. Every such r
 ```cpp
 easy_uds::Server server("/tmp/robot-driver.sock");
 
-server.on_serialized("drive", [](const easy_uds::Request& request) {
+server.on_serialized("/drive", [](const easy_uds::Request& request) {
     // Only one serialized handler can run at a time, even if another process
-    // calls a different serialized route such as "arm" concurrently.
+    // calls a different serialized route such as "/arm" concurrently.
     robot_drive(request.body);
     return easy_uds::Response{200, "ok"};
 });
 
-server.on_serialized("arm", [](const easy_uds::Request& request) {
+server.on_serialized("/arm", [](const easy_uds::Request& request) {
     robot_arm(request.body);
     return easy_uds::Response{200, "ok"};
 });
 
-server.on("status", [](const easy_uds::Request&) {
+server.on("/status", [](const easy_uds::Request&) {
     // Regular RPCs do not wait behind the serialized command queue.
     return easy_uds::Response{200, read_robot_status()};
 });
@@ -113,14 +121,14 @@ When independent resources may run in parallel, opt in through `RouteOptions`:
 
 ```cpp
 server.on(
-    "velocity/set",
+    "/velocity/set",
     easy_uds::RouteOptions{[](const easy_uds::Request& request) {
         robot_drive(request.body);
         return easy_uds::Response{easy_uds::status_ok, "ok"};
     }}.serialize_in("drivetrain", easy_uds::QueuePolicy::latest_wins));
 
 server.on(
-    "arm/move",
+    "/arm/move",
     easy_uds::RouteOptions{[](const easy_uds::Request& request) {
         robot_arm(request.body);
         return easy_uds::Response{easy_uds::status_ok, "ok"};
@@ -150,7 +158,7 @@ Tasks run exactly once, in FIFO order with default-domain serialized commands, a
 
 ```cpp
 // Server: process an upload without retaining its complete body.
-server.on_stream("upload", [](const easy_uds::StreamReader& body, const easy_uds::Request&) {
+server.on_stream("/upload", [](const easy_uds::StreamReader& body, const easy_uds::Request&) {
     std::ofstream output("received.bin", std::ios::binary);
     std::array<char, 64 * 1024> buffer{};
     while (const std::size_t size = body(buffer.data(), buffer.size())) {
@@ -165,7 +173,7 @@ easy_uds::StreamReader upload = [&input](char* buffer, std::size_t capacity) {
     input.read(buffer, static_cast<std::streamsize>(capacity));
     return static_cast<std::size_t>(input.gcount());
 };
-const int status = client.request_stream("upload", upload, [](std::string_view chunk) {
+const int status = client.request_stream("/upload", upload, [](std::string_view chunk) {
     // Consume or persist this view before the callback returns.
 });
 ```
@@ -180,7 +188,7 @@ The exchange is half-duplex: the request stream finishes before the response str
 easy_uds::Client client("/tmp/robot-driver.sock");
 easy_uds::Session session = client.session();  // one connection, reused
 while (true) {
-    const auto response = session.request("imu", "poll");
+    const auto response = session.request("/imu", "poll");
     // ...process...
 }
 ```

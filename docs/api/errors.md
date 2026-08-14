@@ -6,7 +6,7 @@ for every failure:
 
 ```cpp
 try {
-    const auto response = client.request("encoder/read");
+    const auto response = client.request("/encoder/read");
     use(response);
 } catch (const easy_uds::Error& error) {
     if (error.code() == easy_uds::ErrorCode::timeout) {

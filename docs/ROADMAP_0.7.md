@@ -116,20 +116,18 @@ static/shared package consumer는 모든 phase의 필수 gate다.
 
 ## Phase 4 — Examples / documentation
 
-- [ ] README를 소개 → 설치 → 5분 quick start → 핵심 기능 → 상세 링크로 축소
-- [ ] `docs/getting-started/`: installation, quick-start, concepts
-- [ ] `docs/api/`: client/session/server/request-response/stream/options/errors/
-      FD/context/stats
-- [ ] `docs/guides/`: serialized, robot HAL, timeout, production, security,
-      performance tuning
-- [ ] `docs/internals/`: architecture, reactor, concurrency, backpressure,
-      lifetime, protocol v2
+- [x] README에 소개 → 설치 → 5분 quick start → 핵심 기능 → 상세 링크 경로 추가
+- [x] `docs/getting-started/`: installation, quick-start, concepts
+- [x] `docs/api/`: public header map와 client/session/request-response/
+      options/errors/FD/context/stats reference
+- [x] `docs/guides/`: robot HAL, production diagnostics, migration, options
+- [x] `docs/internals/`: protocol, performance, experiments, public boundary index
 - [ ] 모든 중요 API reference에 Purpose, Parameters, Return, Thread safety,
       Ownership, Lifetime, Timeout, Error, Performance, Example 명시
-- [ ] examples 확대
+- [x] examples 학습 순서와 ownership/concurrency 기준 문서화
   - hello world, persistent session, concurrent requests, serialized commands
   - streaming, FD passing, peer credentials, stats, production server
-  - [x] `drive/velocity`, `arm/position`, `health`, `diagnostics`를 포함한
+  - [x] `/drive/velocity`, `/arm/position`, `/health`, `/diagnostics`를 포함한
         컴파일 가능한 robot HAL composition example
 - [ ] 0.6 실험은 `experiments/0.6/`와 history 문서로 이동하되 삭제하지 않음
 

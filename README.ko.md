@@ -40,6 +40,14 @@
 
 ## 빠른 시작
 
+5분 빌드/실행 절차와 예제 학습 순서는
+[`docs/getting-started/`](docs/getting-started/README.md)를 참조하십시오.
+아래에는 전체 API 설명을 계속 제공합니다.
+
+문서 지도: [Getting started](docs/getting-started/README.md) ·
+[API reference](docs/api/README.md) · [Guides](docs/guides/README.md) ·
+[Internals와 실험 기록](docs/internals/README.md)
+
 ### Server
 
 ```cpp
@@ -50,11 +58,11 @@
 int main() {
     easy_uds::Server server("/tmp/easy-uds.sock");
 
-    server.on("ping", [](const easy_uds::Request&) {
+    server.on("/ping", [](const easy_uds::Request&) {
         return easy_uds::Response{200, "pong"};
     });
 
-    server.on("echo", [](const easy_uds::Request& request) {
+    server.on("/echo", [](const easy_uds::Request& request) {
         return easy_uds::Response{200, request.body};
     });
 
@@ -73,7 +81,7 @@ int main() {
 int main() {
     easy_uds::Client client("/tmp/easy-uds.sock");
 
-    const auto response = client.request("echo", "hello");
+    const auto response = client.request("/echo", "hello");
     std::cout << response.status << ' ' << response.body << '\n';
 }
 ```
@@ -98,20 +106,20 @@ GUI Process ────┘
 int main() {
     easy_uds::Server server("/run/robot-driver.sock");
 
-    server.on_serialized("drive", [](const easy_uds::Request& request) {
+    server.on_serialized("/drive", [](const easy_uds::Request& request) {
         // 실제 drive driver 호출
         // 이 handler가 실행되는 동안 다른 on_serialized() handler는 대기합니다.
         execute_drive_command(request.body);
         return easy_uds::Response{200, "ok"};
     });
 
-    server.on_serialized("arm", [](const easy_uds::Request& request) {
+    server.on_serialized("/arm", [](const easy_uds::Request& request) {
         // route가 달라도 drive와 동시에 실행되지 않습니다.
         execute_arm_command(request.body);
         return easy_uds::Response{200, "ok"};
     });
 
-    server.on("status", [](const easy_uds::Request&) {
+    server.on("/status", [](const easy_uds::Request&) {
         // 일반 RPC는 serialized queue 뒤에서 기다리지 않습니다.
         return easy_uds::Response{200, read_robot_status()};
     });
@@ -130,21 +138,21 @@ Process B: arm ─────────┘
 Process C: status ─────────> 일반 worker pool에서 별도로 처리
 ```
 
-모든 `on_serialized()` route는 하나의 FIFO executor를 공유합니다. 따라서 `drive`, `arm`, `motor/set`처럼 route가 서로 달라도 직렬 route끼리는 동시에 실행되지 않습니다.
+모든 `on_serialized()` route는 하나의 FIFO executor를 공유합니다. 따라서 `/drive`, `/arm`, `/motor/set`처럼 route가 서로 달라도 직렬 route끼리는 동시에 실행되지 않습니다.
 
 서로 독립적인 resource는 `RouteOptions`로 domain을 명시하면 병렬 실행할 수
 있습니다.
 
 ```cpp
 server.on(
-    "velocity/set",
+    "/velocity/set",
     easy_uds::RouteOptions{[](const easy_uds::Request& request) {
         execute_drive_command(request.body);
         return easy_uds::Response{easy_uds::status_ok, "ok"};
     }}.serialize_in("drivetrain", easy_uds::QueuePolicy::latest_wins));
 
 server.on(
-    "arm/move",
+    "/arm/move",
     easy_uds::RouteOptions{[](const easy_uds::Request& request) {
         execute_arm_command(request.body);
         return easy_uds::Response{easy_uds::status_ok, "ok"};
@@ -183,19 +191,19 @@ move B 폐기 (handler 실행 안 함)
 
 ```text
 권장: on_serialized()
-- motor/set
-- drive
-- arm/move
-- servo/write
-- gpio/write
-- robot/reset
-- trajectory/start
+- /motor/set
+- /drive
+- /arm/move
+- /servo/write
+- /gpio/write
+- /robot/reset
+- /trajectory/start
 
 보통 on()
-- ping
-- health
-- version
-- status
+- /ping
+- /health
+- /version
+- /status
 - configuration 조회
 - 독립적으로 안전한 sensor 조회
 ```
@@ -208,7 +216,7 @@ move B 폐기 (handler 실행 안 함)
 
 ```cpp
 // Server: 전체 파일을 메모리에 저장하지 않고 업로드 처리
-server.on_stream("upload", [](const easy_uds::StreamReader& body) {
+server.on_stream("/upload", [](const easy_uds::StreamReader& body) {
     std::ofstream output("received.bin", std::ios::binary);
     std::array<char, 64 * 1024> buffer{};
     while (const std::size_t size = body(buffer.data(), buffer.size())) {
@@ -224,7 +232,7 @@ easy_uds::StreamReader upload = [&input](char* buffer, std::size_t capacity) {
     return static_cast<std::size_t>(input.gcount());
 };
 
-const int status = client.request_stream("upload", upload, [](std::string_view chunk) {
+const int status = client.request_stream("/upload", upload, [](std::string_view chunk) {
     // chunk view는 callback이 끝나기 전에 소비하거나 복사해야 합니다.
 });
 ```
@@ -239,7 +247,7 @@ stream은 half-duplex입니다. request stream이 모두 끝난 다음 response 
 easy_uds::Client client("/tmp/robot-driver.sock");
 easy_uds::Session session = client.session();  // 하나의 연결을 계속 재사용
 while (true) {
-    const auto response = session.request("imu", "poll");
+    const auto response = session.request("/imu", "poll");
     // ...처리...
 }
 ```

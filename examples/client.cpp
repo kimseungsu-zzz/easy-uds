@@ -9,10 +9,10 @@ int main() {
     try {
         easy_uds::Client client("/tmp/easy-uds.sock");
 
-        const auto ping = client.request("ping");
+        const auto ping = client.request("/ping");
         std::cout << "ping: " << ping.status << " " << ping.body << '\n';
 
-        const auto echo = client.request("echo", "Hello, easy-uds!");
+        const auto echo = client.request("/echo", "Hello, easy-uds!");
         std::cout << "echo: " << echo.status << " " << echo.body << '\n';
 
         std::size_t remaining = 2U * 1024U * 1024U;
@@ -22,7 +22,7 @@ int main() {
             remaining -= size;
             return size;
         };
-        const int stream_status = client.request_stream("discard", upload, {});
+        const int stream_status = client.request_stream("/discard", upload, {});
         std::cout << "stream: " << stream_status << '\n';
     } catch (const std::exception& error) {
         std::cerr << "Error: " << error.what() << '\n';

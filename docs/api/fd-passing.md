@@ -6,9 +6,9 @@ request value:
 
 ```cpp
 const easy_uds::Response response =
-    client.request_fd("config/load", easy_uds::borrow_fd(fd));
+    client.request_fd("/config/load", easy_uds::borrow_fd(fd));
 
-server.on("config/load", [](const easy_uds::Request& request) {
+server.on("/config/load", [](const easy_uds::Request& request) {
     if (!request.fd.valid()) {
         return easy_uds::Response{400, "descriptor required"};
     }

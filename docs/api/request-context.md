@@ -14,7 +14,7 @@ Opt in by wrapping a two-argument handler in `RouteOptions`:
 
 ```cpp
 server.on(
-    "motor/set",
+    "/motor/set",
     easy_uds::RouteOptions{
         [](const easy_uds::Request& request,
            const easy_uds::RequestContext& context) {

@@ -10,7 +10,7 @@ performance cost.
 
 | Area | Header | Reference |
 |---|---|---|
-| Server, routes, streams, options | [`server.hpp`](../../include/easy_uds/server.hpp) / [`options.hpp`](../../include/easy_uds/options.hpp) | [Core API](core.md), [RouteOptions and serialization](route-options-design.md) |
+| Server, routes, streams, options | [`server.hpp`](../../include/easy_uds/server.hpp) / [`options.hpp`](../../include/easy_uds/options.hpp) | [Core API](core.md), [Option contracts](options.md), [RouteOptions and serialization](route-options-design.md) |
 | One-shot client | [`client.hpp`](../../include/easy_uds/client.hpp) | [Core API](core.md), [Getting started](../getting-started/README.md) |
 | Persistent multiplexed client | [`session.hpp`](../../include/easy_uds/session.hpp) | [Session state](session.md) |
 | Request and response values | [`request.hpp`](../../include/easy_uds/request.hpp) / [`response.hpp`](../../include/easy_uds/response.hpp) | [FD passing](fd-passing.md), [Request context](request-context.md) |

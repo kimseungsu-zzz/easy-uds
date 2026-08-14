@@ -218,17 +218,22 @@ if(EASY_UDS_BUILD_EXPERIMENTS)
         easy_uds_shm_framed_probe
         easy_uds_shm_process_probe
     )
-    add_executable(easy_uds_fd_passing_probe tests/easy_uds_fd_passing_probe.cpp)
-    add_executable(easy_uds_io_uring_probe tests/easy_uds_io_uring_probe.cpp)
-    add_executable(easy_uds_false_sharing_probe tests/easy_uds_false_sharing_probe.cpp)
-    add_executable(easy_uds_zero_copy_probe tests/easy_uds_zero_copy_probe.cpp)
-    add_executable(easy_uds_shm_transport_probe tests/easy_uds_shm_transport_probe.cpp)
+    add_executable(easy_uds_fd_passing_probe
+        experiments/0.6/easy_uds_fd_passing_probe.cpp)
+    add_executable(easy_uds_io_uring_probe
+        experiments/0.6/easy_uds_io_uring_probe.cpp)
+    add_executable(easy_uds_false_sharing_probe
+        experiments/0.6/easy_uds_false_sharing_probe.cpp)
+    add_executable(easy_uds_zero_copy_probe
+        experiments/0.6/easy_uds_zero_copy_probe.cpp)
+    add_executable(easy_uds_shm_transport_probe
+        experiments/0.6/easy_uds_shm_transport_probe.cpp)
     add_executable(easy_uds_shm_framed_probe
-        tests/easy_uds_shm_framed_probe.cpp
+        experiments/0.6/easy_uds_shm_framed_probe.cpp
         src/error.cpp
     )
     add_executable(easy_uds_shm_process_probe
-        tests/easy_uds_shm_process_probe.cpp
+        experiments/0.6/easy_uds_shm_process_probe.cpp
         src/error.cpp
     )
     target_include_directories(easy_uds_shm_framed_probe PRIVATE
@@ -240,7 +245,8 @@ if(EASY_UDS_BUILD_EXPERIMENTS)
     find_library(EASY_UDS_LIBURING uring)
     find_path(EASY_UDS_LIBURING_INCLUDE_DIR liburing.h)
     if(EASY_UDS_LIBURING AND EASY_UDS_LIBURING_INCLUDE_DIR)
-        add_executable(easy_uds_io_uring_echo_probe tests/easy_uds_io_uring_echo_probe.cpp)
+        add_executable(easy_uds_io_uring_echo_probe
+            experiments/0.6/easy_uds_io_uring_echo_probe.cpp)
         target_include_directories(easy_uds_io_uring_echo_probe PRIVATE
             ${EASY_UDS_LIBURING_INCLUDE_DIR}
         )

@@ -645,6 +645,7 @@ src/reactor/            reactor core, parser, dispatch, flow control, output,
 src/protocol/           protocol v2 codec 경계
 src/detail/             descriptor, deadline, socket, exact-I/O utility
 examples/               최소 server/client와 robot HAL 조합 예제
+experiments/0.6/        0.6 실험 단계의 독립 probe 보존
 tests/easy_uds_test/     기능별로 나눈 unit 테스트
 tests/                  stress, fuzz, benchmark, package-consumer 테스트
 cmake/                  설치용 CMake config
@@ -652,7 +653,8 @@ docs/                   protocol 문서
 docs/ROADMAP_0.6.md     0.6.x 기술 실험 및 릴리즈 경계
 docs/ROADMAP_0.7.md     0.7 사용성·API·호환성 계획
 docs/PERF_0.7.md        v0.6.4 대비 0.7 성능 회귀 측정
-docs/EXPERIMENTS_0.6.md  독립 UDS 기술 capability probe
+docs/history/experiments/0.6.md  독립 UDS 기술 capability probe (history)
+docs/history/README.md    history 및 실험 인덱스
 docs/PERF_0.6.md         0.6 benchmark 측정 결과와 해석
 .github/workflows/      GitHub Actions CI
 ```

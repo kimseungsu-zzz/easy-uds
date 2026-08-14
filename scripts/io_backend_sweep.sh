@@ -10,13 +10,13 @@ capability=/tmp/easy-uds-io-uring-capability
 if [[ ! -x "${binary}" ]]; then
     "${CXX:-c++}" -std=c++17 -O3 -DNDEBUG \
         -Wall -Wextra -Wpedantic -Werror -pthread \
-        "${root_dir}/tests/easy_uds_io_uring_echo_probe.cpp" \
+        "${root_dir}/experiments/0.6/easy_uds_io_uring_echo_probe.cpp" \
         -luring -o "${binary}"
 fi
 
 "${CXX:-c++}" -std=c++17 -O2 -DNDEBUG \
     -Wall -Wextra -Wpedantic -Werror \
-    "${root_dir}/tests/easy_uds_io_uring_probe.cpp" \
+    "${root_dir}/experiments/0.6/easy_uds_io_uring_probe.cpp" \
     -o "${capability}"
 
 if ! "${capability}" | grep -q 'supported'; then

@@ -129,7 +129,8 @@ static/shared package consumer는 모든 phase의 필수 gate다.
   - streaming, FD passing, peer credentials, stats, production server
   - [x] `/drive/velocity`, `/arm/position`, `/health`, `/diagnostics`를 포함한
         컴파일 가능한 robot HAL composition example
-- [ ] 0.6 실험은 `experiments/0.6/`와 history 문서로 이동하되 삭제하지 않음
+- [x] 0.6 실험을 `experiments/0.6/`와 `docs/history/experiments/`로 이동하고
+      재현 경로를 유지
 
 ## Phase 5 — Stabilization
 

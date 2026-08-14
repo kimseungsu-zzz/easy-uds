@@ -9,7 +9,7 @@ if [[ ! -x "${binary}" ]]; then
     "${CXX:-c++}" -std=c++17 -O3 -DNDEBUG \
         -Wall -Wextra -Wpedantic -Werror \
         -I"${root_dir}/include" -I"${root_dir}/src" -pthread \
-        "${root_dir}/tests/easy_uds_shm_process_probe.cpp" \
+        "${root_dir}/experiments/0.6/easy_uds_shm_process_probe.cpp" \
         -o "${binary}"
 fi
 

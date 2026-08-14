@@ -596,6 +596,7 @@ src/reactor/            Reactor core, parser, dispatch, flow control, output,
 src/protocol/           Protocol-v2 codec boundary
 src/detail/             Descriptor, deadline, socket, and exact-I/O utilities
 examples/               Minimal server/client plus robot HAL composition example
+experiments/0.6/        Preserved standalone probes from the 0.6 experiment phase
 tests/easy_uds_test/     Unit tests grouped by subsystem
 tests/                  Stress, fuzz, benchmark, and package-consumer tests
 cmake/                  Installed-package CMake config
@@ -603,7 +604,8 @@ docs/                   Protocol documentation
 docs/ROADMAP_0.6.md     0.6.x technical experiment and release boundaries
 docs/ROADMAP_0.7.md     0.7 usability, API, and compatibility plan
 docs/PERF_0.7.md        0.7 regression measurements against v0.6.4
-docs/EXPERIMENTS_0.6.md  Standalone UDS capability probes
+docs/history/experiments/0.6.md  Standalone UDS capability probes (history)
+docs/history/README.md    Historical measurements and experiment index
 docs/PERF_0.6.md         0.6 benchmark measurements and interpretation
 .github/workflows/      GitHub Actions CI
 ```

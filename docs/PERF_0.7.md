@@ -207,8 +207,10 @@ the first 0.7 correctness abstraction passes the 0.6.4 regression gate.
 - ASan/UBSan with leak detection: passed.
 - TSan: passed.
 
-Native x86_64 and ARM64 numbers remain required before a 0.7 release; this
-development A/B protects the default hot path during Phase 1.
+Native x86_64 and ARM64 numbers are now a completed stabilization gate for the
+current 0.7 tree. Repeat the same workflow before creating a release tag; this
+development A/B protects the default hot path from later documentation/API
+changes.
 
 ### Native x86_64 / ARM64 gate
 
@@ -232,6 +234,11 @@ remain within about 2% for throughput, p50, p99, and CPU cost. The dispatch
 additionally passed 20 x86_64 and five ARM64 unit/stress repetitions, the
 longer protocol/session fuzz budgets, ASan/UBSan, TSan, experiments, and
 static/shared package consumers.
+
+The same full gate was rerun after the documentation and experiment-history
+reorganization on `main` (push plus workflow dispatch). It passed the moved
+experiment targets, ARM64 smoke, native Linux soak, sanitizer/fuzz suites, and
+install consumers without a runtime source change.
 
 ## RequestContext foundation (2026-08-14)
 

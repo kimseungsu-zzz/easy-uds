@@ -122,7 +122,7 @@ static/shared package consumer는 모든 phase의 필수 gate다.
       options/errors/FD/context/stats reference
 - [x] `docs/guides/`: robot HAL, production diagnostics, migration, options
 - [x] `docs/internals/`: protocol, performance, experiments, public boundary index
-- [ ] 모든 중요 API reference에 Purpose, Parameters, Return, Thread safety,
+- [x] 모든 중요 API reference에 Purpose, Parameters, Return, Thread safety,
       Ownership, Lifetime, Timeout, Error, Performance, Example 명시
 - [x] examples 학습 순서와 ownership/concurrency 기준 문서화
   - hello world, persistent session, concurrent requests, serialized commands
@@ -134,13 +134,17 @@ static/shared package consumer는 모든 phase의 필수 gate다.
 
 ## Phase 5 — Stabilization
 
-- [ ] 0.6.4 대비 x86_64/ARM64 p50/p99/p99.9/throughput/CPU/allocation A/B
-- [ ] long-lived Session, timeout, shutdown, stalled peer, strict budget stress
-- [ ] ASan/UBSan, TSan, protocol/session fuzz final gate
-- [ ] GCC/Clang static/shared와 install-package consumer
-- [ ] public API naming/ownership/thread-safety consistency review
-- [ ] documentation link/example build check
-- [ ] protocol v2 유지 또는 v3 전환 결정과 migration 동결
+- [x] 0.6.4 대비 x86_64/ARM64 p50/p99/p99.9/throughput/CPU/allocation A/B
+- [x] long-lived Session, timeout, shutdown, stalled peer, strict budget stress
+- [x] ASan/UBSan, TSan, protocol/session fuzz final gate
+- [x] GCC/Clang static/shared와 install-package consumer
+- [x] public API naming/ownership/thread-safety consistency review
+- [x] documentation link/example build check
+- [x] protocol v2 유지와 0.6 → 0.7 migration 동결
+
+The stabilization checklist was verified by the full workflow-dispatch gate on
+the current `main` commit. A release tag remains a separate explicit approval
+step; no tag or release is implied by these checks.
 
 ## 목표 directory 형태
 

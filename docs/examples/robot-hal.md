@@ -5,11 +5,11 @@ of the 0.7 API. It simulates a drivetrain and arm HAL, so it does not require
 robot hardware, but keeps the same boundaries a real driver can use:
 
 ```text
-health                         watchdog/readiness (plain on())
-diagnostics                    best-effort Server::stats() + HAL state
-drive/velocity                 drivetrain domain + LatestWins
-arm/position                   arm domain + contextual FIFO
-drive/calibrate                drivetrain domain + RejectIfBusy
+/health                        watchdog/readiness (plain on())
+/diagnostics                   best-effort Server::stats() + HAL state
+/drive/velocity                drivetrain domain + LatestWins
+/arm/position                  arm domain + contextual FIFO
+/drive/calibrate               drivetrain domain + RejectIfBusy
 ```
 
 Build and run it from a Release tree:
@@ -28,13 +28,13 @@ example can be adapted to call the routes, or a Session can multiplex calls:
 easy_uds::Client client("/tmp/easy-uds-robot.sock");
 auto session = client.session();
 
-const auto health = session.request("health");
-const auto velocity = session.request("drive/velocity", "0.25");
-const auto arm = session.request("arm/position", "home");
-const auto report = session.request("diagnostics");
+const auto health = session.request("/health");
+const auto velocity = session.request("/drive/velocity", "0.25");
+const auto arm = session.request("/arm/position", "home");
+const auto report = session.request("/diagnostics");
 ```
 
-For velocity control, callers can issue a new `drive/velocity` command without
+For velocity control, callers can issue a new `/drive/velocity` command without
 waiting for an older queued command to finish: `LatestWins` replaces only the
 older pending request for that concrete route and returns `409` to that old
 caller. It never interrupts a handler that has already started. Calibration

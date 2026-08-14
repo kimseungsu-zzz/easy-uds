@@ -17,7 +17,9 @@ class RobotHal {
             return {easy_uds::status_bad_request,
                     "velocity command must not be empty"};
         }
-        std::lock_guard<std::mutex> lock(mutex_);
+        // Velocity and calibration share the drivetrain resource, so the
+        // mutex mirrors the named `drivetrain` serialized domain below.
+        std::lock_guard<std::mutex> lock(drivetrain_mutex_);
         velocity_ = std::string(command);
         return {easy_uds::status_ok, velocity_};
     }
@@ -27,25 +29,30 @@ class RobotHal {
             return {easy_uds::status_bad_request,
                     "arm position must not be empty"};
         }
-        std::lock_guard<std::mutex> lock(mutex_);
+        // The arm is independent from the drivetrain and can be updated in
+        // parallel when requests use different serialized domains.
+        std::lock_guard<std::mutex> lock(arm_mutex_);
         arm_position_ = std::string(position);
         return {easy_uds::status_ok, arm_position_};
     }
 
     easy_uds::Response calibrate() {
-        std::lock_guard<std::mutex> lock(mutex_);
+        std::lock_guard<std::mutex> lock(drivetrain_mutex_);
         calibrated_ = true;
         return {easy_uds::status_ok, "calibrated"};
     }
 
     std::string state() const {
-        std::lock_guard<std::mutex> lock(mutex_);
+        // Take both resource locks only for the diagnostic snapshot. The
+        // command paths above never acquire them in the opposite order.
+        std::scoped_lock lock(drivetrain_mutex_, arm_mutex_);
         return "velocity=" + velocity_ + " arm=" + arm_position_ +
                " calibrated=" + (calibrated_ ? "true" : "false");
     }
 
   private:
-    mutable std::mutex mutex_;
+    mutable std::mutex drivetrain_mutex_;
+    mutable std::mutex arm_mutex_;
     std::string velocity_ = "0.0";
     std::string arm_position_ = "home";
     bool calibrated_ = false;
@@ -89,13 +96,13 @@ int main(int argc, char** argv) {
     RobotHal hal;
 
     // Keep health short and cheap enough for a watchdog or readiness probe.
-    server.on("health", [](const easy_uds::Request&) {
+    server.on("/health", [](const easy_uds::Request&) {
         return easy_uds::Response{easy_uds::status_ok, "ok"};
     });
 
     // Diagnostics are intentionally an application-owned RPC. Stats snapshots
     // are best-effort and should be sampled, not treated as one transaction.
-    server.on("diagnostics", [&server, &hal](const easy_uds::Request&) {
+    server.on("/diagnostics", [&server, &hal](const easy_uds::Request&) {
         return easy_uds::Response{easy_uds::status_ok,
                                   diagnostics(server.stats()) +
                                       " " + hal.state()};
@@ -104,7 +111,7 @@ int main(int argc, char** argv) {
     // Velocity commands are latest-value data: an older queued command is not
     // useful after a newer command for the same concrete route arrives.
     server.on(
-        "drive/velocity",
+        "/drive/velocity",
         easy_uds::RouteOptions{[&hal](const easy_uds::Request& request,
                                       const easy_uds::RequestContext& context) {
             if (context.stop_requested()) {
@@ -117,7 +124,7 @@ int main(int argc, char** argv) {
     // Arm movements are ordered and may use the contextual deadline while a
     // real HAL implementation performs a cooperative, interruptible move.
     server.on(
-        "arm/position",
+        "/arm/position",
         easy_uds::RouteOptions{[&hal](const easy_uds::Request& request,
                                       const easy_uds::RequestContext& context) {
             if (context.stop_requested()) {
@@ -130,17 +137,17 @@ int main(int argc, char** argv) {
     // Calibration must not overlap another drivetrain operation. A busy
     // domain produces 409 and leaves the connection/Session usable.
     server.on(
-        "drive/calibrate",
+        "/drive/calibrate",
         easy_uds::RouteOptions{[&hal](const easy_uds::Request&) {
             return hal.calibrate();
         }}.serialize_in("drivetrain", easy_uds::QueuePolicy::reject_if_busy));
 
     std::cout << "robot HAL server listening on " << socket_path << '\n'
-              << "  health       -> watchdog/readiness response\n"
-              << "  diagnostics  -> stats + simulated HAL state\n"
-              << "  drive/velocity (LatestWins, drivetrain)\n"
-              << "  arm/position   (FIFO, arm)\n"
-              << "  drive/calibrate (RejectIfBusy, drivetrain)\n";
+              << "  /health         -> watchdog/readiness response\n"
+              << "  /diagnostics    -> stats + simulated HAL state\n"
+              << "  /drive/velocity (LatestWins, drivetrain)\n"
+              << "  /arm/position   (FIFO, arm)\n"
+              << "  /drive/calibrate (RejectIfBusy, drivetrain)\n";
     server.run();
     return 0;
 }

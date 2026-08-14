@@ -470,8 +470,8 @@ cmake --build build-bench --parallel
 ### Robot HAL 조합 예제
 
 [`examples/robot_hal_server.cpp`](examples/robot_hal_server.cpp)는 실제
-하드웨어 없이도 driver 경계를 보여주는 예제입니다. 짧은 `health` probe,
-`diagnostics` snapshot, contextual handler, `drivetrain`/`arm` domain,
+하드웨어 없이도 driver 경계를 보여주는 예제입니다. 짧은 `/health` 및
+`/diagnostics` route, contextual handler, `drivetrain`/`arm` domain,
 `LatestWins` velocity command, `RejectIfBusy` calibration을 함께 사용합니다.
 전체 설명은 [Robot HAL walkthrough](docs/examples/robot-hal.md)를
 참조하십시오.

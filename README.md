@@ -398,7 +398,7 @@ The streaming benchmark generates bytes on demand and discards them at the recei
 ### Robot HAL composition example
 
 `examples/robot_hal_server.cpp` is a hardware-free driver-shaped example that
-combines a short `health` probe, a `diagnostics` snapshot, contextual handlers,
+combines short `/health` and `/diagnostics` routes, contextual handlers,
 independent `drivetrain`/`arm` domains, `LatestWins` velocity commands, and
 `RejectIfBusy` calibration. Build it with the examples target and see the
 [full walkthrough](docs/examples/robot-hal.md):

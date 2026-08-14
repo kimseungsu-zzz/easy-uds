@@ -29,6 +29,7 @@
 - Grace period before removing a connection-refused socket pathname as stale
 - Thread-safe `stop()` using a single Linux `eventfd` wakeup counter
 - Handler exceptions converted to `500` with the exception message in the body (opt-out via `include_handler_error_messages`)
+- Thread-safe server/Session snapshots with opt-in cumulative server counters
 - Small semantic `ErrorCode` classes with the original socket `errno` preserved by `Error::system_code()`
 - Static or shared library builds through `BUILD_SHARED_LIBS`
 - CMake install/export package and downstream `find_package()` support
@@ -175,6 +176,7 @@ options.stream_chunk_size = 64 * 1024;
 options.max_stream_size = 1024 * 1024 * 1024;
 options.io_timeout = std::chrono::seconds(5);
 options.request_timeout = std::chrono::seconds(30);
+options.stats = easy_uds::StatsMode::basic;  // optional cumulative counters
 options.stream_timeout = std::chrono::milliseconds(0);
 options.stale_socket_grace_period = std::chrono::milliseconds(250);
 options.listen_backlog = 64;
@@ -203,6 +205,7 @@ options.max_concurrent_streams = 3;
 | `stream_timeout` | `0` | Absolute streaming-exchange deadline after the stream header; `0` disables it |
 | `session_idle_grace` | `1 ms` | The last completing worker waits directly for one follow-up request during this grace, avoiding its reactor dispatch hop. It returns the connection to the reactor before running the handler, preserving multiplexing. `0` disables the fast path |
 | `include_handler_error_messages` | `true` | Include handler exception messages in `500` bodies; disable to hide internal details from clients |
+| `stats` | `StatsMode::disabled` | Keep operational gauges available; `basic` additionally records cumulative server events |
 | `stale_socket_grace_period` | `250 ms` | Time to keep probing a connection-refused existing socket before treating it as stale |
 | `listen_backlog` | `64` | Backlog passed to `listen()` |
 | `socket_permissions` | `0600` | Filesystem permissions applied to the socket pathname |
@@ -228,6 +231,7 @@ options.connect_timeout = std::chrono::seconds(2);
 options.io_timeout = std::chrono::seconds(5);
 options.request_timeout = std::chrono::seconds(30);
 options.stream_timeout = std::chrono::milliseconds(0);
+options.stats = easy_uds::StatsMode::basic;  // optional Session counters
 
 easy_uds::Client client("/tmp/easy-uds.sock", options);
 ```
@@ -447,6 +451,7 @@ are also self-contained; see the [public header map](docs/api/headers.md).
 - `stop()`
 - `is_running()`
 - `socket_path()`
+- `stats()` — best-effort connection, stream, queue, and retained-byte snapshot
 
 ### `easy_uds::Client`
 
@@ -463,8 +468,11 @@ are also self-contained; see the [public header map](docs/api/headers.md).
 - `valid()` — true exactly while `status() == SessionStatus::active`
 - `request(std::string_view route, std::string_view body = {})` — multiplexed, concurrent-safe
 - `request_stream(std::string_view route, const StreamReader&, response_chunk)` — independent dedicated connection
+- `stats()` — fixed-request in-flight and cumulative outcome snapshot
 
 ### Data types
+
+- `StatsMode` — `disabled` (default) or opt-in `basic` cumulative counters
 
 ```cpp
 using Status = std::int32_t;  // status_ok=200, status_request_timeout=408, status_not_found=404, ...
@@ -512,6 +520,10 @@ concurrency semantics are documented in
 Advanced request timing, connection observation, and cooperative cancellation
 are documented in
 [`docs/api/request-context.md`](docs/api/request-context.md).
+Runtime gauge, counter-cost, and snapshot-consistency semantics are documented
+in [`docs/api/stats.md`](docs/api/stats.md). The planned Phase 3 domain/policy
+shape is recorded in
+[`docs/api/route-options-design.md`](docs/api/route-options-design.md).
 
 ## Security scope
 

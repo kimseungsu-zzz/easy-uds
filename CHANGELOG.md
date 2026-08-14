@@ -4,6 +4,20 @@ All notable changes to this project are documented here.
 
 ## Unreleased 0.7.0 — 🌱 Usability Foundation
 
+- Added `Server::stats()` and `Session::stats()` snapshots in a self-contained
+  `stats.hpp`. Server gauges reuse connection/backpressure/executor accounting;
+  cumulative server events are explicitly enabled with `StatsMode::basic`.
+- Kept cumulative counters off the default server hot path. Enabled fixed RPC
+  performs one relaxed, thread-sharded event increment, while Session outcomes reuse existing
+  in-flight shard locks without a new mutex or atomic RMW.
+- Documented non-transactional snapshot semantics and exact connection,
+  request-byte, output-byte, queue, timeout, rejection, and Session outcome
+  accounting. Added concurrent gauge/counter, timeout, stream-limit,
+  moved-from, and installed-package coverage.
+- Locked the planned Phase 3 `RouteOptions` shape before implementation:
+  simple and contextual handlers share one advanced options object, with
+  serialization domain and FIFO/LatestWins/RejectIfBusy policy as one semantic
+  tuple rather than new overload families.
 - Added non-owning, non-copyable `RequestContext` observations for request
   id, peer credentials, first-byte arrival, absolute deadline, connection
   closing, server shutdown, and cooperative stop. Handlers remain responsible

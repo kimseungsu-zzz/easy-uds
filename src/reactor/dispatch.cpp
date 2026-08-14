@@ -167,6 +167,7 @@ void close_connection(const std::shared_ptr<ServerState>& state, int fd) {
 
 bool dispatch_request(const std::shared_ptr<ServerState>& state,
                       const std::shared_ptr<ReactorConnection>& reactor_connection) {
+    record_fixed_request(state);
     easy_uds::Request request;
     request.route = std::move(reactor_connection->route_buffer);
     request.body = std::move(reactor_connection->body_buffer);
@@ -254,9 +255,11 @@ void dispatch_stream(const std::shared_ptr<ServerState>& state,
         return;
     }
     if (!try_acquire_stream_slot(state)) {
+        record_stream_rejection(state);
         connection->closing.store(true, std::memory_order_release);
         return;
     }
+    record_stream_request(state);
 
     easy_uds::Request request;
     request.route = std::move(reactor_connection->route_buffer);

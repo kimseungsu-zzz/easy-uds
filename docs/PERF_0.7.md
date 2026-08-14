@@ -284,3 +284,66 @@ the explicit context path and its single tagged-entry branch. The basic
   package variants linked all three contextual registration overloads.
 - ASan/UBSan with leak detection and TSan passed the complete unit and stress
   binaries. Existing public object layouts and protocol v2 are unchanged.
+
+## Runtime statistics (2026-08-14)
+
+Change: add always-available operational gauges by reading accounting already
+maintained for connection limits, backpressure, stream slots, and executor
+queues. Cumulative server and Session outcomes require `StatsMode::basic`.
+The disabled server path performs no statistics atomic RMW. Enabled fixed
+dispatch uses one cache-line-separated thread shard; enabled Session outcomes
+use a separate cache-line-aligned counter array while holding the existing
+in-flight shard mutex. The original `InflightShard` layout is not grown.
+
+### Disabled-default A/B
+
+WSL2, g++ 15.2, CMake Release, empty payload, one shared Session, continuation
+grace disabled. Baseline/current runs alternate. c1 is the median of five
+100,000-request runs per revision; c8 is the median of four. The baseline is
+the pre-stats commit `87bc93e`.
+
+| Workload / revision | Throughput | p50 | p99 | CPU-s / 1M |
+|---|---:|---:|---:|---:|
+| Session c1 / `87bc93e` | 13.54k req/s | 57.188 us | 242.840 us | 115.90 |
+| Session c1 / stats tree, disabled | 13.35k req/s | 56.686 us | 237.908 us | 116.42 |
+| c1 delta | -1.4% | -0.9% | -2.0% | +0.4% |
+| Session c8 / `87bc93e` | 26.80k req/s | 282.394 us | 744.846 us | 208.73 |
+| Session c8 / stats tree, disabled | 27.32k req/s | 275.024 us | 731.316 us | 206.68 |
+| c8 delta | +1.9% | -2.6% | -1.8% | -1.0% |
+
+Every default metric remains within the 0.7 gate. The only new disabled-path
+work is a predictable null-counter branch at server dispatch and under an
+already-held Session shard lock; the variation is scheduling noise.
+
+### Actual-default continuation gate
+
+The diagnostic table above disables worker-lease continuation to isolate the
+reactor dispatch path. A second A/B keeps the shipped
+`session_idle_grace=1 ms` default and alternates five 100,000-request c8 runs
+per revision on the same host.
+
+| Workload / revision | Throughput | p50 | p99 | CPU-s / 1M |
+|---|---:|---:|---:|---:|
+| Session c8 / `87bc93e` | 23.57k req/s | 314.756 us | 942.033 us | 218.81 |
+| Session c8 / stats tree, disabled | 23.79k req/s | 314.106 us | 920.473 us | 218.24 |
+| c8 delta | +0.9% | -0.2% | -2.3% | -0.3% |
+
+The actual default therefore also shows no hot-path regression; all four
+medians move slightly in the favorable direction.
+
+### Explicit `StatsMode::basic` cost
+
+The current tree then alternates disabled/basic runs three times for each
+load, enabling both server and Session counters. Each run has 100,000 requests.
+
+| Workload / mode | Throughput | p50 | p99 | CPU-s / 1M |
+|---|---:|---:|---:|---:|
+| Session c1 / disabled | 13.48k req/s | 56.853 us | 233.616 us | 116.41 |
+| Session c1 / basic | 13.54k req/s | 56.691 us | 236.467 us | 115.94 |
+| Session c8 / disabled | 27.07k req/s | 278.273 us | 752.324 us | 207.68 |
+| Session c8 / basic | 26.95k req/s | 280.852 us | 739.409 us | 208.38 |
+
+The largest unfavorable median is c1 p99 at +1.2%; c8 throughput is -0.4%,
+p50 +0.9%, p99 -1.7%, and CPU +0.3%. No enabled-mode contention regression is
+visible. Decision: retain opt-in, sharded cumulative counters and the existing
+accounting gauges.

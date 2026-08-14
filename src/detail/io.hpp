@@ -65,6 +65,10 @@ inline void validate_server_options(const easy_uds::ServerOptions& options) {
     if (options.worker_threads == 0) {
         throw std::invalid_argument("worker_threads must be greater than zero");
     }
+    if (options.stats != easy_uds::StatsMode::disabled &&
+        options.stats != easy_uds::StatsMode::basic) {
+        throw std::invalid_argument("stats must be StatsMode::disabled or StatsMode::basic");
+    }
     if (options.max_connections == 0) {
         throw std::invalid_argument("max_connections must be greater than zero");
     }
@@ -115,6 +119,10 @@ inline void validate_client_options(const easy_uds::ClientOptions& options) {
     validate_nonnegative_timeout(options.io_timeout, "io_timeout");
     validate_nonnegative_timeout(options.request_timeout, "request_timeout");
     validate_stream_options(options.stream_chunk_size, options.stream_timeout);
+    if (options.stats != easy_uds::StatsMode::disabled &&
+        options.stats != easy_uds::StatsMode::basic) {
+        throw std::invalid_argument("stats must be StatsMode::disabled or StatsMode::basic");
+    }
 }
 
 class FileDescriptor {

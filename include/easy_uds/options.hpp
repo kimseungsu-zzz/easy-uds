@@ -1,5 +1,7 @@
 #pragma once
 
+#include "easy_uds/stats.hpp"
+
 #include <chrono>
 #include <cstddef>
 
@@ -96,6 +98,10 @@ struct ServerOptions {
     // 500 response bodies so clients can see the root cause. Disable when
     // clients must not learn internal error details.
     bool include_handler_error_messages = true;
+
+    // Optional cumulative event counters. Disabled preserves the default hot
+    // path; Server::stats() operational gauges remain available either way.
+    StatsMode stats = StatsMode::disabled;
 };
 
 struct ClientOptions {
@@ -116,6 +122,11 @@ struct ClientOptions {
 
     // Absolute deadline for connect + streamed request + streamed response.
     std::chrono::milliseconds stream_timeout{0};
+
+    // Optional cumulative counters for Sessions created by this Client.
+    // In-flight depth remains observable when disabled. One-shot calls keep
+    // no persistent accounting state.
+    StatsMode stats = StatsMode::disabled;
 };
 
 } // namespace easy_uds

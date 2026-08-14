@@ -4,6 +4,7 @@
 #include "easy_uds/request.hpp"
 #include "easy_uds/request_context.hpp"
 #include "easy_uds/response.hpp"
+#include "easy_uds/stats.hpp"
 #include "easy_uds/stream.hpp"
 
 #include <functional>
@@ -87,6 +88,9 @@ class Server {
 
     [[nodiscard]] bool is_running() const noexcept;
     [[nodiscard]] const std::string& socket_path() const noexcept;
+    // Thread-safe best-effort snapshot. It may briefly acquire reactor and
+    // executor bookkeeping mutexes but never waits for handlers or socket I/O.
+    [[nodiscard]] ServerStats stats() const;
 
   private:
     std::shared_ptr<detail::ServerState> state_;

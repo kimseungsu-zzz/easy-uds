@@ -97,6 +97,7 @@ void test_idle_session_survives_io_timeout();
 void test_session_move();
 void test_error_model();
 void test_request_context();
+void test_stats_snapshots();
 void test_fd_passing();
 void test_reactor_request_timeouts();
 void test_streams();

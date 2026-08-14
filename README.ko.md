@@ -28,6 +28,7 @@
 - 기본 socket 권한 `0600`
 - 동일 socket path의 중복 server 실행과 stale socket 정리를 보호하는 instance lock
 - 다른 thread에서 안전하게 호출할 수 있는 `Server::stop()`
+- 기존 backpressure accounting을 재사용하는 thread-safe 서버/Session stats snapshot
 - handler 예외를 `500 / Internal Server Error`로 변환
 - 작은 의미 분류 `ErrorCode`와 원본 `errno`를 함께 보존하는 `easy_uds::Error`
 - static/shared library 및 CMake `find_package()` 지원
@@ -243,6 +244,7 @@ options.stream_chunk_size = 64 * 1024;
 options.max_stream_size = 1024 * 1024 * 1024;
 options.io_timeout = 5s;
 options.request_timeout = 30s;
+options.stats = easy_uds::StatsMode::basic;  // 선택적 누적 서버 counter
 options.stream_timeout = 0ms;
 options.stale_socket_grace_period = 250ms;
 options.listen_backlog = 64;
@@ -272,6 +274,7 @@ options.max_concurrent_streams = 3;
 | `session_idle_grace` | `1 ms` | 마지막 요청을 마친 워커가 이 시간 동안 후속 요청 하나를 직접 기다려 리액터 디스패치 홉을 줄입니다. 핸들러 실행 전에는 연결을 리액터에 반환해 멀티플렉싱을 유지합니다. `0`은 고속 경로 비활성 |
 | `max_concurrent_streams` | `0` (자동) | 동시 stream 수 상한. 자동값은 `worker_threads - 1`이며 worker가 하나뿐이면 `1`. 명시값은 `1`~`worker_threads` |
 | `include_handler_error_messages` | `true` | `500` body에 handler 예외 메시지 포함. 내부 정보 노출을 피하려면 `false` |
+| `stats` | `StatsMode::disabled` | 운영 gauge는 항상 조회 가능. `basic`은 누적 서버 event counter도 기록 |
 | `stale_socket_grace_period` | `250 ms` | refused socket을 stale로 판단하기 전 대기 시간 |
 | `listen_backlog` | `64` | `listen()` backlog |
 | `socket_permissions` | `0600` | Unix socket pathname 권한 |
@@ -297,6 +300,7 @@ options.connect_timeout = 2s;
 options.io_timeout = 5s;
 options.request_timeout = 30s;
 options.stream_timeout = 0ms;
+options.stats = easy_uds::StatsMode::basic;  // 선택적 Session counter
 
 easy_uds::Client client("/tmp/easy-uds.sock", options);
 ```
@@ -497,6 +501,7 @@ header도 각각 독립적으로 include할 수 있습니다. 자세한 매핑�
 - `stop()`
 - `is_running()`
 - `socket_path()`
+- `stats()` — connection/stream/queue/retained-byte best-effort snapshot
 
 ### `easy_uds::Client`
 
@@ -513,8 +518,11 @@ header도 각각 독립적으로 include할 수 있습니다. 자세한 매핑�
 - `valid()` — `status() == SessionStatus::active`일 때만 true
 - `request(std::string_view route, std::string_view body = {})` — 멀티플렉싱, 동시 호출 가능
 - `request_stream(std::string_view route, const StreamReader&, response_chunk)` — 독립된 전용 연결
+- `stats()` — fixed request의 in-flight 및 누적 outcome snapshot
 
 ### 데이터 타입
+
+- `StatsMode` — 기본 `disabled` 또는 누적 counter를 켜는 `basic`
 
 ```cpp
 using Status = std::int32_t;  // status_ok=200, status_request_timeout=408, status_not_found=404, ...
@@ -559,6 +567,9 @@ FD 소유권은 [`docs/api/fd-passing.md`](docs/api/fd-passing.md), 오류 의�
 [`docs/api/session.md`](docs/api/session.md)에 정리되어 있습니다.
 요청 시각, 연결 관찰, cooperative cancellation 의미는
 [`docs/api/request-context.md`](docs/api/request-context.md)에 정리되어 있습니다.
+Stats의 비용, accounting 경계, snapshot 일관성은
+[`docs/api/stats.md`](docs/api/stats.md), Phase 3의 domain/policy API 사전 설계는
+[`docs/api/route-options-design.md`](docs/api/route-options-design.md)에 정리되어 있습니다.
 
 ## 보안 범위
 

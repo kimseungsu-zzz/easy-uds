@@ -7,6 +7,7 @@
 #include "../detail/io.hpp"
 
 #include <atomic>
+#include <array>
 #include <condition_variable>
 #include <deque>
 #include <exception>
@@ -174,6 +175,28 @@ struct SerializedJob {
     std::size_t request_bytes = 0;
 };
 
+struct ServerCounterState {
+    struct alignas(64) FixedRequestShard {
+        std::atomic<std::uint64_t> value{0};
+    };
+    static constexpr std::size_t fixed_request_shard_count = 64;
+
+    std::atomic<std::uint64_t> accepted_connections{0};
+    std::atomic<std::uint64_t> rejected_connections{0};
+    std::array<FixedRequestShard, fixed_request_shard_count> fixed_requests;
+    std::atomic<std::uint64_t> stream_requests{0};
+    std::atomic<std::uint64_t> stream_rejections{0};
+    std::atomic<std::uint64_t> queue_timeouts{0};
+};
+
+inline std::size_t server_counter_shard_index() noexcept {
+    static std::atomic<std::size_t> next_shard{0};
+    thread_local const std::size_t shard =
+        next_shard.fetch_add(1, std::memory_order_relaxed) %
+        ServerCounterState::fixed_request_shard_count;
+    return shard;
+}
+
 struct ServerState {
     std::string socket_path;
     easy_uds::ServerOptions options;
@@ -229,7 +252,49 @@ struct ServerState {
     std::mutex connections_mutex;
     std::unordered_map<int, std::shared_ptr<ReactorConnection>> connections;
     std::deque<std::shared_ptr<ReactorConnection>> resumed_connections;
+
+    // Kept at the end so the disabled option does not shift existing hot
+    // bookkeeping members. Null means event recording performs no atomic RMW;
+    // operational gauges reuse the accounting fields above.
+    std::unique_ptr<ServerCounterState> counters;
 };
+
+inline void record_accepted_connection(const std::shared_ptr<ServerState>& state) noexcept {
+    if (state->counters) {
+        state->counters->accepted_connections.fetch_add(1, std::memory_order_relaxed);
+    }
+}
+
+inline void record_rejected_connection(const std::shared_ptr<ServerState>& state) noexcept {
+    if (state->counters) {
+        state->counters->rejected_connections.fetch_add(1, std::memory_order_relaxed);
+    }
+}
+
+inline void record_fixed_request(const std::shared_ptr<ServerState>& state) noexcept {
+    if (state->counters) {
+        state->counters->fixed_requests[server_counter_shard_index()].value.fetch_add(
+            1, std::memory_order_relaxed);
+    }
+}
+
+inline void record_stream_request(const std::shared_ptr<ServerState>& state) noexcept {
+    if (state->counters) {
+        state->counters->stream_requests.fetch_add(1, std::memory_order_relaxed);
+    }
+}
+
+inline void record_stream_rejection(const std::shared_ptr<ServerState>& state) noexcept {
+    if (state->counters) {
+        state->counters->stream_rejections.fetch_add(1, std::memory_order_relaxed);
+    }
+}
+
+inline void record_queue_timeout(const std::shared_ptr<ServerState>& state) noexcept {
+    if (state->counters) {
+        state->counters->queue_timeouts.fetch_add(1, std::memory_order_relaxed);
+    }
+}
 
 struct RequestContextFactory {
     static easy_uds::RequestContext make(

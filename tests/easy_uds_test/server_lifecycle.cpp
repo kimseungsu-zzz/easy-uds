@@ -31,6 +31,12 @@ void test_option_validation() {
     expect_throws<std::invalid_argument>([&] { Server server(socket_path("bad-perms"), server_options); },
                                          "socket_permissions beyond 0777 should be rejected");
 
+    server_options = {};
+    server_options.stats = static_cast<StatsMode>(99);
+    expect_throws<std::invalid_argument>(
+        [&] { Server server(socket_path("bad-stats"), server_options); },
+        "unknown stats mode should be rejected");
+
     ClientOptions client_options;
     client_options.connect_timeout = -1ms;
     expect_throws<std::invalid_argument>([&] { Client client(socket_path("bad-client"), client_options); },
@@ -40,6 +46,12 @@ void test_option_validation() {
     client_options.stream_chunk_size = 0;
     expect_throws<std::invalid_argument>([&] { Client client(socket_path("bad-client2"), client_options); },
                                          "zero stream_chunk_size should be rejected");
+
+    client_options = {};
+    client_options.stats = static_cast<StatsMode>(99);
+    expect_throws<std::invalid_argument>(
+        [&] { Client client(socket_path("bad-client-stats"), client_options); },
+        "unknown client stats mode should be rejected");
 }
 
 void test_socket_path_safety() {

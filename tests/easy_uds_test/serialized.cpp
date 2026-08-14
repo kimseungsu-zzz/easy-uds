@@ -79,6 +79,7 @@ void test_serialized_queue_expiry() {
     options.worker_threads = 2;
     options.io_timeout = 500ms;
     options.request_timeout = 300ms;  // server-side deadline for queued commands
+    options.stats = StatsMode::basic;
     Server server(path, options);
     std::atomic<bool> release_blocker{false};
     server.on_serialized("command", [&](const Request& request) {
@@ -117,11 +118,20 @@ void test_serialized_queue_expiry() {
     });
     std::this_thread::sleep_for(400ms);  // 300 ms server deadline expires while queued
 
+    const ServerStats queued_stats = server.stats();
+    expect(queued_stats.serialized_queue_depth >= 1,
+           "serialized queue gauge should include an expired item until dequeued");
+
     release_blocker.store(true, std::memory_order_release);
     blocker.join();
     expired.join();
     expect(expired_status.load(std::memory_order_relaxed) == 408,
            "expired request must be answered with 408, not executed");
+    const ServerStats stats = server.stats();
+    expect(stats.counters &&
+               stats.counters->fixed_requests_dispatched == 2 &&
+               stats.counters->requests_timed_out_before_execution == 1,
+           "server stats should count one pre-execution queue timeout");
 
     server.stop();
     server_thread.join();

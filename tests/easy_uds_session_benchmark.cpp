@@ -55,9 +55,11 @@ int main(int argc, char** argv) {
     // Optional server continuation grace in milliseconds (0 disables the
     // worker-lease continuation fast path; an A/B for hot-path attribution).
     const long long grace_ms = argc > 4 ? std::strtoll(argv[4], nullptr, 10) : 1;
-    if (iterations == 0 || concurrency == 0 || argc > 5 || (argc == 4 && !shared_session) ||
+    const bool runtime_stats = argc > 5 && std::string_view(argv[5]) == "stats";
+    if (iterations == 0 || concurrency == 0 || argc > 6 || (argc > 3 && !shared_session) ||
+        (argc > 5 && !runtime_stats) ||
         grace_ms < 0) {
-        std::cerr << "usage: easy_uds_session_benchmark [iterations] [concurrency] [shared] [grace_ms]\n";
+        std::cerr << "usage: easy_uds_session_benchmark [iterations] [concurrency] [shared] [grace_ms] [stats]\n";
         return 2;
     }
     const std::string path =
@@ -74,6 +76,8 @@ int main(int argc, char** argv) {
         std::min<std::size_t>(server_options.max_connections, static_cast<std::size_t>(std::numeric_limits<int>::max())));
     server_options.stale_socket_grace_period = std::chrono::milliseconds{0};
     server_options.session_idle_grace = std::chrono::milliseconds{grace_ms};
+    server_options.stats = runtime_stats ? easy_uds::StatsMode::basic
+                                         : easy_uds::StatsMode::disabled;
     easy_uds::Server server(path, server_options);
     server.on("ping", [](const easy_uds::Request&) { return easy_uds::Response{200, "pong"}; });
 
@@ -87,7 +91,10 @@ int main(int argc, char** argv) {
     });
     wait_until_running(server);
 
-    easy_uds::Client client(path);
+    easy_uds::ClientOptions client_options;
+    client_options.stats = runtime_stats ? easy_uds::StatsMode::basic
+                                         : easy_uds::StatsMode::disabled;
+    easy_uds::Client client(path, client_options);
     std::unique_ptr<easy_uds::Session> shared;
     if (shared_session) {
         shared = std::make_unique<easy_uds::Session>(client.session());
@@ -192,7 +199,8 @@ int main(int argc, char** argv) {
         latency_sum += sample;
     }
     std::cout << "requests=" << iterations << ", concurrency=" << concurrency
-              << (shared_session ? " (one shared session)\n" : " (independent persistent sessions)\n")
+              << (shared_session ? " (one shared session" : " (independent persistent sessions")
+              << (runtime_stats ? ", runtime stats enabled)\n" : ")\n")
               << "throughput: " << requests_per_second << " requests/s\n"
               << "latency:    avg=" << latency_sum / static_cast<double>(samples.size())
               << " us, p50=" << percentile(samples, 0.50) << " us, p90=" << percentile(samples, 0.90)

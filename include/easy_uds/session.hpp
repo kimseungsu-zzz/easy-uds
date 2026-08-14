@@ -2,6 +2,7 @@
 
 #include "easy_uds/options.hpp"
 #include "easy_uds/response.hpp"
+#include "easy_uds/stats.hpp"
 #include "easy_uds/stream.hpp"
 
 #include <functional>
@@ -43,6 +44,9 @@ class Session {
     // this Session object is not concurrently moved or destroyed.
     [[nodiscard]] SessionStatus status() const noexcept;
     [[nodiscard]] bool valid() const noexcept;
+    // Thread-safe snapshot of the multiplexed fixed-request Session. Throws
+    // std::logic_error for a moved-from Session.
+    [[nodiscard]] SessionStats stats() const;
 
     [[nodiscard]] Response request(std::string_view route, std::string_view body = {});
 

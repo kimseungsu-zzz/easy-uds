@@ -226,6 +226,7 @@ void continue_connection(const std::shared_ptr<ServerState>& state,
             const std::size_t request_bytes =
                 request.route.size() + request.body.size();
 
+            record_fixed_request(state);
             connection->active_regular.fetch_add(1, std::memory_order_relaxed);
             account_connection_request(state, connection, request_bytes);
             if (request.request_id != 0) {
@@ -371,6 +372,7 @@ void worker_loop(const std::shared_ptr<ServerState>& state) {
 
         try {
             if (Clock::now() >= job.deadline) {
+                record_queue_timeout(state);
                 write_error_response(state, job.connection, job.request.request_id,
                                      "request timed out before execution",
                                      state->options.io_timeout, Deadline::max(), 408);
@@ -440,6 +442,7 @@ void serialized_worker_loop(const std::shared_ptr<ServerState>& state) {
 
         try {
             if (Clock::now() >= job.deadline) {
+                record_queue_timeout(state);
                 write_error_response(state, job.connection, job.request.request_id,
                                      "request timed out before execution",
                                      state->options.io_timeout, Deadline::max(), 408);

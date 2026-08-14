@@ -81,6 +81,7 @@ void test_connection_limit() {
     options.max_connections = 2;
     options.io_timeout = 500ms;
     options.request_timeout = 5s;
+    options.stats = StatsMode::basic;
     Server server(path, options);
     server.on("ping", [](const Request&) { return Response{200, "pong"}; });
 
@@ -97,6 +98,12 @@ void test_connection_limit() {
     // A third connection exceeds the limit and is rejected.
     expect_throws<std::system_error>([&] { (void)client.request("ping"); },
                                      "third connection should be rejected at the limit");
+
+    const ServerStats limited = server.stats();
+    expect(limited.active_connections == 2 && limited.counters &&
+               limited.counters->accepted_connections == 2 &&
+               limited.counters->rejected_connections >= 1,
+           "server stats should expose connection admission and rejection");
 
     // Sessions are unaffected.
     expect(first.request("ping").body == "pong", "existing sessions keep working");

@@ -11,5 +11,6 @@
 #include "easy_uds/response.hpp"
 #include "easy_uds/server.hpp"
 #include "easy_uds/session.hpp"
+#include "easy_uds/stats.hpp"
 #include "easy_uds/stream.hpp"
 #include "easy_uds/version.hpp"

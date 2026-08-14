@@ -139,6 +139,10 @@ void test_multiplexed_session() {
         }
     }
 
+    const SessionStats default_stats = session.stats();
+    expect(default_stats.inflight_requests == 0 && !default_stats.counters,
+           "default Session stats should expose depth without enabling cumulative counters");
+
     // Raw pipelining: two requests sent back-to-back on one connection are
     // both answered (reactor parses sequentially, multiplex id correlates).
     const int raw_fd = connect_raw(path);
@@ -451,7 +455,9 @@ void test_session_broken_after_shutdown() {
     std::thread server_thread([&] { server.run(); });
     wait_until_running(server);
 
-    Client client(path);
+    ClientOptions stats_options;
+    stats_options.stats = StatsMode::basic;
+    Client client(path, stats_options);
     Session session = client.session();
     expect(session.status() == SessionStatus::active,
            "new session should report active state");
@@ -470,6 +476,14 @@ void test_session_broken_after_shutdown() {
     expect(session.status() == SessionStatus::broken,
            "peer close should permanently mark the session broken");
     expect(!session.valid(), "broken session should not be valid");
+    const SessionStats broken_stats = session.stats();
+    expect(broken_stats.inflight_requests == 0 && broken_stats.counters &&
+               broken_stats.counters->requests_timed_out == 0 &&
+               broken_stats.counters->requests_completed == 1 &&
+               broken_stats.counters->requests_started ==
+                   broken_stats.counters->requests_completed +
+                       broken_stats.counters->requests_failed,
+           "Session failure accounting should balance regardless of close observation timing");
     cleanup_socket_artifacts(path);
 }
 
@@ -492,6 +506,7 @@ void test_session_broken_after_timeout() {
     ClientOptions client_options;
     client_options.io_timeout = 500ms;
     client_options.request_timeout = 20ms;
+    client_options.stats = StatsMode::basic;
     Session session = Client(path, client_options).session();
     try {
         (void)session.request("slow");
@@ -507,6 +522,13 @@ void test_session_broken_after_timeout() {
     expect(session.status() == SessionStatus::broken,
            "request timeout should mark the session broken");
     expect(!session.valid(), "timed-out session should not be valid");
+    const SessionStats timeout_stats = session.stats();
+    expect(timeout_stats.inflight_requests == 0 && timeout_stats.counters &&
+               timeout_stats.counters->requests_started == 1 &&
+               timeout_stats.counters->requests_completed == 0 &&
+               timeout_stats.counters->requests_timed_out == 1 &&
+               timeout_stats.counters->requests_failed == 0,
+           "Session stats should classify a caller deadline exactly once");
     expect_easy_error([&] { (void)session.request("slow"); }, ErrorCode::closed,
                       "timed-out session should remain permanently unusable");
 
@@ -569,6 +591,8 @@ void test_session_move() {
     expect(moved.request("ping").body == "pong", "moved session keeps the connection");
     expect_throws<std::logic_error>([&] { (void)session.request("ping"); },
                                     "moved-from session must reject requests");
+    expect_throws<std::logic_error>([&] { (void)session.stats(); },
+                                    "moved-from session must reject stats snapshots");
 
     Session destination = client.session();
     expect(destination.request("ping").body == "pong", "move destination is active before assignment");

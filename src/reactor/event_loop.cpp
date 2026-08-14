@@ -162,6 +162,7 @@ void run_reactor(const std::shared_ptr<ServerState>& state) {
                         std::lock_guard<std::mutex> lock(state->connections_mutex);
                         if (state->connections.size() >=
                             state->options.max_connections) {
+                            record_rejected_connection(state);
                             (void)::close(client_fd);
                             continue;
                         }
@@ -181,6 +182,8 @@ void run_reactor(const std::shared_ptr<ServerState>& state) {
                         if (::epoll_ctl(epoll_fd, EPOLL_CTL_ADD, client_fd,
                                         &event) != 0) {
                             state->connections.erase(client_fd);
+                        } else {
+                            record_accepted_connection(state);
                         }
                     }
                 }

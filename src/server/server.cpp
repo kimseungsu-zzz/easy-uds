@@ -294,6 +294,9 @@ Server::Server(std::string socket_path, ServerOptions options) : state_(std::mak
 
     state_->socket_path = std::move(socket_path);
     state_->options = options;
+    if (options.stats == StatsMode::basic) {
+        state_->counters = std::make_unique<detail::ServerCounterState>();
+    }
     state_->not_found_handler = std::make_shared<const detail::HandlerEntry>(detail::HandlerEntry{
         [max_message_size = options.max_message_size](const Request&) {
             return Response{404, max_message_size >= std::string_view{"Not Found"}.size() ? "Not Found" : ""};
@@ -633,6 +636,55 @@ bool Server::is_running() const noexcept {
 
 const std::string& Server::socket_path() const noexcept {
     return state_->socket_path;
+}
+
+ServerStats Server::stats() const {
+    ServerStats snapshot;
+    snapshot.running = state_->running.load(std::memory_order_acquire);
+    snapshot.active_streams =
+        state_->active_streams.load(std::memory_order_acquire);
+    snapshot.retained_request_bytes =
+        state_->total_inflight_request_bytes.load(std::memory_order_acquire);
+    snapshot.queued_output_bytes =
+        state_->total_queued_output_bytes.load(std::memory_order_acquire);
+
+    {
+        std::lock_guard<std::mutex> lock(state_->connections_mutex);
+        snapshot.active_connections = state_->connections.size();
+        for (const auto& entry : state_->connections) {
+            snapshot.inflight_requests +=
+                entry.second->conn->inflight_requests.load(
+                    std::memory_order_acquire);
+        }
+    }
+    {
+        std::lock_guard<std::mutex> lock(state_->work_mutex);
+        snapshot.worker_queue_depth = state_->pending_jobs.size();
+    }
+    {
+        std::lock_guard<std::mutex> lock(state_->serialized_mutex);
+        snapshot.serialized_queue_depth = state_->pending_serialized.size();
+    }
+
+    if (state_->counters) {
+        ServerStatsCounters counters;
+        counters.accepted_connections =
+            state_->counters->accepted_connections.load(std::memory_order_relaxed);
+        counters.rejected_connections =
+            state_->counters->rejected_connections.load(std::memory_order_relaxed);
+        for (const auto& shard : state_->counters->fixed_requests) {
+            counters.fixed_requests_dispatched +=
+                shard.value.load(std::memory_order_relaxed);
+        }
+        counters.stream_requests_started =
+            state_->counters->stream_requests.load(std::memory_order_relaxed);
+        counters.stream_requests_rejected =
+            state_->counters->stream_rejections.load(std::memory_order_relaxed);
+        counters.requests_timed_out_before_execution =
+            state_->counters->queue_timeouts.load(std::memory_order_relaxed);
+        snapshot.counters = counters;
+    }
+    return snapshot;
 }
 
 } // namespace easy_uds

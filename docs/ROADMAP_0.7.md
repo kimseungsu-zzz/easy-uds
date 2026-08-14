@@ -75,12 +75,12 @@ static/shared package consumer는 모든 phase의 필수 gate다.
   - `stream.hpp`, `options.hpp`, `error.hpp`, `fd.hpp`, `version.hpp`
   - `easy_uds.hpp`는 위 header의 umbrella 역할만 수행
 - [x] `request_context.hpp` 기능 header 추가
-- [ ] `stats.hpp` 기능 header 추가
+- [x] `stats.hpp` 기능 header 추가
 - [x] `RequestContext`
   - request id, peer, arrival time, deadline, connection/cancellation 상태
   - 기존 `Handler(const Request&)` 단순형 유지
   - context overload가 request hot path를 회귀시키지 않도록 A/B
-- [ ] `ServerStats` / `SessionStats`
+- [x] `ServerStats` / `SessionStats`
   - active connections/streams, requests, timeout/rejection
   - retained input/output bytes, worker/serialized queue depth
   - snapshot 비용과 thread-safety semantics 문서화
@@ -105,6 +105,7 @@ static/shared package consumer는 모든 phase의 필수 gate다.
 - [ ] advanced route options
   - domain, policy, deadline/cancellation 관찰을 한 options 구조로 확장
   - overload 폭증 방지
+  - [x] simple/contextual handler, domain/policy, replacement key와 409 semantics 사전 설계
 - [ ] production diagnostics
   - 운영 중 원인을 찾을 수 있는 stats와 optional tracing
   - 기본 비활성 시 hot-path 비용 0 또는 측정 불가 수준

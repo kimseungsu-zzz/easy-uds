@@ -1,6 +1,7 @@
 #include <easy_uds/client.hpp>
 #include <easy_uds/error.hpp>
 #include <easy_uds/server.hpp>
+#include <easy_uds/stats.hpp>
 #include <easy_uds/version.hpp>
 
 #include <chrono>
@@ -24,6 +25,12 @@ static_assert(!std::is_copy_constructible_v<easy_uds::RequestContext>);
 static_assert(!std::is_move_constructible_v<easy_uds::RequestContext>);
 static_assert(std::is_constructible_v<
               easy_uds::RouteOptions, easy_uds::RouteOptions::Handler>);
+static_assert(std::is_same_v<decltype(std::declval<const easy_uds::Server&>().stats()),
+                             easy_uds::ServerStats>);
+static_assert(std::is_same_v<decltype(std::declval<const easy_uds::Session&>().stats()),
+                             easy_uds::SessionStats>);
+static_assert(easy_uds::ServerOptions{}.stats == easy_uds::StatsMode::disabled);
+static_assert(easy_uds::ClientOptions{}.stats == easy_uds::StatsMode::disabled);
 
 void register_context_routes(easy_uds::Server& server) {
     const auto handler = [](const easy_uds::Request&,
@@ -34,6 +41,12 @@ void register_context_routes(easy_uds::Server& server) {
     server.on_prefix("context.prefix.", easy_uds::RouteOptions{handler});
     server.on_serialized("context.serialized",
                          easy_uds::RouteOptions{handler});
+}
+
+void inspect_runtime_stats(const easy_uds::Server& server,
+                           const easy_uds::Session& session) {
+    (void)server.stats();
+    (void)session.stats();
 }
 
 int main() {

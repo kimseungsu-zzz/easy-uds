@@ -109,8 +109,22 @@ std::atomic<std::size_t> session_spin_miss_count{0};
 #endif
 
 struct SessionState {
+    static constexpr std::size_t inflight_shard_count = EASY_UDS_SESSION_INFLIGHT_SHARDS;
+
+    struct alignas(64) CounterShard {
+        std::uint64_t requests_started = 0;
+        std::uint64_t requests_completed = 0;
+        std::uint64_t requests_timed_out = 0;
+        std::uint64_t requests_failed = 0;
+    };
+
     explicit SessionState(std::string socket_path, ClientOptions options)
-        : socket_path(std::move(socket_path)), options(options) {}
+        : socket_path(std::move(socket_path)), options(options) {
+        if (options.stats == StatsMode::basic) {
+            counters = std::make_unique<
+                std::array<CounterShard, inflight_shard_count>>();
+        }
+    }
 
     const std::string socket_path;
     ClientOptions options;
@@ -134,7 +148,6 @@ struct SessionState {
     };
     using InflightMap = std::unordered_map<std::uint32_t, Slot*>;
     static constexpr std::size_t cached_inflight_slots = 64;
-    static constexpr std::size_t inflight_shard_count = EASY_UDS_SESSION_INFLIGHT_SHARDS;
     static constexpr std::size_t cached_slots_per_shard =
         (cached_inflight_slots + inflight_shard_count - 1) / inflight_shard_count;
 
@@ -173,9 +186,17 @@ struct SessionState {
     };
 
     std::array<InflightShard, inflight_shard_count> inflight_shards;
+    // Separate allocation preserves InflightShard's cache-line-rounded size.
+    // Updates happen only under the corresponding existing shard mutex.
+    std::unique_ptr<std::array<CounterShard, inflight_shard_count>> counters;
 
     [[nodiscard]] InflightShard& shard_for(std::uint32_t request_id) noexcept {
         return inflight_shards[request_id % inflight_shard_count];
+    }
+
+    [[nodiscard]] CounterShard* counters_for(std::uint32_t request_id) noexcept {
+        return counters ? &(*counters)[request_id % inflight_shard_count]
+                        : nullptr;
     }
 
     // Reusing extracted C++17 map nodes removes steady-state allocator traffic
@@ -309,6 +330,32 @@ bool Session::valid() const noexcept {
     return status() == SessionStatus::active;
 }
 
+SessionStats Session::stats() const {
+    if (!state_) {
+        throw std::logic_error("session has been moved from");
+    }
+    SessionStats snapshot;
+    SessionStatsCounters counters;
+    for (std::size_t index = 0;
+         index < detail::SessionState::inflight_shard_count; ++index) {
+        auto& shard = state_->inflight_shards[index];
+        auto lock = detail::acquire_session_lock(
+            shard.mutex, detail::SessionLockKind::caller_table);
+        snapshot.inflight_requests += shard.inflight.size();
+        if (state_->counters) {
+            const auto& shard_counters = (*state_->counters)[index];
+            counters.requests_started += shard_counters.requests_started;
+            counters.requests_completed += shard_counters.requests_completed;
+            counters.requests_timed_out += shard_counters.requests_timed_out;
+            counters.requests_failed += shard_counters.requests_failed;
+        }
+    }
+    if (state_->counters) {
+        snapshot.counters = counters;
+    }
+    return snapshot;
+}
+
 Response Session::request(std::string_view route, std::string_view body) {
     if (!state_) {
         throw std::logic_error("session has been moved from");
@@ -343,6 +390,9 @@ Response Session::request(std::string_view route, std::string_view body) {
             continue;
         }
         shard.insert(request_id, &slot);
+        if (auto* counters = state_->counters_for(request_id)) {
+            ++counters->requests_started;
+        }
         break;
     }
 #ifdef EASY_UDS_TRACE_SESSION_CONTENTION
@@ -361,6 +411,9 @@ Response Session::request(std::string_view route, std::string_view body) {
             auto& shard = state_->shard_for(request_id);
             auto lock = detail::acquire_session_lock(shard.mutex,
                                                      detail::SessionLockKind::caller_table);
+            if (auto* counters = state_->counters_for(request_id)) {
+                ++counters->requests_failed;
+            }
             shard.erase(request_id);
         }
         (void)::shutdown(state_->fd.get(), SHUT_RDWR);
@@ -400,6 +453,15 @@ Response Session::request(std::string_view route, std::string_view body) {
         auto& shard = state_->shard_for(request_id);
         auto lock = detail::acquire_session_lock(shard.mutex,
                                                  detail::SessionLockKind::caller_table);
+        if (auto* counters = state_->counters_for(request_id)) {
+            if (timed_out) {
+                ++counters->requests_timed_out;
+            } else if (slot.error) {
+                ++counters->requests_failed;
+            } else {
+                ++counters->requests_completed;
+            }
+        }
         shard.erase(request_id);
     }
     if (timed_out) {

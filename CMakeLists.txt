@@ -118,6 +118,7 @@ if(EASY_UDS_BUILD_TESTS)
             tests/easy_uds_test/session.cpp
             tests/easy_uds_test/errors.cpp
             tests/easy_uds_test/request_context.cpp
+            tests/easy_uds_test/stats.cpp
             tests/easy_uds_test/streaming.cpp
             tests/easy_uds_test/serialized.cpp
             tests/easy_uds_test/timeouts_concurrency.cpp

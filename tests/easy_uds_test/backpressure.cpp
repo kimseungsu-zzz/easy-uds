@@ -65,6 +65,7 @@ void test_fixed_output_queue_is_bounded() {
     options.max_connections = 16;
     options.io_timeout = 5s;
     options.request_timeout = 5s;
+    options.stats = StatsMode::basic;
     Server server(path, options);
     const std::string large_body(900U * 1024U, 'x');
     server.on("large", [&](const Request&) { return Response{200, large_body}; });
@@ -74,7 +75,24 @@ void test_fixed_output_queue_is_bounded() {
     wait_until_running(server);
 
     const int fd = connect_raw(path);
-    for (std::uint32_t index = 0; index < 16; ++index) {
+    const int receive_buffer = 4096;
+    expect(::setsockopt(fd, SOL_SOCKET, SO_RCVBUF, &receive_buffer,
+                        sizeof(receive_buffer)) == 0,
+           "shrink bounded-output peer receive buffer");
+    for (std::uint32_t index = 0; index < 2; ++index) {
+        const auto request = fixed_request(index + 1, "large");
+        send_exact(fd, request.data(), request.size());
+    }
+    bool observed_queued_output = false;
+    const auto queue_deadline = std::chrono::steady_clock::now() + 1s;
+    while (std::chrono::steady_clock::now() < queue_deadline) {
+        if (server.stats().queued_output_bytes != 0) {
+            observed_queued_output = true;
+            break;
+        }
+        std::this_thread::yield();
+    }
+    for (std::uint32_t index = 2; index < 16; ++index) {
         const auto request = fixed_request(index + 1, "large");
         send_exact(fd, request.data(), request.size());
     }
@@ -112,6 +130,8 @@ void test_fixed_output_queue_is_bounded() {
     cleanup_socket_artifacts(path);
     expect(closed, "fixed response backlog beyond the per-connection byte cap must close the peer");
     expect(healthy.status == 200 && healthy.body == "pong", "output queue overflow must stay isolated");
+    expect(observed_queued_output,
+           "server stats should expose unsent fixed-response wire bytes");
 }
 
 void test_pipelined_input_applies_backpressure() {

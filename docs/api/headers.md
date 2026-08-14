@@ -25,6 +25,7 @@ feature headers they expose or use:
 | `server.hpp` | Server lifecycle and route registration |
 | `request.hpp` | `Request` and `PeerCredentials` |
 | `request_context.hpp` | Handler timing and cooperative-stop observations |
+| `stats.hpp` | Server/Session operational snapshots and optional counters |
 | `response.hpp` | `Status`, status constants, and `Response` |
 | `stream.hpp` | `StreamReader` and `StreamResponse` |
 | `options.hpp` | `ClientOptions`, `ServerOptions`, and default size constants |

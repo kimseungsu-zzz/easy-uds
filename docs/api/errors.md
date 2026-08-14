@@ -86,6 +86,9 @@ easy-uds never reconnects or replays a request implicitly. An application may
 create a new Session after inspecting the error, but it must decide whether the
 operation is safe to retry.
 
+See the [Session state reference](session.md) for the public state snapshot,
+one-way transitions, and concurrent-observation contract.
+
 ## Thread safety, lifetime, and performance
 
 `Error`, `ErrorCode`, and copied `std::error_code` values have ordinary value

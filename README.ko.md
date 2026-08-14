@@ -501,6 +501,8 @@ pre-1.0 shared build에서는 minor release 사이 ABI 변경 가능성이 있�
 
 ### `easy_uds::Session`
 
+- `status()` — lock-free `active` / `broken` / `moved_from` 상태 스냅샷
+- `valid()` — `status() == SessionStatus::active`일 때만 true
 - `request(std::string_view route, std::string_view body = {})` — 멀티플렉싱, 동시 호출 가능
 - `request_stream(std::string_view route, const StreamReader&, response_chunk)` — 독립된 전용 연결
 
@@ -513,6 +515,8 @@ enum class ErrorCode {
     system, timeout, closed, protocol, busy, too_large,
     invalid_request, unavailable, cancelled
 };
+
+enum class SessionStatus { active, broken, moved_from };
 
 struct PeerCredentials {
     pid_t pid; uid_t uid; gid_t gid;
@@ -543,7 +547,8 @@ struct StreamResponse {
 FD 소유권은 [`docs/api/fd-passing.md`](docs/api/fd-passing.md), 오류 의미와
 원본 OS 오류 보존 방식은 [`docs/api/errors.md`](docs/api/errors.md), 0.6에서
 변경된 코드는 [`docs/migration/0.6-to-0.7.md`](docs/migration/0.6-to-0.7.md)에
-정리되어 있습니다.
+정리되어 있습니다. Session 상태, 재시도, 동시성 의미는
+[`docs/api/session.md`](docs/api/session.md)에 정리되어 있습니다.
 
 ## 보안 범위
 

@@ -94,6 +94,15 @@ void test_multiplexed_session() {
     constexpr std::size_t requests_per_caller = 64;
     std::atomic<std::size_t> ready{0};
     std::atomic<bool> start{false};
+    std::atomic<bool> observe_status{true};
+    std::atomic<bool> observed_invalid_status{false};
+    std::thread status_observer([&] {
+        while (observe_status.load(std::memory_order_acquire)) {
+            if (session.status() != SessionStatus::active || !session.valid()) {
+                observed_invalid_status.store(true, std::memory_order_release);
+            }
+        }
+    });
     std::vector<std::exception_ptr> repeated_errors(repeated_callers);
     callers.clear();
     for (std::size_t caller_index = 0; caller_index < repeated_callers; ++caller_index) {
@@ -120,6 +129,10 @@ void test_multiplexed_session() {
     for (auto& caller : callers) {
         caller.join();
     }
+    observe_status.store(false, std::memory_order_release);
+    status_observer.join();
+    expect(!observed_invalid_status.load(std::memory_order_acquire),
+           "concurrent state snapshots should remain active during successful requests");
     for (const auto& error : repeated_errors) {
         if (error) {
             std::rethrow_exception(error);
@@ -419,6 +432,9 @@ void test_client_rejects_mismatched_response_ids() {
            "reader failure must complete every concurrent session caller");
     expect(failure_elapsed < options.request_timeout,
            "reader failure must wake concurrent callers before their request timeout");
+    expect(session.status() == SessionStatus::broken,
+           "protocol failure should mark the session broken");
+    expect(!session.valid(), "protocol-broken session should not be valid");
     expect_easy_error([&] { (void)session.request("ping"); }, ErrorCode::closed,
                       "unknown response id must permanently break the session");
 }
@@ -437,6 +453,9 @@ void test_session_broken_after_shutdown() {
 
     Client client(path);
     Session session = client.session();
+    expect(session.status() == SessionStatus::active,
+           "new session should report active state");
+    expect(session.valid(), "new session should be valid");
     expect(session.request("ping").body == "pong", "session works before shutdown");
 
     server.stop();
@@ -448,6 +467,9 @@ void test_session_broken_after_shutdown() {
                       "session request against a stopped server should fail");
     expect_easy_error([&] { (void)session.request("ping"); }, ErrorCode::closed,
                       "broken session should reject later requests");
+    expect(session.status() == SessionStatus::broken,
+           "peer close should permanently mark the session broken");
+    expect(!session.valid(), "broken session should not be valid");
     cleanup_socket_artifacts(path);
 }
 
@@ -482,6 +504,9 @@ void test_session_broken_after_timeout() {
                    std::error_code(ETIMEDOUT, std::generic_category()),
                "session deadline should preserve ETIMEDOUT");
     }
+    expect(session.status() == SessionStatus::broken,
+           "request timeout should mark the session broken");
+    expect(!session.valid(), "timed-out session should not be valid");
     expect_easy_error([&] { (void)session.request("slow"); }, ErrorCode::closed,
                       "timed-out session should remain permanently unusable");
 
@@ -531,9 +556,16 @@ void test_session_move() {
 
     Client client(path);
     Session session = client.session();
+    expect(session.status() == SessionStatus::active,
+           "session should begin active");
     expect(session.request("ping").body == "pong", "session works before being moved");
 
     Session moved = std::move(session);
+    expect(session.status() == SessionStatus::moved_from,
+           "move source should report moved_from");
+    expect(!session.valid(), "move source should not be valid");
+    expect(moved.status() == SessionStatus::active,
+           "move destination should preserve active state");
     expect(moved.request("ping").body == "pong", "moved session keeps the connection");
     expect_throws<std::logic_error>([&] { (void)session.request("ping"); },
                                     "moved-from session must reject requests");
@@ -541,6 +573,10 @@ void test_session_move() {
     Session destination = client.session();
     expect(destination.request("ping").body == "pong", "move destination is active before assignment");
     destination = std::move(moved);
+    expect(moved.status() == SessionStatus::moved_from,
+           "move-assigned source should report moved_from");
+    expect(destination.status() == SessionStatus::active,
+           "move assignment should preserve active state");
     expect(destination.request("ping").body == "pong", "move-assigned session keeps the source connection");
     expect_throws<std::logic_error>([&] { (void)moved.request("ping"); },
                                     "move-assigned source must reject requests");

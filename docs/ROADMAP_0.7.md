@@ -59,9 +59,10 @@ static/shared package consumer는 모든 phase의 필수 gate다.
   - 작은 `ErrorCode`/category와 구체적인 human-readable message 병행
   - timeout, closed, protocol, busy, too-large, invalid-request 분류
   - OS `errno`와 `std::system_error` 정보 손실 금지
-- [ ] Session 상태 API
-  - `valid()`/`broken()` 또는 동등한 명확한 상태 조회
-  - reconnect helper는 허용, implicit retry/replay는 금지
+- [x] Session 상태 API
+  - lock-free `status()`/`valid()`로 `active`, `broken`, `moved_from` 조회
+  - `active`는 liveness probe가 아닌 관찰 시점 snapshot으로 문서화
+  - reconnect helper와 implicit retry/replay 없이 새 Session 생성을 명시적 결정으로 유지
 - [ ] 기능 기준 directory 재배치
   - public umbrella include는 그대로 유지
   - 20줄 파일 남발 없이 client/session, server/lifecycle/routing,

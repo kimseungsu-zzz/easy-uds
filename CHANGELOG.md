@@ -4,6 +4,12 @@ All notable changes to this project are documented here.
 
 ## Unreleased 0.7.0 — 🌱 Usability Foundation
 
+- Added lock-free `Session::status()` and `valid()` snapshots with three
+  explicit states: `active`, `broken`, and `moved_from`. The API does not probe
+  the peer, reconnect, or replay requests; `active` means only that no failure
+  has been observed yet.
+- Documented the one-way Session transition model, concurrent observation,
+  move semantics, dedicated-stream independence, and explicit retry boundary.
 - Added a compact operational error model: one `Error` type, stable
   `ErrorCode` meanings, and lossless original `errno` access through
   `system_code()`. `Error` remains a `std::system_error`; its inherited

@@ -3,6 +3,7 @@
 #include <chrono>
 #include <string_view>
 #include <type_traits>
+#include <utility>
 
 #include <unistd.h>
 
@@ -11,6 +12,11 @@ static_assert(easy_uds::protocol_version == 2U);
 static_assert(sizeof(easy_uds::BorrowedFd) == sizeof(int));
 static_assert(sizeof(easy_uds::OwnedFd) == sizeof(int));
 static_assert(!std::is_copy_constructible_v<easy_uds::OwnedFd>);
+static_assert(std::is_same_v<decltype(std::declval<const easy_uds::Session&>().status()),
+                             easy_uds::SessionStatus>);
+static_assert(std::is_same_v<decltype(std::declval<const easy_uds::Session&>().valid()), bool>);
+static_assert(noexcept(std::declval<const easy_uds::Session&>().status()));
+static_assert(noexcept(std::declval<const easy_uds::Session&>().valid()));
 
 int main() {
     constexpr const char* socket_path =

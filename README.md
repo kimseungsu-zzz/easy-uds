@@ -452,6 +452,8 @@ For pre-1.0 shared builds, the ELF `SOVERSION` tracks the major and minor releas
 
 ### `easy_uds::Session`
 
+- `status()` — lock-free `active` / `broken` / `moved_from` snapshot
+- `valid()` — true exactly while `status() == SessionStatus::active`
 - `request(std::string_view route, std::string_view body = {})` — multiplexed, concurrent-safe
 - `request_stream(std::string_view route, const StreamReader&, response_chunk)` — independent dedicated connection
 
@@ -464,6 +466,8 @@ enum class ErrorCode {
     system, timeout, closed, protocol, busy, too_large,
     invalid_request, unavailable, cancelled
 };
+
+enum class SessionStatus { active, broken, moved_from };
 
 struct PeerCredentials {
     pid_t pid; uid_t uid; gid_t gid;
@@ -495,7 +499,9 @@ FD ownership and retention semantics are documented in
 [`docs/api/fd-passing.md`](docs/api/fd-passing.md). Source changes from 0.6 are
 listed in [`docs/migration/0.6-to-0.7.md`](docs/migration/0.6-to-0.7.md).
 Error classification and preserved OS details are documented in
-[`docs/api/errors.md`](docs/api/errors.md).
+[`docs/api/errors.md`](docs/api/errors.md). Session state, retry, and
+concurrency semantics are documented in
+[`docs/api/session.md`](docs/api/session.md).
 
 ## Security scope
 

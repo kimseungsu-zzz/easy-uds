@@ -248,6 +248,15 @@ class Server {
 // ---- Client---------------------------------------------------------------
 class Session;
 
+// A snapshot of the persistent fixed-request connection's observed state.
+// `active` means that no failure has been observed yet; it is not a liveness
+// probe and the peer may disconnect immediately after the snapshot.
+enum class SessionStatus {
+    active = 0,
+    broken = 1,
+    moved_from = 2,
+};
+
 class Client {
   public:
     explicit Client(std::string socket_path, ClientOptions options = {});
@@ -292,6 +301,11 @@ class Session {
     Session& operator=(const Session&) = delete;
     Session(Session&&) noexcept;
     Session& operator=(Session&&) noexcept;
+
+    // Lock-free snapshots. Safe to call concurrently with request() as long as
+    // this Session object is not concurrently moved or destroyed.
+    [[nodiscard]] SessionStatus status() const noexcept;
+    [[nodiscard]] bool valid() const noexcept;
 
     [[nodiscard]] Response request(std::string_view route, std::string_view body = {});
 

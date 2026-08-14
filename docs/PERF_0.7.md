@@ -5,6 +5,42 @@ entry compares against tag `v0.6.4` with the same compiler, host, build flags,
 workload, and repeated runs. Absolute values are development measurements, not
 portable guarantees.
 
+## Explicit Session state (2026-08-14)
+
+Change: add `Session::status()` and `valid()` as lock-free snapshots of the
+existing atomic broken flag, with an explicit moved-from state. The methods
+are observer-only: `request()` gained no new branch, lock, allocation, syscall,
+or stored field.
+
+### Default hot-path A/B
+
+WSL2, g++ 15.2, CMake Release, empty payload. Each row is the median of three
+alternating runs from separately built pre-state-API `1e06934` and current
+trees. Each run uses 30,000 requests and one shared Session.
+
+| Workload / revision | Throughput | p50 | p99 | CPU-s / 1M |
+|---|---:|---:|---:|---:|
+| Session c1 / `1e06934` | 23.82k req/s | 34.964 us | 160.601 us | 63.27 |
+| Session c1 / state API | 23.57k req/s | 35.107 us | 151.746 us | 63.29 |
+| c1 delta | -1.0% | +0.4% | -5.5% | +0.0% |
+| Session c8 / `1e06934` | 33.63k req/s | 221.205 us | 638.844 us | 171.15 |
+| Session c8 / state API | 33.38k req/s | 222.230 us | 656.057 us | 172.22 |
+| c8 delta | -0.7% | +0.5% | +2.7% | +0.6% |
+
+Every median remains inside the 0.7 gate. Because the benchmark does not call
+the new observers and the request path is byte-for-byte source-equivalent,
+the variation is scheduling noise; the explicit state API is retained.
+
+### Correctness gates
+
+- Active, timeout-broken, peer-close-broken, moved-from, move-construction,
+  and move-assignment states have dedicated assertions.
+- An observer repeatedly calls both state methods while eight threads share
+  the Session; the Release, ASan/UBSan, and TSan suites pass.
+- Static and shared Werror builds, stress tests, and installed-package
+  consumers pass. The consumer checks the public return types and `noexcept`
+  contract.
+
 ## Semantic error model (2026-08-13)
 
 Change: operational exceptions now use one `Error` type with an easy-uds

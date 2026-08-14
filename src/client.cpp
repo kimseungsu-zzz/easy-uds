@@ -491,6 +491,18 @@ Session& Session::operator=(Session&& other) noexcept {
     return *this;
 }
 
+SessionStatus Session::status() const noexcept {
+    if (!state_) {
+        return SessionStatus::moved_from;
+    }
+    return state_->broken.load(std::memory_order_acquire) ? SessionStatus::broken
+                                                          : SessionStatus::active;
+}
+
+bool Session::valid() const noexcept {
+    return status() == SessionStatus::active;
+}
+
 Response Session::request(std::string_view route, std::string_view body) {
     if (!state_) {
         throw std::logic_error("session has been moved from");

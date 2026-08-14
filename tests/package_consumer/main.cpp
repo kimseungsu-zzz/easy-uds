@@ -15,6 +15,7 @@ static_assert(easy_uds::version == std::string_view{"0.7.0"});
 static_assert(easy_uds::protocol_version == 2U);
 static_assert(sizeof(easy_uds::BorrowedFd) == sizeof(int));
 static_assert(sizeof(easy_uds::OwnedFd) == sizeof(int));
+static_assert(std::is_aggregate_v<easy_uds::Response>);
 static_assert(!std::is_copy_constructible_v<easy_uds::OwnedFd>);
 static_assert(std::is_same_v<decltype(std::declval<const easy_uds::Session&>().status()),
                              easy_uds::SessionStatus>);

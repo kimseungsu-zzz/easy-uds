@@ -63,6 +63,8 @@ explicitly rather than relying on retry or replay.
 an optional move-only `OwnedFd`. The handler owns the received descriptor for
 the duration of the call; duplicate it when retaining it after return. `Response`
 contains a wire-transparent non-negative `Status` and a string body. The
+`Response::ok(body)` helper covers the common success case without changing the
+aggregate `Response{status, body}` form used for explicit statuses. The
 `status_*` constants cover the common `200`, `404`, `408`, `409`, `500`, and
 `503` outcomes; applications may return another non-negative status.
 

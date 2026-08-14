@@ -61,11 +61,11 @@ int main() {
     easy_uds::Server server("/tmp/easy-uds.sock");
 
     server.on("/ping", [](const easy_uds::Request&) {
-        return easy_uds::Response{200, "pong"};
+        return easy_uds::Response::ok("pong");
     });
 
     server.on("/echo", [](const easy_uds::Request& request) {
-        return easy_uds::Response{200, request.body};
+        return easy_uds::Response::ok(request.body);
     });
 
     std::cout << "Server listening on " << server.socket_path() << '\n';
@@ -405,7 +405,8 @@ The streaming benchmark generates bytes on demand and discards them at the recei
 
 ### Robot HAL composition example
 
-`examples/robot_hal_server.cpp` is a hardware-free driver-shaped example that
+`examples/server.cpp` and `examples/client.cpp` are the fixed-RPC beginner
+path. `examples/robot_hal_server.cpp` is a hardware-free driver-shaped example that
 combines short `/health` and `/diagnostics` routes, contextual handlers,
 independent `drivetrain`/`arm` domains, `LatestWins` velocity commands, and
 `RejectIfBusy` calibration. Build it with the examples target and see the
@@ -456,6 +457,10 @@ Then run the client from another terminal:
 ```bash
 ./build/easy_uds_client_example
 ```
+
+Streaming is intentionally a separate step; see
+[`docs/examples/streaming.md`](docs/examples/streaming.md) and the
+`easy_uds_streaming_*_example` targets.
 
 ## Install and use from CMake
 
@@ -527,6 +532,7 @@ are also self-contained; see the [public header map](docs/api/headers.md).
 
 - `StatsMode` — `disabled` (default) or opt-in `basic` cumulative counters
 - `QueuePolicy` — `fifo`, `latest_wins`, or `reject_if_busy`
+- `Response::ok(body)` — beginner convenience; aggregate `Response{status, body}` remains available
 
 ```cpp
 using Status = std::int32_t;  // status_ok=200, status_request_timeout=408, status_not_found=404, ...
@@ -603,6 +609,8 @@ cmake/                  Installed-package CMake config
 docs/                   Protocol documentation
 docs/ROADMAP_0.6.md     0.6.x technical experiment and release boundaries
 docs/ROADMAP_0.7.md     0.7 usability, API, and compatibility plan
+docs/ERGONOMICS_0.7.md  Beginner-first syntax and progressive disclosure audit
+docs/RELEASE_0.7.md     Release-candidate scope and approval boundary
 docs/PERF_0.7.md        0.7 regression measurements against v0.6.4
 docs/history/experiments/0.6.md  Standalone UDS capability probes (history)
 docs/history/README.md    Historical measurements and experiment index

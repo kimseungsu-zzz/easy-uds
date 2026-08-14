@@ -110,6 +110,31 @@ jobs:
       - name: Test
         run: ctest --test-dir build --output-on-failure
 
+  compile-error-ux:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler: [gcc, clang]
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Select compiler
+        shell: bash
+        run: |
+          if [[ "${{ matrix.compiler }}" == "clang" ]]; then
+            echo "CXX=clang++" >> "$GITHUB_ENV"
+          else
+            echo "CXX=g++" >> "$GITHUB_ENV"
+          fi
+
+      - name: Compile invalid-usage probes and expect readable failures
+        run: bash scripts/compile_error_smoke.sh
+
   experiments:
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -293,3 +318,15 @@ jobs:
             -DCMAKE_PREFIX_PATH="$RUNNER_TEMP/easy-uds-prefix"
           cmake --build consumer-build --parallel
           ./consumer-build/easy_uds_package_consumer
+
+      - name: Build beginner find_package consumer
+        run: |
+          cmake -S tests/beginner -B beginner-build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_PREFIX_PATH="$RUNNER_TEMP/easy-uds-prefix"
+          cmake --build beginner-build --parallel
+
+      - name: Run beginner package consumer against a real server
+        run: |
+          bash scripts/beginner_consumer_smoke.sh \
+            beginner-build "$RUNNER_TEMP/easy-uds-beginner.sock"

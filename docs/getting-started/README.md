@@ -31,10 +31,10 @@ In another terminal:
 ./build/easy_uds_client_example
 ```
 
-The server registers `/ping`, `/echo`, and `/discard`. The client demonstrates
-one-shot fixed requests followed by a streaming request. The pathname socket is
-removed by the server's normal lifecycle cleanup; choose a different path as
-the first argument when running your own server.
+The server registers only `/ping` and `/echo`; the first run is fixed RPC with
+no streaming, Session, or scheduling concepts. The pathname socket is removed
+by the server's normal lifecycle cleanup; choose a different path as the first
+argument when running your own server.
 
 ## 3. The smallest application
 
@@ -46,7 +46,7 @@ The beginner API has one server entry point and one client entry point:
 int main() {
     easy_uds::Server server("/tmp/my-service.sock");
     server.on("/echo", [](const easy_uds::Request& request) {
-        return easy_uds::Response{easy_uds::status_ok, request.body};
+        return easy_uds::Response::ok(request.body);
     });
     server.run();
 }
@@ -61,11 +61,18 @@ const auto response = client.request("/echo", "hello");
 callers, create one persistent `Client::session()` and share that move-only
 `Session` explicitly; see [Session](../api/session.md).
 
+`Response::ok()` is a convenience for the common successful reply. The
+aggregate form, `Response{status, body}`, remains available when an explicit
+status is needed. Status values follow familiar numeric conventions such as
+`200`, `404`, and `409`, but easy-uds is not HTTP and does not implement HTTP
+headers, methods, or routing rules.
+
 ## 4. Choose the next example
 
 | Need | Start here | What it teaches |
 |---|---|---|
-| Basic RPC and streaming | [`examples/server.cpp`](../../examples/server.cpp) | plain routes, fixed response, stream route |
+| Basic fixed RPC | [`examples/server.cpp`](../../examples/server.cpp) | plain routes and fixed response |
+| Streaming when needed | [`examples/streaming_server.cpp`](../../examples/streaming_server.cpp) + [`streaming_client.cpp`](../../examples/streaming_client.cpp) | pull callbacks, chunk lifetime, half-duplex stream |
 | Persistent polling | [Session API](../api/session.md) | multiplexing, state, timeout behavior |
 | Ordered hardware commands | [Robot HAL walkthrough](../examples/robot-hal.md) | ownership boundaries, domains, policies, context, stats |
 | Descriptor transfer | [FD passing](../api/fd-passing.md) | borrowed input and owned request lifetime |

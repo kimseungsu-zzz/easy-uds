@@ -107,6 +107,31 @@ if(EASY_UDS_BUILD_EXAMPLES)
     add_executable(easy_uds_client_example examples/client.cpp)
     target_link_libraries(easy_uds_client_example PRIVATE easy_uds::easy_uds)
 
+    add_executable(easy_uds_streaming_server_example
+        examples/streaming_server.cpp)
+    target_link_libraries(easy_uds_streaming_server_example PRIVATE
+        easy_uds::easy_uds)
+
+    add_executable(easy_uds_streaming_client_example
+        examples/streaming_client.cpp)
+    target_link_libraries(easy_uds_streaming_client_example PRIVATE
+        easy_uds::easy_uds)
+
+    foreach(example_target IN ITEMS
+            easy_uds_server_example
+            easy_uds_client_example
+            easy_uds_streaming_server_example
+            easy_uds_streaming_client_example)
+        target_compile_options(${example_target} PRIVATE
+            $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Wall;-Wextra;-Wpedantic>
+        )
+        if(EASY_UDS_WARNINGS_AS_ERRORS)
+            target_compile_options(${example_target} PRIVATE
+                $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Werror>
+            )
+        endif()
+    endforeach()
+
     add_executable(easy_uds_robot_hal_server_example
         examples/robot_hal_server.cpp)
     target_link_libraries(easy_uds_robot_hal_server_example PRIVATE
@@ -151,6 +176,23 @@ if(EASY_UDS_BUILD_TESTS)
         endif()
         add_test(NAME easy_uds.unit COMMAND easy_uds_test)
         set_tests_properties(easy_uds.unit PROPERTIES TIMEOUT 20)
+
+        add_executable(easy_uds_rc_adversarial
+            tests/easy_uds_test/common.cpp
+            tests/easy_uds_test/rc_adversarial.cpp
+            tests/easy_uds_test/rc_main.cpp
+        )
+        target_link_libraries(easy_uds_rc_adversarial PRIVATE easy_uds::easy_uds)
+        target_compile_options(easy_uds_rc_adversarial PRIVATE
+            $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Wall;-Wextra;-Wpedantic>
+        )
+        if(EASY_UDS_WARNINGS_AS_ERRORS)
+            target_compile_options(easy_uds_rc_adversarial PRIVATE
+                $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Werror>
+            )
+        endif()
+        add_test(NAME easy_uds.rc_adversarial COMMAND easy_uds_rc_adversarial)
+        set_tests_properties(easy_uds.rc_adversarial PROPERTIES TIMEOUT 20)
 
         add_executable(easy_uds_stress_test tests/easy_uds_stress_test.cpp)
         target_link_libraries(easy_uds_stress_test PRIVATE easy_uds::easy_uds)

@@ -11,6 +11,8 @@ release promise.
   including io_uring and shared-memory probes.
 - [History index](../history/README.md) — historical measurements kept out of
   the beginner API path.
+- [0.7 release-candidate record](../RELEASE_0.7.md) — scope freeze and final
+  verification gates.
 - [Public headers and source layout](../api/headers.md) — where the stable
   boundary ends and implementation details begin.
 

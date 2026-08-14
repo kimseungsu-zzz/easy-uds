@@ -124,11 +124,15 @@ static/shared package consumer는 모든 phase의 필수 gate다.
 - [x] `docs/internals/`: protocol, performance, experiments, public boundary index
 - [x] 모든 중요 API reference에 Purpose, Parameters, Return, Thread safety,
       Ownership, Lifetime, Timeout, Error, Performance, Example 명시
+- [x] [Beginner ergonomics audit](ERGONOMICS_0.7.md)와 `Response::ok()` 최소 helper
+      후보 비교 기록
 - [x] examples 학습 순서와 ownership/concurrency 기준 문서화
-  - hello world, persistent session, concurrent requests, serialized commands
-  - streaming, FD passing, peer credentials, stats, production server
+  - fixed hello world, persistent session, concurrent requests, serialized commands
+  - streaming, FD passing, peer credentials, stats, production server as next steps
   - [x] `/drive/velocity`, `/arm/position`, `/health`, `/diagnostics`를 포함한
         컴파일 가능한 robot HAL composition example
+- [x] 설치 package beginner consumer와 GCC/Clang compile-error UX probe 추가
+- [x] fixed-RPC와 streaming example 분리
 - [x] 0.6 실험을 `experiments/0.6/`와 `docs/history/experiments/`로 이동하고
       재현 경로를 유지
 
@@ -141,6 +145,10 @@ static/shared package consumer는 모든 phase의 필수 gate다.
 - [x] public API naming/ownership/thread-safety consistency review
 - [x] documentation link/example build check
 - [x] protocol v2 유지와 0.6 → 0.7 migration 동결
+
+The release-candidate rationale and approval boundary are recorded in
+[`RELEASE_0.7.md`](RELEASE_0.7.md). Passing the checklist does not create a
+tag or release.
 
 The stabilization checklist was verified by the full workflow-dispatch gate on
 the current `main` commit. A release tag remains a separate explicit approval

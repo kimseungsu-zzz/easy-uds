@@ -59,11 +59,11 @@ int main() {
     easy_uds::Server server("/tmp/easy-uds.sock");
 
     server.on("/ping", [](const easy_uds::Request&) {
-        return easy_uds::Response{200, "pong"};
+        return easy_uds::Response::ok("pong");
     });
 
     server.on("/echo", [](const easy_uds::Request& request) {
-        return easy_uds::Response{200, request.body};
+        return easy_uds::Response::ok(request.body);
     });
 
     std::cout << "Server listening on " << server.socket_path() << '\n';
@@ -477,7 +477,8 @@ cmake --build build-bench --parallel
 
 ### Robot HAL 조합 예제
 
-[`examples/robot_hal_server.cpp`](examples/robot_hal_server.cpp)는 실제
+[`examples/server.cpp`](examples/server.cpp)와 [`examples/client.cpp`](examples/client.cpp)가
+fixed RPC 입문 경로이고, [`examples/robot_hal_server.cpp`](examples/robot_hal_server.cpp)는 실제
 하드웨어 없이도 driver 경계를 보여주는 예제입니다. 짧은 `/health` 및
 `/diagnostics` route, contextual handler, `drivetrain`/`arm` domain,
 `LatestWins` velocity command, `RejectIfBusy` calibration을 함께 사용합니다.
@@ -506,6 +507,9 @@ Server:
 ```bash
 ./build/easy_uds_client_example
 ```
+
+Streaming은 별도 단계로 분리했습니다. [`docs/examples/streaming.md`](docs/examples/streaming.md)와
+`easy_uds_streaming_*_example` target을 참조하십시오.
 
 ## 설치 및 CMake 프로젝트에서 사용
 
@@ -578,6 +582,7 @@ header도 각각 독립적으로 include할 수 있습니다. 자세한 매핑�
 
 - `StatsMode` — 기본 `disabled` 또는 누적 counter를 켜는 `basic`
 - `QueuePolicy` — `fifo`, `latest_wins`, `reject_if_busy`
+- `Response::ok(body)` — beginner 성공 응답 helper; 명시적 status에는 aggregate `Response{status, body}` 유지
 
 ```cpp
 using Status = std::int32_t;  // status_ok=200, status_request_timeout=408, status_not_found=404, ...
@@ -652,6 +657,8 @@ cmake/                  설치용 CMake config
 docs/                   protocol 문서
 docs/ROADMAP_0.6.md     0.6.x 기술 실험 및 릴리즈 경계
 docs/ROADMAP_0.7.md     0.7 사용성·API·호환성 계획
+docs/ERGONOMICS_0.7.md  beginner-first syntax 및 progressive disclosure audit
+docs/RELEASE_0.7.md     release candidate 범위와 승인 경계
 docs/PERF_0.7.md        v0.6.4 대비 0.7 성능 회귀 측정
 docs/history/experiments/0.6.md  독립 UDS 기술 capability probe (history)
 docs/history/README.md    history 및 실험 인덱스

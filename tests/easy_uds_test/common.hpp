@@ -123,5 +123,6 @@ void test_stop_interrupts_blocked_workers();
 void test_handler_error_opt_out();
 void test_global_memory_budgets();
 void test_partial_request_uses_global_budget();
+void test_release_candidate_adversarial();
 
 } // namespace easy_uds::test

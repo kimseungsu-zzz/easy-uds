@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <string>
+#include <utility>
 
 namespace easy_uds {
 
@@ -21,6 +22,13 @@ inline constexpr Status status_unavailable = 503;
 struct Response {
     Status status = status_ok;
     std::string body;
+
+    // The smallest beginner convenience: preserve aggregate construction for
+    // explicit statuses while making the common successful reply read
+    // naturally. This is inline and layout-neutral.
+    [[nodiscard]] static Response ok(std::string body = {}) {
+        return Response{status_ok, std::move(body)};
+    }
 };
 
 } // namespace easy_uds

@@ -46,6 +46,10 @@ All notable changes to this project are documented here.
   or `Request`/regular-worker-job layout growth, and added deadline-disabled,
   deadline-expiry, disconnect, shutdown, prefix, serialized, and lifetime
   regressions.
+- Added the layout-neutral `Response::ok()` beginner helper while retaining
+  aggregate responses for explicit statuses. Split fixed-RPC and streaming
+  examples, added the installed beginner package consumer, compile-error UX
+  probes, and a dedicated release-candidate adversarial audit.
 
 - Split the public umbrella into self-contained client, Session, server,
   request, response, stream, and options headers while preserving

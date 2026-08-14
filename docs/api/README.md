@@ -14,7 +14,7 @@ performance cost.
 | One-shot client | [`client.hpp`](../../include/easy_uds/client.hpp) | [Core API](core.md), [Getting started](../getting-started/README.md) |
 | Persistent multiplexed client | [`session.hpp`](../../include/easy_uds/session.hpp) | [Session state](session.md) |
 | Request and response values | [`request.hpp`](../../include/easy_uds/request.hpp) / [`response.hpp`](../../include/easy_uds/response.hpp) | [FD passing](fd-passing.md), [Request context](request-context.md) |
-| Streaming | [`stream.hpp`](../../include/easy_uds/stream.hpp) | [Core API](core.md) and [`examples/server.cpp`](../../examples/server.cpp) |
+| Streaming | [`stream.hpp`](../../include/easy_uds/stream.hpp) | [Core API](core.md) and [streaming example](../examples/streaming.md) |
 | Error classification | [`error.hpp`](../../include/easy_uds/error.hpp) | [Error model](errors.md) |
 | Descriptor ownership | [`fd.hpp`](../../include/easy_uds/fd.hpp) | [FD passing](fd-passing.md) |
 | Request metadata | [`request_context.hpp`](../../include/easy_uds/request_context.hpp) | [Request context](request-context.md) |
@@ -40,3 +40,6 @@ performance cost.
 
 The header comments are the normative API details; these pages explain how to
 compose them without requiring a source-tree tour.
+
+For the beginner/advanced boundary and the final syntax comparison, see the
+[0.7 ergonomics audit](../ERGONOMICS_0.7.md).

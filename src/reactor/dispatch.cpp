@@ -68,14 +68,17 @@ bool enqueue_worker_job(const std::shared_ptr<ServerState>& state, std::shared_p
     PendingJob job;
     job.connection = std::move(connection);
     job.request = std::move(request);
-    job.arrival_time = arrival_time;
     job.deadline = deadline;
     job.handler = std::move(handler);
     job.is_stream = is_stream;
     job.request_bytes = job.request.route.size() + job.request.body.size();
     job.release_stream_request_bytes = is_stream && request_bytes_reserved;
     job.buffered = std::move(buffered);
-    job.buffered_offset = buffered_offset;
+    if (is_stream) {
+        job.buffered_offset = buffered_offset;
+    } else {
+        job.arrival_ticks = arrival_time.time_since_epoch().count();
+    }
     const auto accounting_connection = job.connection;
     const std::size_t accounting_bytes = job.request_bytes;
     {

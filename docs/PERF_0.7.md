@@ -241,6 +241,9 @@ The existing `Handler(const Request&)` path does not construct a context or
 allocate. Its immutable route entry keeps the original size and reuses the
 existing serialized flag byte for a contextual bit, so the basic invocation
 adds one predictable branch without reading the context callback storage.
+Regular fixed jobs also share one existing union word between first-byte
+arrival ticks and the stream-only buffered offset, preserving the original
+multiplexed worker-queue footprint.
 
 ### Basic-handler hot-path A/B
 
@@ -255,12 +258,12 @@ gate value.
 
 | Workload / revision | Throughput | p50 | p99 | CPU-s / 1M |
 |---|---:|---:|---:|---:|
-| Session c1 / `7d30528` | 17.48k req/s | 44.877 us | 200.480 us | 81.85 |
-| Session c1 / RequestContext tree, basic handler | 17.69k req/s | 45.043 us | 199.220 us | 81.30 |
-| c1 delta | +1.2% | +0.4% | -0.6% | -0.7% |
-| Session c8 / `7d30528` | 24.84k req/s | 295.827 us | 917.577 us | 203.70 |
-| Session c8 / RequestContext tree, basic handler | 24.51k req/s | 301.242 us | 912.943 us | 205.95 |
-| c8 delta | -1.3% | +1.8% | -0.5% | +1.1% |
+| Session c1 / `7d30528` | 16.26k req/s | 47.950 us | 218.997 us | 87.76 |
+| Session c1 / RequestContext tree, basic handler | 16.17k req/s | 48.125 us | 216.543 us | 88.63 |
+| c1 delta | -0.5% | +0.4% | -1.1% | +1.0% |
+| Session c8 / `7d30528` | 24.72k req/s | 298.411 us | 903.742 us | 204.26 |
+| Session c8 / RequestContext tree, basic handler | 24.65k req/s | 299.300 us | 900.049 us | 205.28 |
+| c8 delta | -0.3% | +0.3% | -0.4% | +0.5% |
 
 Every basic-handler median remains well inside the 0.7 gate. Decision: keep
 the explicit context path and its single tagged-entry branch. The basic

@@ -377,7 +377,8 @@ void worker_loop(const std::shared_ptr<ServerState>& state) {
             } else if (state->running.load()) {
                 easy_uds::Response response =
                     invoke_request_handler(job.handler, job.request, state,
-                                           job.connection, job.arrival_time,
+                                           job.connection,
+                                           job.fixed_arrival_time(),
                                            job.deadline);
                 try {
                     write_fixed_response(state, job.connection, job.request.request_id,
@@ -391,8 +392,9 @@ void worker_loop(const std::shared_ptr<ServerState>& state) {
             job.connection->closing.store(true, std::memory_order_release);
         }
         if (complete_regular_request(state, job.connection, job.request_bytes)) {
-            continue_connection(state, job.connection, std::move(job.buffered),
-                                job.buffered_offset);
+            // Fixed reactor jobs never carry leased stream bytes; the union
+            // word holds arrival ticks for this executor class.
+            continue_connection(state, job.connection, std::move(job.buffered), 0);
         }
     }
 }

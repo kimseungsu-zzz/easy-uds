@@ -141,7 +141,6 @@ struct ReactorConnection {
 struct PendingJob {
     std::shared_ptr<Connection> connection;
     easy_uds::Request request;
-    Clock::time_point arrival_time{};
     Deadline deadline = Deadline::max();
     std::shared_ptr<const HandlerEntry> handler;
     bool is_stream = false;
@@ -152,7 +151,17 @@ struct PendingJob {
     // For stream jobs: bytes already read from the socket before the lease
     // hand-off, followed by the fd.
     std::string buffered;
-    std::size_t buffered_offset = 0;
+    // Fixed jobs need first-byte arrival while stream jobs need a buffer
+    // offset, never both. Sharing their existing word keeps the regular
+    // multiplexed worker-queue footprint unchanged.
+    union {
+        std::size_t buffered_offset = 0;
+        Clock::duration::rep arrival_ticks;
+    };
+
+    [[nodiscard]] Clock::time_point fixed_arrival_time() const noexcept {
+        return Clock::time_point{Clock::duration{arrival_ticks}};
+    }
 };
 
 struct SerializedJob {

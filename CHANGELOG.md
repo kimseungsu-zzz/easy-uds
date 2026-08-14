@@ -14,8 +14,9 @@ All notable changes to this project are documented here.
   unchanged, while future scheduling controls can extend one options object
   instead of multiplying `on_*` overload families.
 - Preserved the basic handler hot path without per-request context allocation
-  or `Request` layout growth, and added deadline-disabled, deadline-expiry,
-  disconnect, shutdown, prefix, serialized, and lifetime regressions.
+  or `Request`/regular-worker-job layout growth, and added deadline-disabled,
+  deadline-expiry, disconnect, shutdown, prefix, serialized, and lifetime
+  regressions.
 
 - Split the public umbrella into self-contained client, Session, server,
   request, response, stream, and options headers while preserving

@@ -17,7 +17,10 @@ Result wait_once(platform_types::NativeSocket fd, Interest interest,
         if (error == WSAEINTR) {
             return {Status::interrupted, error};
         }
-        return {Status::error, error};
+        // The synchronous transport translates this result through the
+        // generic errno category. Preserve the mapped errno rather than
+        // leaking the numeric Winsock namespace (100xx) upward.
+        return {Status::error, errno};
     }
     if (result == 0) {
         return {Status::timed_out, 0};

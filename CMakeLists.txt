@@ -65,6 +65,8 @@ add_library(easy_uds
     src/system/platform/socket_lifecycle.hpp
     src/system/platform/linux/socket_io.cpp
     src/system/platform/socket_io.hpp
+    src/system/platform/linux/socket_wait.cpp
+    src/system/platform/socket_wait.hpp
     src/system/transport/transport.cpp
     src/system/transport/transport.hpp
     src/system/reactor/dispatch.cpp
@@ -235,6 +237,23 @@ if(EASY_UDS_BUILD_TESTS)
         add_test(NAME easy_uds.readiness COMMAND easy_uds_readiness_test)
         set_tests_properties(easy_uds.readiness PROPERTIES
             TIMEOUT 5 LABELS "rc;platform;readiness")
+
+        add_executable(easy_uds_socket_wait_test tests/socket_wait.cpp)
+        target_include_directories(easy_uds_socket_wait_test PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/src/system)
+        target_link_libraries(easy_uds_socket_wait_test PRIVATE easy_uds::easy_uds)
+        target_compile_features(easy_uds_socket_wait_test PRIVATE cxx_std_17)
+        target_compile_options(easy_uds_socket_wait_test PRIVATE
+            $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Wall;-Wextra;-Wpedantic>
+        )
+        if(EASY_UDS_WARNINGS_AS_ERRORS)
+            target_compile_options(easy_uds_socket_wait_test PRIVATE
+                $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Werror>
+            )
+        endif()
+        add_test(NAME easy_uds.socket_wait COMMAND easy_uds_socket_wait_test)
+        set_tests_properties(easy_uds.socket_wait PROPERTIES
+            TIMEOUT 5 LABELS "rc;platform;socket-wait")
 
         add_executable(easy_uds_descriptor_passing_test tests/descriptor_passing.cpp)
         target_include_directories(easy_uds_descriptor_passing_test PRIVATE

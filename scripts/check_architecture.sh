@@ -42,6 +42,11 @@ check_no_match \
     '^[[:space:]]*#[[:space:]]*include[[:space:]]*[<"](sys/socket\.h|unistd\.h|fcntl\.h)[>"]|(^|[^[:alnum:]_])::(socket|connect|accept|bind|listen|send|recv|sendmsg|getsockopt|fcntl|close|shutdown)[[:space:]]*\(' \
     "${root_dir}/src/system/transport"
 
+check_no_match \
+    "transport policy must use socket wait capability" \
+    'poll\.h|(^|[^[:alnum:]_])::poll[[:space:]]*\(' \
+    "${root_dir}/src/system/transport"
+
 for policy_dir in reactor runtime; do
     check_no_match \
         "system/${policy_dir} policy must use socket capabilities" \

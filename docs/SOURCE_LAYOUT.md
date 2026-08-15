@@ -62,3 +62,8 @@ Phase 4F moves socket descriptor lifecycle, raw byte I/O, and connect-error
 queries behind concrete system platform seams. The POSIX endpoint value
 contract now lives in `src/system/platform/endpoint.hpp`; Linux syscall
 implementations remain in `src/system/platform/linux/`.
+
+Phase 4G adds `platform/socket_wait.hpp` with a concrete Linux implementation
+for one synchronous `poll` attempt. Transport retains deadline calculation,
+`EINTR` retry, timeout conversion, and public error mapping; this wait seam is
+not the reactor readiness contract.

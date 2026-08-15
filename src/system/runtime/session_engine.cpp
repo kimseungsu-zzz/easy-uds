@@ -63,8 +63,9 @@ void session_reader_loop(SessionState* state) {
         while (!state->reader_stop.load(std::memory_order_relaxed)) {
             HeaderBytes header{};
             if (!reader.buffered()) {
-                wait_for_io(state->fd.get(), POLLIN, std::chrono::milliseconds{0},
-                            Deadline::max(), "receive timed out");
+                wait_for_io(state->fd.get(), socket_wait::Interest::read,
+                            std::chrono::milliseconds{0}, Deadline::max(),
+                            "receive timed out");
             }
             reader.read(header.data(), header.size(), state->options.io_timeout,
                         Deadline::max());

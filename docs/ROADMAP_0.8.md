@@ -26,6 +26,11 @@ The Phase 4F `src/system/platform/socket_io.hpp` seam likewise exposes POSIX
 boundary today; do not present it as a final Windows socket contract before the
 0.8 transport model is selected.
 
+Phase 4G adds `src/system/platform/socket_wait.hpp` for one synchronous wait
+attempt. Its current `Interest`/result shape is useful for the Linux transport
+seam, but it is not a promise that Windows will use `poll`-style waiting; an
+IOCP or another completion model may require a different setup-time contract.
+
 ## Capability decisions still open
 
 - Windows readiness may use a completion model rather than the current Linux

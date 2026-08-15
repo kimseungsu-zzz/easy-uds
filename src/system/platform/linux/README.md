@@ -18,6 +18,9 @@ and the existing one-descriptor/frame ordering rules.
 setsockopt setup, while `socket_io.cpp` owns raw byte I/O, ordinary gathered
 write, and the `SO_ERROR` connect-completion query. Both report raw syscall
 results; transport code retains retry, deadline, and public error semantics.
+`socket_wait.cpp` owns one synchronous `poll` attempt and translates
+`POLLIN`/`POLLOUT`/`POLLERR`/`POLLHUP`/`POLLNVAL` into a small result. It is
+separate from the reactor's multi-connection readiness/eventfd contract.
 Higher layers keep their existing value/timeout semantics and call these
 functions directly; there is no virtual transport or type-erased backend.
 

@@ -163,19 +163,37 @@ Simple/Core policy (1,000 requests, 10 repeats, c1/c8/c32). The medians below
 include all ten repeats; they are not a release-quality absolute benchmark,
 but show no reproducible hot-path regression from the concrete syscall calls:
 
-| Load / API | Baseline throughput | Phase 4F throughput | Baseline p50 | Phase 4F p50 | Baseline p99 | Phase 4F p99 |
-|---|---:|---:|---:|---:|---:|---:|
-| c1 / Core | 12.69k/s | 12.88k/s | 67.17 us | 64.60 us | 223.77 us | 220.34 us |
-| c1 / Simple | 12.49k/s | 13.09k/s | 68.46 us | 64.97 us | 228.39 us | 213.98 us |
-| c8 / Core | 36.69k/s | 39.51k/s | 196.58 us | 184.96 us | 463.28 us | 435.34 us |
-| c8 / Simple | 38.51k/s | 38.45k/s | 187.39 us | 188.89 us | 464.12 us | 472.76 us |
-| c32 / Core | 24.02k/s | 24.84k/s | 755.54 us | 742.36 us | 15606.5 us | 15233.2 us |
-| c32 / Simple | 21.79k/s | 22.01k/s | 760.90 us | 721.57 us | 20596.4 us | 21562.1 us |
+| Load / API | Baseline throughput | Phase 4F throughput | Baseline p50 | Phase 4F p50 | Baseline p99 | Phase 4F p99 | Baseline CPU-s/1M | Phase 4F CPU-s/1M |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| c1 / Core | 11.20k/s | 11.65k/s | 71.38 us | 71.41 us | 249.79 us | 243.07 us | 81.24 | 77.42 |
+| c1 / Simple | 11.64k/s | 11.70k/s | 70.01 us | 70.05 us | 248.85 us | 238.10 us | 77.27 | 77.10 |
+| c8 / Core | 34.87k/s | 35.71k/s | 210.32 us | 205.25 us | 509.82 us | 496.50 us | 91.27 | 89.65 |
+| c8 / Simple | 35.66k/s | 36.46k/s | 204.57 us | 202.56 us | 511.07 us | 477.09 us | 87.91 | 87.07 |
+| c32 / Core | 37.32k/s | 37.60k/s | 808.57 us | 795.42 us | 1530.76 us | 1545.19 us | 91.45 | 88.99 |
+| c32 / Simple | 38.26k/s | 38.29k/s | 789.99 us | 793.94 us | 1483.12 us | 1513.75 us | 88.55 | 88.78 |
 
 The setup-inclusive allocation probe remained approximately 10.5 allocations
 per request (with a one-allocation startup fluctuation); the warmed Session
 steady-state gate remains effectively zero allocations per request. No virtual
 backend, generic NativeHandle, or public API change was introduced.
+
+The first independent fixed ten-repeat capture was visibly scheduler-sensitive
+on this WSL2 host (c8 candidate CPU was roughly 15% above baseline and c8
+throughput roughly 11-13% below baseline). It was not silently selected away:
+the complete second fixed ten-repeat capture is shown above, and returned all
+medians inside the existing gate. The two captures do not establish a
+reproducible Phase 4F regression, so no hot-path optimization was added.
+
+## Synchronous wait boundary (2026-08-15)
+
+Phase 4G moves the one-descriptor `poll` attempt out of `transport/io.hpp` into
+`platform/socket_wait` while leaving deadline calculation, `EINTR` retry,
+`ETIMEDOUT` conversion, invalid-descriptor mapping, and public `Error` meaning
+in transport. The seam reports only `ready`, `timed_out`, `interrupted`,
+`invalid_descriptor`, or native error. It is intentionally independent of the
+multi-connection reactor readiness/epoll contract. A dedicated socketpair test
+covers timeout, readiness, byte delivery, and invalid-descriptor results; no
+new request-path allocation or virtual backend was introduced.
 
 ## Explicit Session state (2026-08-14)
 

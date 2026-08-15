@@ -14,7 +14,6 @@
 #include <thread>
 #include <utility>
 
-#include <poll.h>
 namespace easy_uds::detail {
 namespace {
 
@@ -208,8 +207,9 @@ void continue_connection(const std::shared_ptr<ServerState>& state,
                 if (grace.count() == 0) {
                     break;
                 }
-                wait_for_io(fd, POLLIN, std::chrono::milliseconds{0},
-                            deadline_from_now(grace), "receive timed out");
+                wait_for_io(fd, socket_wait::Interest::read,
+                            std::chrono::milliseconds{0}, deadline_from_now(grace),
+                            "receive timed out");
                 request_started = true;
             }
             const Clock::time_point arrival_time = Clock::now();

@@ -11,6 +11,7 @@
 #include "../platform/descriptor_passing.hpp"
 #include "../platform/socket_io.hpp"
 #include "../platform/socket_lifecycle.hpp"
+#include "../platform/socket_wait.hpp"
 #include "../platform/endpoint.hpp"
 
 #include <algorithm>
@@ -24,8 +25,6 @@
 #include <string>
 #include <system_error>
 #include <utility>
-
-#include <poll.h>
 
 namespace easy_uds::detail {
 
@@ -214,7 +213,9 @@ inline void check_absolute_deadline(Deadline deadline, const char* timeout_opera
     }
 }
 
-inline void wait_for_io(int fd, short events, std::chrono::milliseconds inactivity_timeout, Deadline absolute_deadline,
+inline void wait_for_io(int fd, socket_wait::Interest interest,
+                        std::chrono::milliseconds inactivity_timeout,
+                        Deadline absolute_deadline,
                         const char* timeout_operation) {
     Deadline wait_deadline = absolute_deadline;
     if (inactivity_timeout.count() > 0) {
@@ -227,24 +228,20 @@ inline void wait_for_io(int fd, short events, std::chrono::milliseconds inactivi
             throw_system_error(timeout_operation, ETIMEDOUT);
         }
 
-        pollfd item{};
-        item.fd = fd;
-        item.events = events;
-        const int result = ::poll(&item, 1, timeout_ms);
-        if (result < 0) {
-            if (errno == EINTR) {
-                continue;
-            }
-            throw_system_error("poll failed");
-        }
-        if (result == 0) {
-            throw_system_error(timeout_operation, ETIMEDOUT);
-        }
-        if ((item.revents & POLLNVAL) != 0) {
-            throw_system_error("socket descriptor became invalid", EBADF);
-        }
-        if ((item.revents & (events | POLLERR | POLLHUP)) != 0) {
+        const auto result = socket_wait::wait_once(fd, interest, timeout_ms);
+        switch (result.status) {
+        case socket_wait::Status::ready:
             return;
+        case socket_wait::Status::timed_out:
+            throw_system_error(timeout_operation, ETIMEDOUT);
+        case socket_wait::Status::interrupted:
+            continue;
+        case socket_wait::Status::invalid_descriptor:
+            throw_system_error("socket descriptor became invalid",
+                               result.native_error == 0 ? EBADF : result.native_error);
+        case socket_wait::Status::error:
+            throw_system_error("poll failed",
+                               result.native_error == 0 ? EIO : result.native_error);
         }
     }
 }
@@ -301,7 +298,8 @@ class BufferedReader {
                 continue;
             }
             if (errno == EAGAIN || errno == EWOULDBLOCK) {
-                wait_for_io(fd_, POLLIN, inactivity_timeout, absolute_deadline, "receive timed out");
+                wait_for_io(fd_, socket_wait::Interest::read, inactivity_timeout,
+                            absolute_deadline, "receive timed out");
                 continue;
             }
             throw_system_error("receive failed");
@@ -343,7 +341,8 @@ inline void write_exact(int fd, const void* data, std::size_t size, std::chrono:
             continue;
         }
         if (errno == EAGAIN || errno == EWOULDBLOCK) {
-            wait_for_io(fd, POLLOUT, inactivity_timeout, absolute_deadline, "send timed out");
+            wait_for_io(fd, socket_wait::Interest::write, inactivity_timeout,
+                        absolute_deadline, "send timed out");
             continue;
         }
         throw_system_error("send failed");
@@ -384,7 +383,8 @@ inline void write_iovecs_exact(int fd, iovec* parts, std::size_t part_count,
             continue;
         }
         if (errno == EAGAIN || errno == EWOULDBLOCK) {
-            wait_for_io(fd, POLLOUT, inactivity_timeout, absolute_deadline, "send timed out");
+            wait_for_io(fd, socket_wait::Interest::write, inactivity_timeout,
+                        absolute_deadline, "send timed out");
             continue;
         }
         throw_system_error("send failed");
@@ -431,7 +431,8 @@ inline void write_iovecs_exact_with_fd(int fd, iovec* parts, std::size_t part_co
             continue;
         }
         if (errno == EAGAIN || errno == EWOULDBLOCK) {
-            wait_for_io(fd, POLLOUT, inactivity_timeout, absolute_deadline, "send timed out");
+            wait_for_io(fd, socket_wait::Interest::write, inactivity_timeout,
+                        absolute_deadline, "send timed out");
             continue;
         }
         throw_system_error("send failed");
@@ -474,7 +475,8 @@ inline void connect_nonblocking(int fd, const platform_linux::UnixEndpoint& addr
         deadline = earlier_deadline(deadline, deadline_from_now(connect_timeout));
     }
 
-    wait_for_io(fd, POLLOUT, std::chrono::milliseconds{0}, deadline, "connect timed out");
+    wait_for_io(fd, socket_wait::Interest::write, std::chrono::milliseconds{0},
+                deadline, "connect timed out");
 
     int socket_error = 0;
     if (socket_io::query_socket_error(fd, socket_error) != 0) {

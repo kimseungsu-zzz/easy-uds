@@ -39,7 +39,8 @@ class StreamByteSource {
                 continue;
             }
             if (errno == EAGAIN || errno == EWOULDBLOCK) {
-                wait_for_io(fd_, POLLIN, io_timeout, deadline, "receive timed out");
+                wait_for_io(fd_, socket_wait::Interest::read, io_timeout, deadline,
+                            "receive timed out");
                 continue;
             }
             throw_system_error("receive failed");

@@ -1,7 +1,10 @@
 #include <easy_uds/easy_uds.hpp>
 #include <easy_uds/simple.hpp>
 
+#include <algorithm>
+#include <array>
 #include <chrono>
+#include <cstring>
 #include <exception>
 #include <filesystem>
 #include <iostream>
@@ -58,6 +61,33 @@ int main() {
         server.on("/echo", [](const easy_uds::Request& request) {
             return easy_uds::Response::ok(request.body);
         });
+        server.on_stream("/stream", [](const easy_uds::StreamReader& body,
+                                        const easy_uds::Request&) {
+            std::array<char, 256> buffer{};
+            std::size_t total = 0;
+            while (true) {
+                const std::size_t size = body(buffer.data(), buffer.size());
+                if (size == 0) {
+                    break;
+                }
+                total += size;
+            }
+            if (total != 8192) {
+                return easy_uds::StreamResponse{400, {}};
+            }
+            return easy_uds::StreamResponse{
+                206,
+                [text = std::string("stream-ok"), offset = std::size_t{0}](
+                    char* output, std::size_t capacity) mutable {
+                    const std::size_t size = std::min(capacity, text.size() - offset);
+                    if (size == 0) {
+                        return std::size_t{0};
+                    }
+                    std::memcpy(output, text.data() + offset, size);
+                    offset += size;
+                    return size;
+                }};
+        });
 
         std::exception_ptr server_error;
         std::thread server_thread([&] {
@@ -108,6 +138,21 @@ int main() {
         }
         require(session.status() == easy_uds::SessionStatus::active,
                 "Windows Session did not remain active");
+
+        std::size_t upload_remaining = 8192;
+        easy_uds::StreamReader upload = [&upload_remaining](char* output,
+                                                            std::size_t capacity) {
+            const std::size_t size = std::min(capacity, upload_remaining);
+            std::memset(output, 'x', size);
+            upload_remaining -= size;
+            return size;
+        };
+        std::string stream_reply;
+        const auto stream_status = client.request_stream(
+            "/stream", upload,
+            [&stream_reply](std::string_view chunk) { stream_reply += chunk; });
+        require(stream_status == 206 && stream_reply == "stream-ok",
+                "Windows streaming RPC failed");
 
         server.stop();
         server_thread.join();

@@ -16,6 +16,8 @@ release promise.
   the beginner API path.
 - [0.7.0 release record](../RELEASE_0.7.md) — scope freeze and final
   verification gates.
+- [0.7.1 architecture release](../releases/v0.7.1.md) — source ownership,
+  backend assembly, and handoff scope.
 - [Public headers and source layout](../api/headers.md) — where the stable
   boundary ends and implementation details begin.
 

@@ -50,7 +50,7 @@
 
 ### 가장 빠른 시작: Simple API
 
-v0.7.0의 이름인 **Again Easily**는 0.6에서 검증한 빠른 엔진을 이제 더
+0.7.x의 이름인 **Again Easily**는 0.6에서 검증한 빠른 엔진을 이제 더
 쉽고 안전하게 사용한다는 뜻입니다. 고정 request/response RPC라면 Simple
 API로 첫 프로그램을 바로 시작할 수 있습니다.
 
@@ -717,6 +717,7 @@ docs/ROADMAP_0.6.md     0.6.x 기술 실험 및 릴리즈 경계
 docs/ROADMAP_0.7.md     0.7 사용성·API·호환성 계획
 docs/ERGONOMICS_0.7.md  beginner-first syntax 및 progressive disclosure audit
 docs/RELEASE_0.7.md     0.7.0 최종 범위와 검증 기록
+docs/releases/v0.7.1.md 0.7.1 아키텍처 릴리즈 범위와 인수인계
 docs/SOURCE_LAYOUT.md    0.7.1 source ownership와 dependency 경계
 docs/PERF_0.7.md        v0.6.4 대비 0.7 성능 회귀 측정
 docs/history/experiments/0.6.md  독립 UDS 기술 capability probe (history)

@@ -17,6 +17,39 @@ check_no_match() {
     fi
 }
 
+check_cmake_platform_source_set() {
+    local list_name=$1
+    awk -v name="${list_name}" '
+        $0 ~ "^[[:space:]]*set\\(" name "[[:space:]]*$" { inside = 1; next }
+        inside && /^[[:space:]]*\)[[:space:]]*$/ { exit }
+        inside { print $1 }
+    ' "${root_dir}/CMakeLists.txt"
+}
+
+check_no_match \
+    "CMake backend source assembly must remain explicit" \
+    '^[[:space:]]*file[[:space:]]*\([[:space:]]*GLOB' \
+    "${root_dir}/CMakeLists.txt"
+
+linux_implementation_files=$(find "${root_dir}/src/system/platform/linux" \
+    -type f -name '*.cpp' -printf 'src/system/platform/linux/%f\n' | sort)
+cmake_platform_sources=$(check_cmake_platform_source_set EASY_UDS_PLATFORM_SOURCES | sort)
+cmake_common_linux_sources=$(check_cmake_platform_source_set EASY_UDS_COMMON_SOURCES |
+    grep '^src/system/platform/linux/' || true)
+
+if [[ "${linux_implementation_files}" != "${cmake_platform_sources}" ]]; then
+    echo "architecture guard: Linux implementation/source-set mismatch" >&2
+    diff -u \
+        <(printf '%s\n' "${linux_implementation_files}") \
+        <(printf '%s\n' "${cmake_platform_sources}") >&2 || true
+    exit 1
+fi
+if [[ -n "${cmake_common_linux_sources}" ]]; then
+    echo "architecture guard: Linux implementation leaked into common CMake sources" >&2
+    printf '%s\n' "${cmake_common_linux_sources}" >&2
+    exit 1
+fi
+
 check_no_match \
     "system/platform/linux must not include user layers" \
     '^[[:space:]]*#[[:space:]]*include[[:space:]]*[<"]([^>"]*/)?(user/|easy_uds/simple\.hpp)' \

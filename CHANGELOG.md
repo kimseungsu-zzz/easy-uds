@@ -2,6 +2,27 @@
 
 All notable changes to this project are documented here.
 
+## easy-uds 0.7.1 — Architecture Release
+
+This is an internal architecture and packaging release; public API and
+protocol behavior are unchanged.
+
+### Changed
+
+- Clarified User/System source ownership and Linux platform capability
+  isolation.
+- Made the CMake common-source and Linux platform source selection explicit at
+  build time.
+- Added architecture guards for platform dependency ownership and documented
+  the P0/P1/P2 Windows handoff blockers for 0.8.
+
+### Compatibility
+
+- No public API, Simple API, ABI contract, or protocol-v2 behavior change is
+  intended by this release.
+- Windows, C, Python, generic native handles, and protocol v3 remain outside
+  the 0.7.x scope.
+
 ## easy-uds 0.7.0 — Again Easily
 
 ### Added

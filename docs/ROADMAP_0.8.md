@@ -45,6 +45,37 @@ entry point, but intentionally has no sources in 0.7.1. See
 the per-dependency classification and the list of POSIX-shaped seams that must
 not be mistaken for final Windows contracts.
 
+## 0.8 handoff priority
+
+The 0.7.1 architecture is frozen with these blockers, in order:
+
+### P0 — public-header blockers
+
+- Decide how `PeerCredentials` can represent `pid_t`/`uid_t`/`gid_t` without
+  making the public header POSIX-only.
+- Decide whether `OwnedFd`/`BorrowedFd` remain explicitly POSIX descriptors or
+  gain a separate Windows resource API. Do not rename or generalize them in
+  0.7.x.
+
+### P1 — engine/platform seam blockers
+
+- Replace or retain the `sockaddr_un`/`UnixEndpoint` value seam after choosing
+  the Windows endpoint model.
+- Decide what replaces POSIX `ssize_t`/`iovec` seams for raw and gathered I/O.
+- Decide how `dev_t`/`ino_t` pathname identity and TOCTOU ownership checks map
+  to a Windows endpoint lifecycle.
+
+### P2 — backend architecture decisions
+
+- Choose readiness versus an IOCP/completion model; the current readiness and
+  synchronous-wait contracts are not frozen as Windows interfaces.
+- Choose Windows endpoint and resource/HANDLE-passing capabilities, if any.
+- Define Windows instance ownership/locking and stale-name semantics.
+
+The 0.8 implementation order is P0 public surface, then P1 concrete seams,
+then P2 backend capabilities. No item is solved by adding a runtime virtual
+backend or a generic handle type before its semantics are known.
+
 ## Capability decisions still open
 
 - Windows readiness may use a completion model rather than the current Linux

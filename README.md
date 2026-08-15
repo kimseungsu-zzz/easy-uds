@@ -460,7 +460,7 @@ EASY_UDS_SOAK_BENCHMARKS=1 ./scripts/long_soak.sh build-bench 20
 The `workflow_dispatch` CI path runs the same matrix on native Ubuntu x86_64
 and hosted ARM64, then uploads both complete logs.
 
-For a 0.7.0 source checkout, run the one-command release gate. It builds
+For a 0.7.1 source checkout, run the one-command release gate. It builds
 static and shared variants, executes the labelled adversarial suite, checks
 invalid-usage diagnostics, and validates both installed-package consumers:
 
@@ -672,6 +672,7 @@ docs/ROADMAP_0.6.md     0.6.x technical experiment and release boundaries
 docs/ROADMAP_0.7.md     0.7 usability, API, and compatibility plan
 docs/ERGONOMICS_0.7.md  Beginner-first syntax and progressive disclosure audit
 docs/RELEASE_0.7.md     0.7.0 final scope and verification record
+docs/releases/v0.7.1.md 0.7.1 architecture release scope and handoff
 docs/SOURCE_LAYOUT.md    0.7.1 source ownership and dependency boundary
 docs/PERF_0.7.md        0.7 regression measurements against v0.6.4
 docs/history/experiments/0.6.md  Standalone UDS capability probes (history)

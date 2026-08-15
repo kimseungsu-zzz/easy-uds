@@ -11,7 +11,7 @@
 
 #include <unistd.h>
 
-static_assert(easy_uds::version == std::string_view{"0.7.0"});
+static_assert(easy_uds::version == std::string_view{"0.7.1"});
 static_assert(easy_uds::protocol_version == 2U);
 static_assert(sizeof(easy_uds::BorrowedFd) == sizeof(int));
 static_assert(sizeof(easy_uds::OwnedFd) == sizeof(int));

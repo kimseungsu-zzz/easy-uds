@@ -7,10 +7,6 @@
 #include <limits>
 #include <string_view>
 
-#include <sys/socket.h>
-#include <sys/uio.h>
-#include <unistd.h>
-
 namespace easy_uds::detail {
 namespace {
 
@@ -78,15 +74,9 @@ std::array<iovec, 2> remaining_parts(OutgoingFrame& frame, std::size_t& part_cou
 ssize_t send_frame_once(int fd, OutgoingFrame& frame) {
     std::size_t part_count = 0;
     auto parts = remaining_parts(frame, part_count);
-    msghdr message{};
-    message.msg_iov = parts.data();
-    message.msg_iovlen = part_count;
     while (true) {
-#ifdef MSG_NOSIGNAL
-        const ssize_t result = ::sendmsg(fd, &message, MSG_NOSIGNAL | MSG_DONTWAIT);
-#else
-        const ssize_t result = ::sendmsg(fd, &message, MSG_DONTWAIT);
-#endif
+        const ssize_t result = socket_io::send_iovecs_nonblocking(
+            fd, parts.data(), part_count);
         if (result < 0 && errno == EINTR) {
             continue;
         }
@@ -134,7 +124,7 @@ bool refresh_connection_events(const std::shared_ptr<ServerState>& state,
                            connection_token(connection->fd,
                                             it->second->generation)) != 0) {
         connection->closing.store(true, std::memory_order_release);
-        (void)::shutdown(connection->fd, SHUT_RDWR);
+        socket_lifecycle::shutdown(connection->fd);
         return false;
     }
     it->second->registered_events = events;

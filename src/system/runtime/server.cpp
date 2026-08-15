@@ -13,7 +13,6 @@
 #include <vector>
 
 #include <sys/file.h>
-#include <sys/socket.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -154,13 +153,13 @@ void unlink_owned_socket(const std::shared_ptr<detail::ServerState>& state) noex
 
 void close_lifecycle_fds_locked(const std::shared_ptr<detail::ServerState>& state) noexcept {
     if (state->listener_fd >= 0) {
-        (void)::close(state->listener_fd);
+        socket_lifecycle::close(state->listener_fd);
         state->listener_fd = -1;
     }
     readiness::close(state->wakeup_fd);
     state->wakeup_fd = -1;
     if (state->instance_lock_fd >= 0) {
-        (void)::close(state->instance_lock_fd);
+        socket_lifecycle::close(state->instance_lock_fd);
         state->instance_lock_fd = -1;
     }
     readiness::close(state->readiness_fd);
@@ -186,7 +185,7 @@ void stop_state(const std::shared_ptr<detail::ServerState>& state) noexcept {
     {
         std::lock_guard<std::mutex> lock(state->connections_mutex);
         for (auto& [fd, rc] : state->connections) {
-            (void)::shutdown(fd, SHUT_RDWR);
+            socket_lifecycle::shutdown(fd);
         }
     }
 
@@ -410,7 +409,7 @@ void Server::run() {
         std::lock_guard<std::mutex> lock(state->connections_mutex);
         for (auto& [fd, rc] : state->connections) {
             rc->conn->closing.store(true, std::memory_order_release);
-            (void)::shutdown(fd, SHUT_RDWR);
+            socket_lifecycle::shutdown(fd);
         }
         state->connections.clear();
     }

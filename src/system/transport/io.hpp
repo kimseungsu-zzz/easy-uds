@@ -1,14 +1,17 @@
 #pragma once
 
 // Shared implementation infrastructure for the reactor server and the client:
-// RAII descriptors, deadlines, non-blocking read-ahead/exact I/O, and sockets.
+// Deadlines, non-blocking read-ahead/exact I/O, and transport framing. Raw
+// descriptor lifecycle and socket syscalls live in platform capabilities.
 
 #include "easy_uds/error.hpp"
 #include "easy_uds/options.hpp"
 #include "easy_uds/request.hpp"
 #include "../protocol/codec.hpp"
 #include "../platform/descriptor_passing.hpp"
-#include "../platform/linux/endpoint.hpp"
+#include "../platform/socket_io.hpp"
+#include "../platform/socket_lifecycle.hpp"
+#include "../platform/endpoint.hpp"
 
 #include <algorithm>
 #include <array>
@@ -22,12 +25,7 @@
 #include <system_error>
 #include <utility>
 
-#include <fcntl.h>
 #include <poll.h>
-#include <sys/socket.h>
-#include <sys/types.h>
-#include <sys/uio.h>
-#include <unistd.h>
 
 namespace easy_uds::detail {
 
@@ -126,65 +124,31 @@ inline void validate_client_options(const easy_uds::ClientOptions& options) {
     }
 }
 
-class FileDescriptor {
-  public:
-    explicit FileDescriptor(int fd = -1) noexcept : fd_(fd) {}
-    ~FileDescriptor() { reset(); }
-
-    FileDescriptor(const FileDescriptor&) = delete;
-    FileDescriptor& operator=(const FileDescriptor&) = delete;
-
-    FileDescriptor(FileDescriptor&& other) noexcept : fd_(std::exchange(other.fd_, -1)) {}
-    FileDescriptor& operator=(FileDescriptor&& other) noexcept {
-        if (this != &other) {
-            reset(std::exchange(other.fd_, -1));
-        }
-        return *this;
-    }
-
-    [[nodiscard]] int get() const noexcept { return fd_; }
-    [[nodiscard]] int release() noexcept { return std::exchange(fd_, -1); }
-
-    void reset(int fd = -1) noexcept {
-        if (fd_ >= 0) {
-            (void)::close(fd_);
-        }
-        fd_ = fd;
-    }
-
-  private:
-    int fd_;
-};
-
 inline void set_close_on_exec(int fd) {
-    const int flags = ::fcntl(fd, F_GETFD);
-    if (flags < 0) {
-        throw_system_error("fcntl(F_GETFD) failed");
-    }
-    if (::fcntl(fd, F_SETFD, flags | FD_CLOEXEC) < 0) {
-        throw_system_error("fcntl(F_SETFD) failed");
+    const auto result = socket_lifecycle::set_close_on_exec(fd);
+    if (!result.ok()) {
+        const char* operation = result.failure == socket_lifecycle::SetupFailure::close_on_exec_getfd
+                                    ? "fcntl(F_GETFD) failed"
+                                    : "fcntl(F_SETFD) failed";
+        throw_system_error(operation, result.native_error);
     }
 }
 
 inline void set_nonblocking(int fd) {
-    const int flags = ::fcntl(fd, F_GETFL);
-    if (flags < 0) {
-        throw_system_error("fcntl(F_GETFL) failed");
-    }
-    if ((flags & O_NONBLOCK) == 0 && ::fcntl(fd, F_SETFL, flags | O_NONBLOCK) < 0) {
-        throw_system_error("fcntl(F_SETFL O_NONBLOCK) failed");
+    const auto result = socket_lifecycle::set_nonblocking(fd);
+    if (!result.ok()) {
+        const char* operation = result.failure == socket_lifecycle::SetupFailure::nonblocking_getfl
+                                    ? "fcntl(F_GETFL) failed"
+                                    : "fcntl(F_SETFL O_NONBLOCK) failed";
+        throw_system_error(operation, result.native_error);
     }
 }
 
 inline void configure_no_sigpipe(int fd) {
-#if !defined(MSG_NOSIGNAL) && defined(SO_NOSIGPIPE)
-    const int enabled = 1;
-    if (::setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &enabled, sizeof(enabled)) != 0) {
-        throw_system_error("setsockopt(SO_NOSIGPIPE) failed");
+    const auto result = socket_lifecycle::configure_no_sigpipe(fd);
+    if (!result.ok()) {
+        throw_system_error("setsockopt(SO_NOSIGPIPE) failed", result.native_error);
     }
-#else
-    (void)fd;
-#endif
 }
 
 inline FileDescriptor make_socket() {
@@ -326,7 +290,7 @@ class BufferedReader {
                     Deadline absolute_deadline) {
         while (true) {
             check_absolute_deadline(absolute_deadline, "receive timed out");
-            const ssize_t result = ::recv(fd_, data, capacity, 0);
+            const ssize_t result = socket_io::receive(fd_, data, capacity);
             if (result > 0) {
                 return result;
             }
@@ -367,11 +331,7 @@ inline void write_exact(int fd, const void* data, std::size_t size, std::chrono:
 
     while (sent < size) {
         check_absolute_deadline(absolute_deadline, "send timed out");
-#ifdef MSG_NOSIGNAL
-        const ssize_t result = ::send(fd, bytes + sent, size - sent, MSG_NOSIGNAL);
-#else
-        const ssize_t result = ::send(fd, bytes + sent, size - sent, 0);
-#endif
+        const ssize_t result = socket_io::send(fd, bytes + sent, size - sent);
         if (result > 0) {
             sent += static_cast<std::size_t>(result);
             continue;
@@ -402,14 +362,8 @@ inline void write_iovecs_exact(int fd, iovec* parts, std::size_t part_count,
         }
 
         check_absolute_deadline(absolute_deadline, "send timed out");
-        msghdr message{};
-        message.msg_iov = parts + first;
-        message.msg_iovlen = part_count - first;
-#ifdef MSG_NOSIGNAL
-        const ssize_t result = ::sendmsg(fd, &message, MSG_NOSIGNAL);
-#else
-        const ssize_t result = ::sendmsg(fd, &message, 0);
-#endif
+        const ssize_t result = socket_io::send_iovecs(fd, parts + first,
+                                                      part_count - first);
         if (result > 0) {
             std::size_t consumed = static_cast<std::size_t>(result);
             while (first < part_count && consumed >= parts[first].iov_len) {
@@ -523,8 +477,7 @@ inline void connect_nonblocking(int fd, const platform_linux::UnixEndpoint& addr
     wait_for_io(fd, POLLOUT, std::chrono::milliseconds{0}, deadline, "connect timed out");
 
     int socket_error = 0;
-    socklen_t length = sizeof(socket_error);
-    if (::getsockopt(fd, SOL_SOCKET, SO_ERROR, &socket_error, &length) != 0) {
+    if (socket_io::query_socket_error(fd, socket_error) != 0) {
         throw_system_error("getsockopt(SO_ERROR) failed");
     }
     if (socket_error != 0) {

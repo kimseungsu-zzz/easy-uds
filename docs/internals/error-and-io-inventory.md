@@ -1,6 +1,6 @@
 # Error and low-level I/O inventory
 
-This inventory records the 0.7.1 Phase 4E boundary. It is intentionally a
+This inventory records the 0.7.1 Phase 4F boundary. It is intentionally a
 concrete map, not a virtual backend design. Linux capabilities report raw
 results, `errno`, or a small semantic result; the system/runtime layer decides
 when that becomes `easy_uds::Error`.
@@ -14,7 +14,7 @@ when that becomes `easy_uds::Error`.
 | `system/reactor/output.cpp` | `EINTR`, `EAGAIN`, `EWOULDBLOCK` | Nonblocking output retry/control flow | Reactor; fatal results use `throw_system_error` |
 | `system/reactor/stream_io.hpp` | `EINTR`, `EAGAIN`, `EWOULDBLOCK`, `ECONNRESET` | Stream retry or peer-close mapping | Transport/reactor via `throw_system_error` |
 | `system/transport/io.hpp` | `ETIMEDOUT`, `EBADF`, `EPIPE`, `ECONNRESET` | Deadline, invalid descriptor, closed peer | `throw_system_error` maps to public `Error` and preserves native code |
-| `system/transport/io.hpp` | `EINPROGRESS`, `EAGAIN`, `EWOULDBLOCK`, `EINTR`, `getsockopt(SO_ERROR)` | Nonblocking connect completion | Transport; only final failure becomes `Error` |
+| `system/transport/io.hpp` | `EINPROGRESS`, `EAGAIN`, `EWOULDBLOCK`, `EINTR`, `SO_ERROR` | Nonblocking connect completion | Transport; only final failure becomes `Error` |
 | `system/runtime/server.cpp` | `ENOENT`, `EWOULDBLOCK`, `EAGAIN`, `EADDRINUSE` | Stale socket/instance lock lifecycle | Server lifecycle via `throw_system_error` or explicit busy `Error` |
 | `system/platform/linux/readiness.cpp` | `EINTR`, `EINVAL`, raw syscall result | Linux readiness/wakeup capability | Reactor decides retry/translation |
 | `system/platform/linux/descriptor_passing.cpp` | `MSG_CTRUNC`, malformed ancillary, native `fcntl` result | Descriptor capability semantic/native result | Parser maps semantic rejection; `throw_system_error` maps native setup failure |
@@ -28,20 +28,27 @@ wrapped in an `Error` merely because they are observable through `errno`.
 ## `io.hpp` portability hotspots
 
 `src/system/transport/io.hpp` remains a deliberately mixed concrete utility
-header. The current responsibilities are:
+header for deadline/retry policy and framing. Raw socket lifecycle and byte
+syscalls now live in concrete platform capabilities. The current
+responsibilities are:
 
 | Responsibility | Operations | Phase decision |
 |---|---|---|
-| Descriptor lifecycle | `fcntl`, `close`, RAII `FileDescriptor` | Existing system utility; future capability candidate |
-| Nonblocking configuration | `fcntl(F_GETFL/F_SETFL)`, `setsockopt(SO_NOSIGPIPE)` | Existing setup path; no hot-path abstraction added |
+| Descriptor lifecycle | `FileDescriptor`, close/shutdown | `platform/socket_lifecycle` concrete seam; public OwnedFd remains separate |
+| Nonblocking configuration | `fcntl(F_GETFL/F_SETFL)`, `setsockopt(SO_NOSIGPIPE)` | `platform/socket_lifecycle`; raw errno mapped by transport |
 | Wait-for-I/O | `poll`, `EINTR`, timeout conversion | Existing deadline utility; future readiness integration candidate |
-| Basic byte I/O | `send`, `recv`, exact loops, peer-close handling | Keep concrete until a measured portability seam is justified |
-| Gathered write | non-FD `sendmsg` with `iovec` | Keep with transport; do not couple ordinary writes to ancillary capability |
+| Basic byte I/O | `send`, `recv`, exact loops, peer-close handling | `platform/socket_io` reports raw results; retry/closed semantics stay above |
+| Gathered write | non-FD `sendmsg` with `iovec` | `platform/socket_io`; remains independent from descriptor ancillary capability |
 | Descriptor-bearing write | `descriptor_passing::send_iovecs` | Extracted Linux capability; first-successful-send-only attachment retained |
-| Connect completion | nonblocking `connect`, `getsockopt(SO_ERROR)` | Keep in transport setup; final errno maps above the syscall boundary |
+| Connect completion | nonblocking `connect`, `SO_ERROR` query | Separate setup-time capability; final errno maps above the syscall boundary |
 
 The normal gathered-write path remains separate from descriptor-bearing
 `sendmsg`; no generic `Iovec`, virtual I/O backend, or type erasure is added.
+
+`socket_lifecycle.hpp` owns internal descriptor close/shutdown and setup flags;
+`socket_io.hpp` owns raw `send`/`recv`/ordinary `sendmsg` and the `SO_ERROR`
+query. Both seams return native results only. `io.hpp` retains retry,
+deadline, peer-closed, and public `Error` semantics above those calls.
 
 ## Descriptor seam status
 

@@ -7,8 +7,6 @@
 #include <cstring>
 #include <string>
 
-#include <sys/socket.h>
-
 namespace easy_uds::detail {
 
 // Byte source for worker-owned leases: buffered reactor bytes first, then
@@ -29,7 +27,7 @@ class StreamByteSource {
         }
         while (received < size) {
             check_absolute_deadline(deadline, "receive timed out");
-            const ssize_t result = ::recv(fd_, bytes + received, size - received, 0);
+            const ssize_t result = socket_io::receive(fd_, bytes + received, size - received);
             if (result > 0) {
                 received += static_cast<std::size_t>(result);
                 continue;

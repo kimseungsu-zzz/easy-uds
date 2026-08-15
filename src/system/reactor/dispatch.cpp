@@ -6,8 +6,6 @@
 #include <string_view>
 #include <utility>
 
-#include <sys/socket.h>
-
 namespace easy_uds::detail {
 
 bool try_acquire_stream_slot(const std::shared_ptr<ServerState>& state) noexcept {
@@ -125,11 +123,11 @@ void close_connection(const std::shared_ptr<ServerState>& state, int fd) {
     // a handler (the frame errored or the connection died mid-parse) must not
     // outlive the connection.
     for (const int leftover : it->second->received_fds) {
-        (void)::close(leftover);
+        socket_lifecycle::close(leftover);
     }
     it->second->received_fds.clear();
     if (it->second->request_fd >= 0) {
-        (void)::close(it->second->request_fd);
+        socket_lifecycle::close(it->second->request_fd);
         it->second->request_fd = -1;
     }
     connection->closing.store(true, std::memory_order_release);
@@ -137,7 +135,7 @@ void close_connection(const std::shared_ptr<ServerState>& state, int fd) {
         (void)readiness::control(state->readiness_fd,
                                  readiness::Control::remove, fd, 0, 0);
     }
-    (void)::shutdown(fd, SHUT_RDWR);
+    socket_lifecycle::shutdown(fd);
     {
         std::lock_guard<std::mutex> output_lock(connection->output_mutex);
         const std::size_t queued = connection->queued_output_bytes.exchange(0, std::memory_order_acq_rel);

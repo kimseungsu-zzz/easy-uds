@@ -152,7 +152,7 @@ void run_reactor(const std::shared_ptr<ServerState>& state) {
                         if (state->connections.size() >=
                             state->options.max_connections) {
                             record_rejected_connection(state);
-                            (void)::close(client_fd);
+                            socket_lifecycle::close(client_fd);
                             continue;
                         }
                         auto connection = std::make_shared<Connection>(

@@ -1,8 +1,9 @@
 #pragma once
 
-// Linux pathname Unix-domain endpoint and socket lifecycle capability.
-// Higher layers use this concrete value/function boundary instead of naming
-// AF_UNIX or sockaddr_un directly. No virtual backend is involved.
+// Current concrete endpoint contract.  The value remains POSIX-oriented while
+// Linux owns its syscall implementation in platform/linux/endpoint.cpp.  It is
+// kept outside the Linux implementation directory so system policy code does
+// not include a backend header directly.
 
 #include <string>
 #include <string_view>

@@ -132,7 +132,7 @@ void shutdown_session_state(std::unique_ptr<SessionState>& state) noexcept {
     }
     state->reader_stop.store(true, std::memory_order_relaxed);
     if (state->fd.get() >= 0) {
-        (void)::shutdown(state->fd.get(), SHUT_RDWR);
+        socket_lifecycle::shutdown(state->fd.get());
     }
     if (state->reader_thread.joinable()) {
         state->reader_thread.join();

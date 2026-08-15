@@ -129,7 +129,7 @@ Response Session::request(std::string_view route, std::string_view body) {
             }
             shard.erase(request_id);
         }
-        (void)::shutdown(state_->fd.get(), SHUT_RDWR);
+        detail::socket_lifecycle::shutdown(state_->fd.get());
         throw;
     }
 
@@ -177,7 +177,7 @@ Response Session::request(std::string_view route, std::string_view body) {
     }
     if (timed_out) {
         state_->broken.store(true, std::memory_order_release);
-        (void)::shutdown(state_->fd.get(), SHUT_RDWR);
+        detail::socket_lifecycle::shutdown(state_->fd.get());
         detail::throw_system_error("request timed out", ETIMEDOUT);
     }
     const std::exception_ptr error = slot.error;

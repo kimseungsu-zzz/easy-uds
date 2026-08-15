@@ -30,7 +30,8 @@ protocol golden test passed after this measurement.
 ## Linux endpoint capability extraction (2026-08-15)
 
 Phase 4 moved pathname endpoint validation and socket lifecycle syscalls into
-`src/system/platform/linux/endpoint.*`. The same WSL2 Release alternating
+`src/system/platform/endpoint.hpp` plus `src/system/platform/linux/endpoint.cpp`.
+The same WSL2 Release alternating
 Simple/Core probe (10,000 requests, three repeats) remained within the gate:
 
 | Load | API | Throughput | p50 | p99 | CPU-s / 1M |
@@ -147,6 +148,34 @@ unchanged by readiness extraction.
 
 The contract is documented as the current reactor seam, not as the final
 cross-platform backend shape for a future Windows completion model.
+
+## Low-level socket I/O boundary A/B (2026-08-15)
+
+Phase 4F moved internal descriptor lifecycle, raw byte I/O, ordinary gathered
+write, and `SO_ERROR` querying behind concrete platform seams. The endpoint
+value contract is now `src/system/platform/endpoint.hpp`; Linux syscall
+implementations are selected at build time. Retry, deadline, peer-closed, and
+public `Error` meaning remain in transport/reactor code.
+
+As a same-host smoke check, WSL2 Release g++ 15.2 measured the previous
+`282ef45` tree and the Phase 4F candidate with the same alternating
+Simple/Core policy (1,000 requests, 10 repeats, c1/c8/c32). The medians below
+include all ten repeats; they are not a release-quality absolute benchmark,
+but show no reproducible hot-path regression from the concrete syscall calls:
+
+| Load / API | Baseline throughput | Phase 4F throughput | Baseline p50 | Phase 4F p50 | Baseline p99 | Phase 4F p99 |
+|---|---:|---:|---:|---:|---:|---:|
+| c1 / Core | 12.69k/s | 12.88k/s | 67.17 us | 64.60 us | 223.77 us | 220.34 us |
+| c1 / Simple | 12.49k/s | 13.09k/s | 68.46 us | 64.97 us | 228.39 us | 213.98 us |
+| c8 / Core | 36.69k/s | 39.51k/s | 196.58 us | 184.96 us | 463.28 us | 435.34 us |
+| c8 / Simple | 38.51k/s | 38.45k/s | 187.39 us | 188.89 us | 464.12 us | 472.76 us |
+| c32 / Core | 24.02k/s | 24.84k/s | 755.54 us | 742.36 us | 15606.5 us | 15233.2 us |
+| c32 / Simple | 21.79k/s | 22.01k/s | 760.90 us | 721.57 us | 20596.4 us | 21562.1 us |
+
+The setup-inclusive allocation probe remained approximately 10.5 allocations
+per request (with a one-allocation startup fluctuation); the warmed Session
+steady-state gate remains effectively zero allocations per request. No virtual
+backend, generic NativeHandle, or public API change was introduced.
 
 ## Explicit Session state (2026-08-14)
 

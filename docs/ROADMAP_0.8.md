@@ -21,6 +21,11 @@ The current `src/system/platform/descriptor_passing.hpp` also exposes POSIX
 that Linux-oriented seam, move it under the Linux directory, or replace it with
 a system-owned buffer description after the Windows transport shape is known.
 
+The Phase 4F `src/system/platform/socket_io.hpp` seam likewise exposes POSIX
+`ssize_t`/`iovec` for raw and gathered I/O. It is an internal Linux-oriented
+boundary today; do not present it as a final Windows socket contract before the
+0.8 transport model is selected.
+
 ## Capability decisions still open
 
 - Windows readiness may use a completion model rather than the current Linux

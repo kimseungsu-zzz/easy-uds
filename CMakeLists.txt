@@ -54,13 +54,17 @@ add_library(easy_uds
     src/system/runtime/session_engine.hpp
     src/system/runtime/trace.hpp
     src/system/platform/linux/endpoint.cpp
-    src/system/platform/linux/endpoint.hpp
+    src/system/platform/endpoint.hpp
     src/system/platform/linux/readiness.cpp
     src/system/platform/readiness.hpp
     src/system/platform/linux/peer_identity.cpp
     src/system/platform/peer_identity.hpp
     src/system/platform/linux/descriptor_passing.cpp
     src/system/platform/descriptor_passing.hpp
+    src/system/platform/linux/socket_lifecycle.cpp
+    src/system/platform/socket_lifecycle.hpp
+    src/system/platform/linux/socket_io.cpp
+    src/system/platform/socket_io.hpp
     src/system/transport/transport.cpp
     src/system/transport/transport.hpp
     src/system/reactor/dispatch.cpp

@@ -15,8 +15,6 @@
 #include <utility>
 
 #include <poll.h>
-#include <unistd.h>
-
 namespace easy_uds::detail {
 namespace {
 
@@ -322,11 +320,11 @@ void rearm_connection(const std::shared_ptr<ServerState>& state,
         // but never delivered to a handler.
         if (existing != state->connections.end() && fresh != existing->second) {
             for (const int leftover : existing->second->received_fds) {
-                (void)::close(leftover);
+                socket_lifecycle::close(leftover);
             }
             existing->second->received_fds.clear();
             if (existing->second->request_fd >= 0) {
-                (void)::close(existing->second->request_fd);
+                socket_lifecycle::close(existing->second->request_fd);
                 existing->second->request_fd = -1;
             }
         }

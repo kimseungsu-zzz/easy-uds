@@ -33,7 +33,8 @@ the concrete seams used before any Linux syscall extraction. Client and Session
 glue now calls concrete runtime engine functions, and route options are
 translated once during registration into immutable internal entries.
 
-Phase 4 begins the inventory-driven extraction with `endpoint.*`: pathname
+Phase 4 begins the inventory-driven extraction with the endpoint contract and
+Linux `endpoint.cpp`: pathname
 `AF_UNIX`/`sockaddr_un` validation and socket lifecycle calls are now concrete
 Linux capability functions. Phase 4B adds the current reactor readiness
 contract and its concrete Linux `epoll`/`eventfd` implementation; this seam is
@@ -56,3 +57,8 @@ current `platform/descriptor_passing.hpp` seam intentionally exposes POSIX
 `ssize_t`/`iovec` and is not a final Windows transport contract. The errno and
 `io.hpp` responsibility inventory is maintained in
 [`internals/error-and-io-inventory.md`](internals/error-and-io-inventory.md).
+
+Phase 4F moves socket descriptor lifecycle, raw byte I/O, and connect-error
+queries behind concrete system platform seams. The POSIX endpoint value
+contract now lives in `src/system/platform/endpoint.hpp`; Linux syscall
+implementations remain in `src/system/platform/linux/`.

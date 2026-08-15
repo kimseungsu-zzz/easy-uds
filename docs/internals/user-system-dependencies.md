@@ -113,8 +113,10 @@ this inventory.
 | `user/cpp/core/client/session` | Owns public member glue | Calls concrete engine functions and state | No platform backend dependency |
 | `system/runtime/server` | Yes, transitively through reactor core | Lifecycle and route registration | Direct Linux includes remain |
 | `system/reactor` | Yes, transitively through `core.hpp` | Connections, parsing, workers, queues, readiness policy | Uses the platform-neutral readiness contract; no direct epoll/eventfd headers |
-| `system/transport` | Yes: options/request/response/stream/error | Exact I/O and framing | Direct socket/uio/unix/fcntl use |
-| `system/platform/linux/endpoint.*` | No public C++ API | Pathname endpoint and socket lifecycle capability | Linux `AF_UNIX`/socket syscalls |
+| `system/transport` | Yes: options/request/response/stream/error | Exact I/O, framing, and retry/deadline policy | Uses concrete platform seams; wait/poll remains transport-owned for now |
+| `system/platform/endpoint.hpp` + `system/platform/linux/endpoint.cpp` | No public C++ API | Pathname endpoint contract and socket lifecycle capability | Linux `AF_UNIX`/socket syscalls |
+| `system/platform/socket_lifecycle.hpp` + `system/platform/linux/socket_lifecycle.cpp` | No public C++ API | Internal fd ownership, shutdown, and nonblocking setup | Linux `close`/`shutdown`/`fcntl`/`setsockopt` |
+| `system/platform/socket_io.hpp` + `system/platform/linux/socket_io.cpp` | No public C++ API | Raw byte/gathered I/O and connect completion query | Linux `send`/`recv`/`sendmsg`/`getsockopt` |
 | `system/platform/linux/readiness.cpp` | No public C++ API | Readiness registration/wait and wakeup signal/consume | Linux `epoll`/`eventfd` syscalls |
 | `system/platform/linux/peer_identity.cpp` | No public C++ API | Connected-peer identity capture | Linux `SO_PEERCRED`/`getsockopt` |
 | `system/platform/linux/descriptor_passing.cpp` | No public C++ API | Descriptor-bearing send/receive and ancillary validation | Linux `SCM_RIGHTS`/`recvmsg`/`sendmsg`; raw result only |
@@ -137,8 +139,10 @@ This phase does not add Windows code, C/Python APIs, change protocol v2,
 optimize the hot path, or introduce a virtual transport. The concrete
 user/system seam, endpoint/socket capability, readiness/wakeup capability,
 peer-identity capability, and descriptor-passing capability are now in place.
-Phase 4E also moved descriptor native/error results across an internal boundary
-before public mapping. The remaining generic low-level error translation is an
-inventory-driven follow-up.
+Phase 4E moved descriptor native/error results across an internal boundary
+before public mapping. Phase 4F now moves socket lifecycle and raw I/O syscalls
+behind concrete platform seams; deadline/retry/error meaning remains above
+them. The remaining generic low-level error translation is an inventory-driven
+follow-up.
 These capabilities should continue to land as small concrete units where that
 reduces coupling without adding a call or allocation to the hot path.

@@ -32,6 +32,23 @@ check_no_match \
     '^[[:space:]]*#[[:space:]]*include[[:space:]]*[<"]easy_uds/(client|server|session|simple|error|request|response|options|stats|fd|stream|request_context)\.hpp[>"]' \
     "${root_dir}/src/system/platform/linux"
 
+check_no_match \
+    "transport policy must not include Linux backend headers" \
+    '^[[:space:]]*#[[:space:]]*include[[:space:]]*[<"][^>"]*platform/linux[^>"]*[>"]' \
+    "${root_dir}/src/system/transport"
+
+check_no_match \
+    "transport policy must not own socket lifecycle or byte syscalls" \
+    '^[[:space:]]*#[[:space:]]*include[[:space:]]*[<"](sys/socket\.h|unistd\.h|fcntl\.h)[>"]|(^|[^[:alnum:]_])::(socket|connect|accept|bind|listen|send|recv|sendmsg|getsockopt|fcntl|close|shutdown)[[:space:]]*\(' \
+    "${root_dir}/src/system/transport"
+
+for policy_dir in reactor runtime; do
+    check_no_match \
+        "system/${policy_dir} policy must use socket capabilities" \
+        '^[[:space:]]*#[[:space:]]*include[[:space:]]*[<"]sys/socket\.h[>"]|(^|[^[:alnum:]_])::(socket|connect|accept|bind|listen|send|recv|sendmsg|getsockopt|shutdown)[[:space:]]*\(' \
+        "${root_dir}/src/system/${policy_dir}"
+done
+
 system_sources=()
 while IFS= read -r -d '' path; do
     system_sources+=("${path}")

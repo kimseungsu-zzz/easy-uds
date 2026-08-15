@@ -105,7 +105,7 @@ struct Connection {
           last_output_progress(last_io_progress.load(std::memory_order_relaxed)) {}
     ~Connection() {
         if (fd >= 0) {
-            (void)::close(fd);
+            socket_lifecycle::close(fd);
         }
     }
 

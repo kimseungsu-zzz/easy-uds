@@ -1,9 +1,17 @@
-# User/System dependency audit
+# User/System dependency audit and concrete seam
 
 This is the 0.7.1 Phase 2 inventory after the behavior-neutral relocation in
 `36154fd`. It is an audit, not a refactor: protocol v2, runtime behavior, and
 the hot path are unchanged. The purpose is to make the remaining dependency
 direction explicit before extracting Linux capabilities.
+
+Phase 3 now establishes the first concrete seam without introducing a virtual
+backend or an internal Request/Response mirror. Public Client and Session
+method glue lives under `src/user/cpp/core/`; one-shot/session engine state and
+operations remain concrete functions under `src/system/runtime/`. Server route
+registration glue is also user-owned, while registration-time translation into
+immutable `HandlerEntry`/`RouteScheduling` entries is system-owned. No request
+path conversion is performed.
 
 ## Target direction
 
@@ -28,14 +36,17 @@ below rather than hidden behind a premature virtual interface.
 | `system/protocol/codec.hpp` | `error.hpp` | Reports malformed magic/version/type/flags as `Error` | Engine error contract; protocol validation |
 | `system/transport/io.hpp` | `error.hpp`, `options.hpp`, `request.hpp` | Validates client/server limits and constructs peer credentials | Engine policy contract; platform capability value |
 | `system/transport/transport.hpp` | `options.hpp`, `response.hpp`, `stream.hpp` | Frames fixed and streaming requests and returns `Status` | Protocol values plus public stream contract |
-| `system/runtime/client.cpp` | `client.hpp` | Defines `Client` methods and one-shot response handling | Public API implementation |
-| `system/runtime/session.cpp` | `session.hpp` | Defines `Session`, in-flight slots, reader loop, and stats snapshot | Public API implementation plus engine concurrency |
+| `user/cpp/core/client.cpp` | `client.hpp` | Thin `Client` method glue | Public API implementation |
+| `system/runtime/client_engine.*` | client/options/response/stream contracts | One-shot connect, framing, and response operations | Concrete engine implementation |
+| `user/cpp/core/session.cpp` | `session.hpp` | Thin `Session` method glue and value-boundary access | Public API implementation |
+| `system/runtime/session_engine.*` | session/options/response contracts | In-flight shards, reader, waiter, and shutdown state | Concrete engine concurrency |
+| `user/cpp/core/server_api.cpp` | `server.hpp` | Route registration member-function glue | Public API implementation |
+| `system/runtime/server_registration.*` | server/route contracts | One-time immutable handler/scheduling translation | Concrete engine registration |
 | `system/reactor/core.hpp` | `server.hpp` | Stores handlers/options and defines the server-side dispatch state | Mixed public API adapter and engine state |
 
-`system/runtime/server.cpp` has no direct public-header include of its own; it
-includes `reactor/core.hpp` and defines the `Server` member functions declared
-by the transitive `server.hpp` include. It is therefore still a public API
-implementation edge.
+`system/runtime/server.cpp` still owns the Linux-heavy Server constructor,
+lifecycle, run/stop, and stats implementation. It is intentionally the next
+cold-path seam; moving it is deferred until the capability inventory is ready.
 
 All other reactor translation units include `reactor/core.hpp` (directly or
 through `common.hpp`, `parser.hpp`, or `stream_io.hpp`). Their public C++
@@ -45,12 +56,12 @@ dependency is consequently transitive, not absent.
 
 | Symbol | Current users | Classification | Long-term note |
 |---|---|---|---|
-| `Client` | `runtime/client.cpp` | Public API implementation | Keep concrete; split method glue from transport operations before moving files again |
-| `Session` | `runtime/session.cpp` | Public API implementation plus engine concurrency | `SessionState` is the likely concrete engine boundary; no virtual client needed |
-| `Server` | `runtime/server.cpp`, `reactor/core.hpp` | Public API implementation | Registration/lifecycle glue can eventually sit beside user/cpp while dispatch state stays system-owned |
+| `Client` | `user/cpp/core/client.cpp`, `runtime/client_engine.*` | Public API glue plus concrete engine | Keep concrete; no virtual client needed |
+| `Session` | `user/cpp/core/session.cpp`, `runtime/session_engine.*` | Public API glue plus engine concurrency | `SessionState` is the concrete engine boundary; no mirror or virtual client needed |
+| `Server` | `user/cpp/core/server_api.cpp`, `runtime/server.cpp` | Registration glue plus lifecycle implementation | Route translation is complete; lifecycle remains system-owned until Linux extraction |
 | `Request` | reactor jobs, handlers, transport | Protocol/handler value | A request is both decoded wire data and the user handler input; an internal mirror would add conversion cost |
 | `Response` | worker output, client/session readers | Protocol/handler value | Status/body are wire values; the aggregate is currently the zero-copy handler boundary |
-| `RouteOptions` | handler registry and serialized dispatch | Engine scheduling contract exposed through public API | Domain/policy can later be translated once at registration, not per request |
+| `RouteOptions` | `user/cpp/core/server_api.cpp` then handler registry | Engine scheduling contract exposed through public API | Domain/policy is translated once at registration, not per request |
 | `ServerOptions` | `ServerState`, option validation | Engine configuration contract | Contains limits/deadlines/backpressure that directly size engine state |
 | `ClientOptions` | one-shot client, `SessionState`, transport | Engine configuration contract | Used for deadlines, framing limits, stream limits, and optional stats |
 | `PeerCredentials` | `Connection`, `Request`, `capture_peer_credentials` | Platform capability value | Produced by Linux `SO_PEERCRED`; extraction target for `platform/linux` |
@@ -96,9 +107,10 @@ this inventory.
 | Component | Public C++ dependency? | Genuine engine contract? | Linux/platform capability? |
 |---|---:|---:|---:|
 | `system/core` | Error header only | Error classification | No direct syscall today |
-| `system/protocol` | Error header only | Wire codec and validation | `arpa/inet.h` only; no UDS syscall |
-| `system/runtime/client` | Yes: Client/Response/options/FD/stream | Request deadlines and one-shot lifecycle | Through transport helpers |
-| `system/runtime/session` | Yes: Session/Response/options/stats | In-flight table, reader/waiter, send serialization | Through transport helpers |
+| `system/protocol` | Error header only | Wire codec and validation | Dependency-free big-endian codec; no UDS syscall |
+| `system/runtime/client_engine` | Yes: Response/options/FD/stream values | Request deadlines and one-shot lifecycle | Through transport helpers |
+| `system/runtime/session_engine` | Yes: Response/options/stats values | In-flight table, reader/waiter, send serialization | Through transport helpers |
+| `user/cpp/core/client/session` | Owns public member glue | Calls concrete engine functions and state | No platform backend dependency |
 | `system/runtime/server` | Yes, transitively through reactor core | Lifecycle and route registration | Direct Linux includes remain |
 | `system/reactor` | Yes, transitively through `core.hpp` | Connections, parsing, workers, queues | Direct epoll/socket/eventfd/poll use |
 | `system/transport` | Yes: options/request/response/stream/error | Exact I/O and framing | Direct socket/uio/unix/fcntl use |
@@ -106,12 +118,22 @@ this inventory.
 | `user/cpp` | Owns public C++ headers | Public call/handler syntax | Must not include backend headers |
 | `user/c`, `user/py` | No implementation yet | Future binding surfaces | Must depend downward only |
 
+## Protocol portability decision
+
+The protocol codec previously used `arpa/inet.h` only for `htonl`/`ntohl`.
+Protocol v2 now uses four-byte explicit big-endian reads and writes in the
+header codec itself. This removes a network-header dependency without changing
+the 20-byte wire format or adding a call on the hot path. The
+`easy_uds.protocol_golden` CTest compares a representative encoded header
+byte-for-byte and decodes it again; the existing fuzz target continues to
+exercise malformed headers.
+
 ## Next phase, explicitly deferred
 
-This audit does not move Linux syscalls, add Windows code, add C/Python APIs,
+This phase does not move Linux syscalls, add Windows code, add C/Python APIs,
 change protocol v2, optimize the hot path, or introduce a virtual transport.
-The next implementation step should be a small concrete seam for the mixed
-`reactor/core.hpp` regions, followed by an inventory-driven move of `epoll`,
+The concrete user/system seam is now in place. The next implementation step is
+an inventory-driven move of `epoll`,
 `eventfd`, `AF_UNIX`, `sockaddr_un`, `accept4`, `SO_PEERCRED`, `SCM_RIGHTS`,
 `chmod`/`unlink`, and `errno` into `system/platform/linux` where that reduces
 coupling without adding a call or allocation to the hot path.

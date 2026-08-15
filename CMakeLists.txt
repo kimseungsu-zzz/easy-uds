@@ -43,8 +43,15 @@ find_package(Threads REQUIRED)
 add_library(easy_uds
     src/system/core/error.cpp
     src/system/runtime/server.cpp
-    src/system/runtime/client.cpp
-    src/system/runtime/session.cpp
+    src/system/runtime/server_registration.cpp
+    src/system/runtime/server_registration.hpp
+    src/user/cpp/core/client.cpp
+    src/user/cpp/core/server_api.cpp
+    src/system/runtime/client_engine.cpp
+    src/system/runtime/client_engine.hpp
+    src/user/cpp/core/session.cpp
+    src/system/runtime/session_engine.cpp
+    src/system/runtime/session_engine.hpp
     src/system/runtime/trace.hpp
     src/system/transport/transport.cpp
     src/system/transport/transport.hpp
@@ -181,6 +188,24 @@ if(EASY_UDS_BUILD_TESTS)
         set_tests_properties(easy_uds.unit PROPERTIES
             TIMEOUT 20
             LABELS "rc;unit;integration;session;streaming;fd;serialized;latestwins;rejectifbusy;stats;budget;shutdown")
+
+        add_executable(easy_uds_protocol_golden tests/protocol_golden.cpp)
+        target_include_directories(easy_uds_protocol_golden PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/src/system
+            ${CMAKE_CURRENT_SOURCE_DIR}/src/user/cpp/core)
+        target_link_libraries(easy_uds_protocol_golden PRIVATE easy_uds::easy_uds)
+        target_compile_features(easy_uds_protocol_golden PRIVATE cxx_std_17)
+        target_compile_options(easy_uds_protocol_golden PRIVATE
+            $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Wall;-Wextra;-Wpedantic>
+        )
+        if(EASY_UDS_WARNINGS_AS_ERRORS)
+            target_compile_options(easy_uds_protocol_golden PRIVATE
+                $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Werror>
+            )
+        endif()
+        add_test(NAME easy_uds.protocol_golden COMMAND easy_uds_protocol_golden)
+        set_tests_properties(easy_uds.protocol_golden PROPERTIES
+            TIMEOUT 5 LABELS "rc;protocol;portability")
 
         add_executable(easy_uds_rc_adversarial
             tests/easy_uds_test/common.cpp

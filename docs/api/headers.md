@@ -49,11 +49,11 @@ Internal files are grouped by runtime responsibility:
 ```text
 src/system/core/              shared engine state and error implementation
 src/system/protocol/          protocol-v2 codec boundary
-src/system/runtime/           Client, Session, and Server runtime
+src/system/runtime/           concrete engine operations and Server lifecycle
 src/system/reactor/           epoll parser, dispatch, flow/output, workers
 src/system/transport/         shared descriptor, exact I/O, client framing
 src/system/platform/linux/    reserved Linux dependency boundary
-src/user/cpp/core/            installed Core C++ headers
+src/user/cpp/core/            installed Core C++ headers and public method glue
 src/user/cpp/simple/          installed Simple C++ header
 src/user/c/ and src/user/py/  reserved non-C++ language boundaries
 ```

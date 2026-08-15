@@ -48,6 +48,60 @@
 [API reference](docs/api/README.md) · [Guides](docs/guides/README.md) ·
 [Internals와 실험 기록](docs/internals/README.md)
 
+### 가장 빠른 시작: Simple API
+
+v0.7.0의 이름인 **Again Easily**는 0.6에서 검증한 빠른 엔진을 이제 더
+쉽고 안전하게 사용한다는 뜻입니다. 고정 request/response RPC라면 Simple
+API로 첫 프로그램을 바로 시작할 수 있습니다.
+
+```cpp
+#include <easy_uds/simple.hpp>
+
+#include <string>
+
+using namespace easy_uds::simple;
+
+int main() {
+    Server server("/tmp/easy-uds.sock");
+    server.on("/ping") = "pong";
+    server.on("/echo") = [](std::string_view body) {
+        return std::string(body);
+    };
+    server.run();
+}
+```
+
+클라이언트도 같은 헤더만 사용합니다.
+
+```cpp
+#include <easy_uds/simple.hpp>
+
+using namespace easy_uds::simple;
+
+int main() {
+    Client client("/tmp/easy-uds.sock");
+    auto pong = client.request("/ping");
+    auto echo = client.request("/echo", "hello");
+}
+```
+
+서버가 200이 아닌 응답을 반환하면 `simple::Client::request()`는
+`simple::ResponseError`를 던집니다. `status()`와 `body()`로 애플리케이션
+오류를 확인할 수 있으며, timeout·protocol·connection 오류는 기존
+`easy_uds::Error`로 전달됩니다.
+
+```cpp
+try {
+    auto body = client.request("/motor");
+} catch (const easy_uds::simple::ResponseError& error) {
+    // error.status(), error.body()
+}
+```
+
+request metadata, streaming, FD 전달, Session, queue policy, 통계처럼 더
+세밀한 기능이 필요하면 `server.core()`로 동일한 서버의 Core API에 내려갈
+수 있습니다. 별도 reactor나 socket을 만들지 않는 명시적인 escape hatch입니다.
+
 ### Server
 
 ```cpp

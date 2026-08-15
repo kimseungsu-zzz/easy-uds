@@ -5,6 +5,28 @@ entry compares against tag `v0.6.4` with the same compiler, host, build flags,
 workload, and repeated runs. Absolute values are development measurements, not
 portable guarantees.
 
+## Concrete User/System seam (2026-08-15)
+
+The Phase 3 seam moves public Client/Session method glue and route registration
+out of the system runtime, while keeping concrete engine state and the request
+path unchanged. On WSL2 with g++ 15.2, Release, alternating Simple/Core runs
+(10,000 requests, three repeats), the current tree measured:
+
+| Load | API | Throughput | p50 | p99 | CPU-s / 1M |
+|---|---|---:|---:|---:|---:|
+| c1 | Core | 11.19k/s | 71.866 us | 235.150 us | 83.14 |
+| c1 | Simple | 12.14k/s | 68.555 us | 246.895 us | 75.32 |
+| c8 | Core | 36.58k/s | 201.322 us | 522.810 us | 89.67 |
+| c8 | Simple | 36.21k/s | 198.463 us | 561.290 us | 90.82 |
+| c32 | Core | 35.86k/s | 787.493 us | 1550.370 us | 90.90 |
+| c32 | Simple | 34.52k/s | 814.700 us | 1517.650 us | 94.87 |
+
+The c32 Simple/Core deltas remain inside the Phase 3 gate (throughput -3.7%,
+p50 +3.5%, p99 -2.1%, CPU +4.4%). The warmed Session allocation probe counted
+2 allocations over 5,000 requests (0.0004/request), preserving the existing
+near-zero steady-state behavior. The full static/shared release gate and the
+protocol golden test passed after this measurement.
+
 ## Functional public/internal layout (2026-08-14)
 
 Change: split the public umbrella into self-contained feature headers and move

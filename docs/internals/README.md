@@ -28,3 +28,6 @@ before adding it to the beginner documentation.
   beginner facade promotion record and scope boundary.
 - [User/system dependency audit](user-system-dependencies.md) — current public
   C++ edges and concrete separation candidates for 0.7.1.
+- Phase 3 concrete seams are recorded in the dependency audit: public Client,
+  Session, and route-registration glue is user-owned, while engine state and
+  registration translation remain concrete system functions.

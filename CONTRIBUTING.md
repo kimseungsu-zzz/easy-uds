@@ -21,6 +21,8 @@ The developer preset enables warnings-as-errors.
 - Run the protocol fuzzer when changing header parsing or length validation.
 - Update `docs/PROTOCOL.md` for any wire-format change and bump the protocol version when compatibility breaks.
 - Update `CHANGELOG.md` for user-visible changes.
+- When changing `README.md`, review and update `README.ko.md` in the same
+  change so both entry points expose the same beginner-facing product surface.
 - Keep the CMake project version and `src/user/cpp/core/easy_uds/version.hpp` in sync for releases.
 - Treat pre-1.0 minor releases as potentially ABI-breaking and keep the configured `SOVERSION` policy intact.
 

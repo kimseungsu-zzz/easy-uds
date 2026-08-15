@@ -1,4 +1,4 @@
-#include "easy_uds/client.hpp"
+#include "client_engine.hpp"
 
 #include "../transport/io.hpp"
 #include "../transport/transport.hpp"
@@ -6,17 +6,14 @@
 #include <array>
 #include <cstdint>
 #include <stdexcept>
-#include <utility>
 
-namespace easy_uds {
+namespace easy_uds::detail::client_engine {
 namespace {
 
 using namespace detail;
 using protocol::HeaderBytes;
 using protocol::WireType;
 
-// The frame header marks the request as carrying a descriptor and the
-// descriptor rides as SCM_RIGHTS on the first sendmsg.
 void write_request_frame_with_fd(int fd, std::uint32_t request_id, int passed_fd,
                                  std::string_view route, std::string_view body,
                                  std::chrono::milliseconds io_timeout, Deadline deadline) {
@@ -55,53 +52,45 @@ Response read_response(BufferedReader& reader, std::size_t max_message_size,
 
 } // namespace
 
-Client::Client(std::string socket_path, ClientOptions options)
-    : socket_path_(std::move(socket_path)), options_(options) {
-    (void)detail::make_address(socket_path_);
-    detail::validate_client_options(options_);
+void validate(const std::string& socket_path, const ClientOptions& options) {
+    (void)detail::make_address(socket_path);
+    detail::validate_client_options(options);
 }
 
-Response Client::request(std::string_view route, std::string_view body) const {
-    detail::client::validate_request_lengths(route, body, options_.max_message_size);
-
-    const detail::Deadline deadline = detail::deadline_from_now(options_.request_timeout);
-    detail::FileDescriptor fd = detail::make_socket();
-    const sockaddr_un address = detail::make_address(socket_path_);
-    detail::connect_nonblocking(fd.get(), address, options_.connect_timeout, deadline);
-
-    detail::client::write_request_frame(fd.get(), 0, route, body, options_.io_timeout,
-                                        deadline);
-    detail::BufferedReader reader(fd.get());
-    return read_response(reader, options_.max_message_size, options_.io_timeout, deadline);
+Response request(const std::string& socket_path, const ClientOptions& options,
+                 std::string_view route, std::string_view body) {
+    detail::client::validate_request_lengths(route, body, options.max_message_size);
+    const Deadline deadline = detail::deadline_from_now(options.request_timeout);
+    FileDescriptor fd = detail::make_socket();
+    const sockaddr_un address = detail::make_address(socket_path);
+    detail::connect_nonblocking(fd.get(), address, options.connect_timeout, deadline);
+    detail::client::write_request_frame(fd.get(), 0, route, body, options.io_timeout, deadline);
+    BufferedReader reader(fd.get());
+    return read_response(reader, options.max_message_size, options.io_timeout, deadline);
 }
 
-Response Client::request_fd(std::string_view route, BorrowedFd fd,
-                            std::string_view body) const {
+Response request_fd(const std::string& socket_path, const ClientOptions& options,
+                    std::string_view route, BorrowedFd fd, std::string_view body) {
     if (!fd.valid()) {
         throw std::invalid_argument("request_fd requires a valid descriptor");
     }
-    detail::client::validate_request_lengths(route, body, options_.max_message_size);
-
-    const detail::Deadline deadline = detail::deadline_from_now(options_.request_timeout);
-    detail::FileDescriptor socket_fd = detail::make_socket();
-    const sockaddr_un address = detail::make_address(socket_path_);
-    detail::connect_nonblocking(socket_fd.get(), address, options_.connect_timeout, deadline);
-
+    detail::client::validate_request_lengths(route, body, options.max_message_size);
+    const Deadline deadline = detail::deadline_from_now(options.request_timeout);
+    FileDescriptor socket_fd = detail::make_socket();
+    const sockaddr_un address = detail::make_address(socket_path);
+    detail::connect_nonblocking(socket_fd.get(), address, options.connect_timeout, deadline);
     write_request_frame_with_fd(socket_fd.get(), 0, fd.get(), route, body,
-                                options_.io_timeout, deadline);
-    detail::BufferedReader reader(socket_fd.get());
-    return read_response(reader, options_.max_message_size, options_.io_timeout, deadline);
+                                options.io_timeout, deadline);
+    BufferedReader reader(socket_fd.get());
+    return read_response(reader, options.max_message_size, options.io_timeout, deadline);
 }
 
-Status Client::request_stream(
+Status request_stream(
+    const std::string& socket_path, const ClientOptions& options,
     std::string_view route, const StreamReader& request_body,
-    const std::function<void(std::string_view)>& response_chunk) const {
-    return detail::client::run_oneshot_stream(socket_path_, options_, route, request_body,
+    const std::function<void(std::string_view)>& response_chunk) {
+    return detail::client::run_oneshot_stream(socket_path, options, route, request_body,
                                               response_chunk);
 }
 
-Session Client::session() const {
-    return Session(socket_path_, options_);
-}
-
-} // namespace easy_uds
+} // namespace easy_uds::detail::client_engine

@@ -13,6 +13,8 @@ if [[ "$(uname -s)" != "Linux" ]]; then
     exit 2
 fi
 
+bash "${root_dir}/scripts/check_architecture.sh"
+
 run_consumer() {
     local variant_build=$1
     local prefix_dir=$2

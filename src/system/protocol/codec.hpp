@@ -23,11 +23,8 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
-#include <cstring>
 #include <limits>
 #include <stdexcept>
-
-#include <arpa/inet.h>
 
 namespace easy_uds::detail::protocol {
 
@@ -65,15 +62,19 @@ struct DecodedHeader {
     std::uint16_t flags = 0;
 };
 
-inline void put_u32(HeaderBytes& header, std::size_t offset, std::uint32_t value) noexcept {
-    const std::uint32_t wire_value = htonl(value);
-    std::memcpy(header.data() + offset, &wire_value, sizeof(wire_value));
+inline void put_u32(HeaderBytes& header, std::size_t offset,
+                    std::uint32_t value) noexcept {
+    header[offset] = static_cast<unsigned char>((value >> 24) & 0xFFU);
+    header[offset + 1] = static_cast<unsigned char>((value >> 16) & 0xFFU);
+    header[offset + 2] = static_cast<unsigned char>((value >> 8) & 0xFFU);
+    header[offset + 3] = static_cast<unsigned char>(value & 0xFFU);
 }
 
 inline std::uint32_t get_u32(const HeaderBytes& header, std::size_t offset) noexcept {
-    std::uint32_t wire_value = 0;
-    std::memcpy(&wire_value, header.data() + offset, sizeof(wire_value));
-    return ntohl(wire_value);
+    return (static_cast<std::uint32_t>(header[offset]) << 24) |
+           (static_cast<std::uint32_t>(header[offset + 1]) << 16) |
+           (static_cast<std::uint32_t>(header[offset + 2]) << 8) |
+           static_cast<std::uint32_t>(header[offset + 3]);
 }
 
 inline HeaderBytes encode_header(WireType type, std::uint32_t request_id, std::uint32_t arg1,

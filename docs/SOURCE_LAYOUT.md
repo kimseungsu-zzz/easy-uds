@@ -9,13 +9,13 @@ src/
 ├── system/
 │   ├── core/                 shared engine state and error implementation
 │   ├── protocol/             protocol-v2 codec boundary
-│   ├── runtime/              client, session, and server runtime
+│   ├── runtime/              concrete engine functions and server lifecycle
 │   ├── reactor/              epoll dispatch, parsing, workers, and streams
 │   ├── transport/            exact I/O and client framing helpers
 │   └── platform/linux/       reserved Linux dependency boundary
 └── user/
     ├── cpp/
-    │   ├── core/             installed Core C++ headers
+    │   ├── core/             installed Core C++ headers and public method glue
     │   └── simple/           installed Simple C++ header
     ├── c/                    reserved C ABI boundary
     └── py/                   reserved Python binding boundary
@@ -29,7 +29,9 @@ changing the package surface.
 The actual dependency inventory is maintained in
 [`internals/user-system-dependencies.md`](internals/user-system-dependencies.md).
 It records the current intentional `system → public C++ contract` edges and
-the concrete seams to use before any Linux syscall extraction.
+the concrete seams used before any Linux syscall extraction. Client and Session
+glue now calls concrete runtime engine functions, and route options are
+translated once during registration into immutable internal entries.
 
 The first relocation deliberately leaves Linux calls in their existing
 implementation files and keeps the current C++ runtime behavior intact. The

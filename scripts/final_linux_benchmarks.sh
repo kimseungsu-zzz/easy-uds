@@ -36,7 +36,7 @@ require_binary easy_uds_session_benchmark
 require_binary easy_uds_stream_benchmark
 require_binary easy_uds_allocation_benchmark
 
-echo "easy-uds 0.6.x final benchmark"
+echo "easy-uds 0.8 RC Linux benchmark"
 echo "utc: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
 echo "kernel: $(uname -srvmo)"
 echo "architecture: $(uname -m)"

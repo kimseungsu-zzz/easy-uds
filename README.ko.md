@@ -736,6 +736,7 @@ docs/platform-support.md   현재 Linux/Windows 지원 범위와 제한
 docs/internals/windows-backend.md Windows backend 결정과 검증 경계
 docs/SOURCE_LAYOUT.md    0.7.1 source ownership와 dependency 경계
 docs/PERF_0.7.md        v0.6.4 대비 0.7 성능 회귀 측정
+docs/PERF_0.8_RC.md     0.8 RC Linux 기준 측정
 docs/history/experiments/0.6.md  독립 UDS 기술 capability probe (history)
 docs/history/README.md    history 및 실험 인덱스
 docs/PERF_0.6.md         0.6 benchmark 측정 결과와 해석

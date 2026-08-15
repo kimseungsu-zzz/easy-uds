@@ -18,6 +18,8 @@ release promise.
 - [0.7 performance](../PERF_0.7.md) — API-foundation A/B measurements.
 - [0.8 Request capabilities](../PERF_0.8_REQUEST_CAPABILITIES.md) — Request
   footprint, ownership chain, and no-allocation policy.
+- [0.8 RC performance](../PERF_0.8_RC.md) — Linux reference measurements
+  and explicit Windows/ARM64 measurement boundaries.
 - [0.6 experiments](../history/experiments/0.6.md) — adopted and rejected experiments,
   including io_uring and shared-memory probes.
 - [History index](../history/README.md) — historical measurements kept out of

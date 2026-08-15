@@ -690,6 +690,7 @@ docs/platform-support.md   Current Linux/Windows support and intentional limits
 docs/internals/windows-backend.md Windows backend decisions and validation boundary
 docs/SOURCE_LAYOUT.md    0.7.1 source ownership and dependency boundary
 docs/PERF_0.7.md        0.7 regression measurements against v0.6.4
+docs/PERF_0.8_RC.md     0.8 RC Linux reference measurements
 docs/history/experiments/0.6.md  Standalone UDS capability probes (history)
 docs/history/README.md    Historical measurements and experiment index
 docs/PERF_0.6.md         0.6 benchmark measurements and interpretation

@@ -10,6 +10,12 @@ readiness, wakeup, and pathname lifecycle primitives.
 | Linux | AF_UNIX | supported and regression-tested | supported | supported | peer credentials and one-FD `SCM_RIGHTS` |
 | Windows 10+ | Winsock AF_UNIX | implemented; Windows CI is the validation gate | implemented through the common engine | implemented | unavailable in 0.8; no fake FD/SID API |
 
+The Windows RC smoke covers fixed RPC, concurrent Session requests, streaming,
+Simple `ResponseError`, repeated bind/run/stop lifecycle, and installed-package
+Core/Simple consumers. Static and shared library variants are built in the
+Windows workflow. These become validation results only after that job has run
+on the current commit.
+
 The Windows implementation deliberately uses AF_UNIX rather than introducing a
 Named Pipe-specific protocol or a runtime transport hierarchy. This preserves
 protocol v2 and the existing request-id/session machinery while keeping the

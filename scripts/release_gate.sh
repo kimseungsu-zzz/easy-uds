@@ -2,7 +2,7 @@
 
 set -euo pipefail
 
-# One-command release gate. This validates the installed package as
+# One-command Linux release gate. This validates the installed package as
 # well as in-tree targets; it does not create tags or releases.
 
 root_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
@@ -87,6 +87,6 @@ run_variant OFF
 run_variant ON
 
 echo
-echo "release_gate: build, unit/integration, release labels, compile-error UX,"
+echo "release_gate: 0.8 RC build, unit/integration, release labels, compile-error UX,"
 echo "release_gate: static/shared package consumers, Simple API /echo smoke,"
 echo "release_gate: and beginner /echo smoke passed"

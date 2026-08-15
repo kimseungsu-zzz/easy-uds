@@ -731,6 +731,7 @@ docs/ROADMAP_0.7.md     0.7 사용성·API·호환성 계획
 docs/ERGONOMICS_0.7.md  beginner-first syntax 및 progressive disclosure audit
 docs/RELEASE_0.7.md     0.7.0 최종 범위와 검증 기록
 docs/releases/v0.7.1.md 0.7.1 아키텍처 릴리즈 범위와 인수인계
+docs/releases/v0.8.0-rc.1.md 0.8 RC 범위와 검증 경계
 docs/platform-support.md   현재 Linux/Windows 지원 범위와 제한
 docs/internals/windows-backend.md Windows backend 결정과 검증 경계
 docs/SOURCE_LAYOUT.md    0.7.1 source ownership와 dependency 경계

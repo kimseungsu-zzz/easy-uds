@@ -466,7 +466,7 @@ EASY_UDS_SOAK_BENCHMARKS=1 ./scripts/long_soak.sh build-bench 20
 The `workflow_dispatch` CI path runs the same matrix on native Ubuntu x86_64
 and hosted ARM64, then uploads both complete logs.
 
-For a 0.7.1 source checkout, run the one-command release gate. It builds
+For the current source checkout, run the one-command Linux release gate. It builds
 static and shared variants, executes the labelled adversarial suite, checks
 invalid-usage diagnostics, and validates both installed-package consumers:
 
@@ -477,9 +477,9 @@ bash scripts/release_gate.sh
 The gate never creates a tag or GitHub release; release automation remains a
 separate maintainer step.
 
-The assignment-style beginner facade is the narrow v1
-`<easy_uds/simple.hpp>` API. Its historical prototype and diagnostic probes
-remain reproducible under `experiments/simple_api/`:
+The beginner facade is the production v1 `<easy_uds/simple.hpp>` API. Its
+functional and diagnostic probes remain reproducible under
+`experiments/simple_api/`:
 
 ```bash
 cmake -S . -B build-simple -DCMAKE_BUILD_TYPE=Release \
@@ -685,6 +685,7 @@ docs/ROADMAP_0.7.md     0.7 usability, API, and compatibility plan
 docs/ERGONOMICS_0.7.md  Beginner-first syntax and progressive disclosure audit
 docs/RELEASE_0.7.md     0.7.0 final scope and verification record
 docs/releases/v0.7.1.md 0.7.1 architecture release scope and handoff
+docs/releases/v0.8.0-rc.1.md 0.8 RC scope and validation boundary
 docs/platform-support.md   Current Linux/Windows support and intentional limits
 docs/internals/windows-backend.md Windows backend decisions and validation boundary
 docs/SOURCE_LAYOUT.md    0.7.1 source ownership and dependency boundary

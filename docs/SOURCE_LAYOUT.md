@@ -10,9 +10,10 @@ src/
 │   ├── core/                 shared engine state and error implementation
 │   ├── protocol/             protocol-v2 codec boundary
 │   ├── runtime/              concrete engine functions and server lifecycle
-│   ├── reactor/              readiness dispatch, parsing, workers, and streams
+│   ├── reactor/              readiness-neutral dispatch, parsing, workers, and streams
 │   ├── transport/            exact I/O and client framing helpers
-│   └── platform/linux/       endpoint, readiness, identity, and FD capabilities
+│   ├── platform/linux/       Linux endpoint, readiness, identity, and FD capabilities
+│   └── platform/windows/     Windows AF_UNIX/Winsock capability source set
 └── user/
     ├── cpp/
     │   ├── core/             installed Core C++ headers and public method glue

@@ -39,3 +39,10 @@ build/tests/ASan/UBSan/TSan/fuzz/stress remain the regression gate. Windows
 source compilation and runtime behavior are claimed only from the dedicated
 GitHub Actions job after it executes; until then this is an explicit external
 validation blocker, not a passing test result.
+
+The pathname capability is deliberately conservative when Windows does not
+expose POSIX inode/type information: only paths recorded as bound by this
+backend are classified as sockets. An unrelated existing file is never treated
+as a stale socket. Full cross-process stale-name and ACL parity is deferred to
+the Windows endpoint design phase rather than approximated with fake POSIX
+identity values.

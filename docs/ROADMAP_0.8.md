@@ -1,20 +1,21 @@
-# 0.8 portability decisions
+# 0.8 portability decisions and RC handoff
 
-0.7.1 keeps the Linux/POSIX public contract explicit while extracting concrete
-Linux capabilities behind the engine. The following items are deliberately
-deferred to 0.8 design work; this file records blockers rather than promising a
-particular backend shape.
+0.7.1 froze the User/System/platform ownership map. The 0.8 RC work now uses
+that map to provide a concrete Windows AF_UNIX backend without pretending that
+POSIX capabilities are portable. This document records the decisions made for
+the initial RC and the blockers intentionally deferred beyond it.
 
 ## Public-header blocker
 
 `PeerCredentials` currently exposes `pid_t`, `uid_t`, and `gid_t` from
-`<sys/types.h>`. That is correct for the Linux-only 0.7 line, but these POSIX
-types make the current public header unsuitable for a Windows build.
+`<sys/types.h>`. That remains a POSIX-only public capability. The common
+Request and umbrella headers no longer require this header on Windows, so the
+Windows public surface is compilable without fabricating UID/GID values.
 
-Before adding a Windows backend, decide whether peer identity becomes a
-portable value, a platform-specific optional capability, or a separate
-platform header. Do not silently rename it to `NativeHandle` or widen
-`OwnedFd`/`BorrowedFd`; those remain POSIX descriptor APIs in 0.7.x.
+The RC decision is a separate POSIX extension/capability. Windows PID/SID/token
+identity is not aliased to Linux credentials and remains a future capability.
+`OwnedFd`/`BorrowedFd` remain POSIX descriptor APIs; no `NativeHandle` wrapper
+was introduced.
 
 The current `src/system/platform/descriptor_passing.hpp` also exposes POSIX
 `ssize_t`, `iovec`, and integer descriptors. In 0.8, decide whether to retain
@@ -37,7 +38,7 @@ The current security model depends on POSIX device/inode, effective UID,
 behavior remain an open design item rather than a `PortableInode` or universal
 file-lock API.
 
-Phase 5 completes the Linux dependency audit and makes backend assembly visible
+Phase 5 completed the Linux dependency audit and makes backend assembly visible
 in CMake: `EASY_UDS_COMMON_SOURCES` is combined with one concrete platform
 capability source set at build time. The 0.8 Windows branch now contains an
 AF_UNIX/Winsock implementation for endpoint, I/O, readiness, wakeup, and
@@ -48,38 +49,41 @@ not be mistaken for final Windows contracts.
 
 ## 0.8 handoff priority
 
-The 0.7.1 architecture is frozen with these handoff items, in order. The
-Windows backend implementation has started, but the external Windows compiler
-and runtime gate is still a release blocker until it runs.
+The following handoff items are the remaining RC validation questions. The
+Windows implementation is present, but the external Windows compiler/runtime
+job is still a release blocker until it runs.
 
 ### P0 — public-header blockers
 
-- Decide how `PeerCredentials` can represent `pid_t`/`uid_t`/`gid_t` without
-  making the public header POSIX-only.
-- Decide whether `OwnedFd`/`BorrowedFd` remain explicitly POSIX descriptors or
-  gain a separate Windows resource API. Do not rename or generalize them in
-  0.7.x.
+- **Resolved for the initial RC:** `PeerCredentials` and POSIX request
+  capabilities stay in the POSIX extension surface; common Windows headers do
+  not include them.
+- **Resolved for the initial RC:** `OwnedFd`/`BorrowedFd` remain explicitly
+  POSIX descriptors. Windows resource passing is out of scope.
 
 ### P1 — engine/platform seam blockers
 
-- Replace or retain the `sockaddr_un`/`UnixEndpoint` value seam after choosing
-  the Windows endpoint model.
-- Decide what replaces POSIX `ssize_t`/`iovec` seams for raw and gathered I/O.
-- Decide how `dev_t`/`ino_t` pathname identity and TOCTOU ownership checks map
-  to a Windows endpoint lifecycle.
+- **Selected for the initial RC:** Winsock `AF_UNIX` keeps the existing
+  pathname byte-stream model through a concrete build-time endpoint seam.
+- POSIX `ssize_t`/`iovec` headers remain internal temporary seams; the Windows
+  implementation uses `WSABUF` internally and does not expose those types in
+  common public headers.
+- Windows pathname identity is conservative: only paths known to the backend
+  are treated as sockets; Windows ACL/identity parity is deferred.
 
 ### P2 — backend architecture decisions
 
-- Choose readiness versus an IOCP/completion model; the current readiness and
-  synchronous-wait contracts are not frozen as Windows interfaces.
-- Choose Windows endpoint and resource/HANDLE-passing capabilities, if any.
-- Define Windows instance ownership/locking and stale-name semantics.
+- The initial RC uses concrete `WSAPoll` readiness plus UDP wakeup. This is not
+  frozen as the final IOCP architecture.
+- Windows endpoint uses AF_UNIX; HANDLE/SOCKET passing is intentionally absent.
+- Instance ownership uses a concrete Windows lock-file capability; full ACL and
+  stale-name parity remains a future design item.
 
 The 0.8 implementation order is P0 public surface, then P1 concrete seams,
 then P2 backend capabilities. No item is solved by adding a runtime virtual
 backend or a generic handle type before its semantics are known.
 
-## Capability decisions still open
+## Capability decisions still open after the initial RC
 
 - Windows readiness currently uses a concrete `WSAPoll`/UDP-wakeup capability;
   it is not frozen as the final IOCP architecture.

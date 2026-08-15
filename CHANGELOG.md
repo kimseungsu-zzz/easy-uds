@@ -2,6 +2,46 @@
 
 All notable changes to this project are documented here.
 
+## easy-uds 0.8.0-rc.1 — Cross-platform Core (candidate)
+
+This candidate keeps the Linux engine and protocol-v2 behavior while adding a
+concrete Windows AF_UNIX backend selected at build time. It is not a final
+release until the Windows CI gate has run on the candidate commit.
+
+### Added
+
+- Windows AF_UNIX endpoint, socket I/O, readiness/wakeup, synchronous wait, and
+  pathname lifecycle capabilities.
+- Windows Core one-shot RPC, persistent Session, concurrent request-id
+  multiplexing, streaming, Simple API, and lifecycle smoke coverage.
+- Windows static/shared package assembly plus installed Core/Simple consumers.
+
+### Changed
+
+- Common engine and public Request remain platform-neutral; POSIX descriptor,
+  peer-credential, and `request_fd` surfaces remain explicitly POSIX-only.
+- CMake selects one explicit platform source set; architecture guards reject
+  accidental platform implementation leakage.
+- Windows Winsock errors are translated to the existing semantic Error model.
+
+### Compatibility and scope
+
+- Protocol v2, wire framing, Linux FD passing, Linux peer credentials, and
+  Linux performance gates are unchanged.
+- Windows resource/HANDLE passing, SID/token identity, generic native handles,
+  C/Python bindings, typed RPC, protocol v3, and IOCP optimization are not in
+  this candidate.
+
+### Verification
+
+- Linux GCC Debug/Release, CTest, architecture guard, and existing regression
+  suites remain required and are run locally/CI.
+- Windows Core/Session/Simple/streaming/lifecycle/package validation is owned
+  by the dedicated Windows Actions job; no local MSVC result is claimed.
+- See [`docs/releases/v0.8.0-rc.1.md`](docs/releases/v0.8.0-rc.1.md) and
+  [`docs/platform-support.md`](docs/platform-support.md) for the exact RC
+  boundary.
+
 ## easy-uds 0.7.1 — Architecture Release
 
 This is an internal architecture and packaging release; public API and

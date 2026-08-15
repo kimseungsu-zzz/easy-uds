@@ -12,7 +12,7 @@ Session::Session(std::string socket_path, ClientOptions options)
     : state_(std::make_unique<detail::SessionState>(std::move(socket_path), options)) {
     const detail::Deadline deadline = detail::deadline_from_now(state_->options.request_timeout);
     state_->fd = detail::make_socket();
-    const sockaddr_un address = detail::make_address(state_->socket_path);
+    const auto address = detail::make_address(state_->socket_path);
     detail::connect_nonblocking(state_->fd.get(), address, state_->options.connect_timeout,
                                 deadline);
     state_->reader_thread =

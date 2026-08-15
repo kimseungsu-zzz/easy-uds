@@ -12,7 +12,6 @@
 
 #include <sys/epoll.h>
 #include <sys/eventfd.h>
-#include <sys/socket.h>
 #include <unistd.h>
 
 namespace easy_uds::detail {
@@ -142,12 +141,7 @@ void run_reactor(const std::shared_ptr<ServerState>& state) {
                 }
                 std::size_t accepted = 0;
                 while (accepted < max_accept_batch) {
-#if defined(__linux__) && defined(SOCK_CLOEXEC) && defined(SOCK_NONBLOCK)
-                    const int client_fd =
-                        ::accept4(listener, nullptr, nullptr, SOCK_CLOEXEC | SOCK_NONBLOCK);
-#else
-                    const int client_fd = ::accept(listener, nullptr, nullptr);
-#endif
+                    const int client_fd = platform_linux::accept_socket(listener);
                     if (client_fd < 0) {
                         if (errno == EINTR || errno == ECONNABORTED) {
                             continue;

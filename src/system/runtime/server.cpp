@@ -17,7 +17,6 @@
 #include <sys/file.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
-#include <sys/un.h>
 #include <unistd.h>
 
 namespace easy_uds {
@@ -94,7 +93,7 @@ void remove_stale_socket(const std::string& socket_path, std::chrono::millisecon
     const Deadline grace_deadline = deadline_from_now(grace_period);
     while (true) {
         FileDescriptor probe = make_socket();
-        const sockaddr_un address = make_address(socket_path);
+        const auto address = make_address(socket_path);
         try {
             connect_nonblocking(probe.get(), address, std::chrono::milliseconds{100}, Deadline::max());
             throw easy_uds::Error(
@@ -141,7 +140,7 @@ void remove_stale_socket(const std::string& socket_path, std::chrono::millisecon
         throw std::runtime_error("socket path changed before stale-socket removal: " + socket_path);
     }
 
-    if (::unlink(socket_path.c_str()) != 0 && errno != ENOENT) {
+    if (platform_linux::unlink_socket(socket_path.c_str()) != 0 && errno != ENOENT) {
         throw_system_error("remove stale socket failed");
     }
 }
@@ -159,7 +158,7 @@ void unlink_owned_socket(const std::shared_ptr<detail::ServerState>& state) noex
     if (state->socket_identity_valid && ::lstat(state->socket_path.c_str(), &current) == 0 &&
         S_ISSOCK(current.st_mode) && current.st_uid == ::geteuid() &&
         current.st_dev == state->socket_device && current.st_ino == state->socket_inode) {
-        (void)::unlink(state->socket_path.c_str());
+        (void)platform_linux::unlink_socket(state->socket_path.c_str());
     }
 }
 
@@ -283,8 +282,8 @@ Server::Server(std::string socket_path, ServerOptions options) : state_(std::mak
     remove_stale_socket(state_->socket_path, options.stale_socket_grace_period);
 
     FileDescriptor listener = make_socket();
-    const sockaddr_un address = make_address(state_->socket_path);
-    if (::bind(listener.get(), reinterpret_cast<const sockaddr*>(&address), address_length(address)) != 0) {
+    const auto address = make_address(state_->socket_path);
+    if (platform_linux::bind_socket(listener.get(), address) != 0) {
         throw_system_error("bind failed");
     }
 
@@ -300,7 +299,7 @@ Server::Server(std::string socket_path, ServerOptions options) : state_(std::mak
     state_->socket_inode = identity.st_ino;
     state_->socket_identity_valid = true;
 
-    if (::chmod(state_->socket_path.c_str(), static_cast<mode_t>(options.socket_permissions)) != 0) {
+    if (platform_linux::chmod_socket(state_->socket_path.c_str(), options.socket_permissions) != 0) {
         const int error = errno;
         unlink_owned_socket(state_);
         throw_system_error("chmod socket path failed", error);
@@ -314,7 +313,7 @@ Server::Server(std::string socket_path, ServerOptions options) : state_(std::mak
         throw std::runtime_error("socket path changed while applying permissions");
     }
 
-    if (::listen(listener.get(), options.listen_backlog) != 0) {
+    if (platform_linux::listen_socket(listener.get(), options.listen_backlog) != 0) {
         const int error = errno;
         unlink_owned_socket(state_);
         throw_system_error("listen failed", error);

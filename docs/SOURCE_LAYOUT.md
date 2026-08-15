@@ -12,7 +12,7 @@ src/
 │   ├── runtime/              concrete engine functions and server lifecycle
 │   ├── reactor/              epoll dispatch, parsing, workers, and streams
 │   ├── transport/            exact I/O and client framing helpers
-│   └── platform/linux/       reserved Linux dependency boundary
+│   └── platform/linux/       endpoint/socket and future Linux capabilities
 └── user/
     ├── cpp/
     │   ├── core/             installed Core C++ headers and public method glue
@@ -33,13 +33,11 @@ the concrete seams used before any Linux syscall extraction. Client and Session
 glue now calls concrete runtime engine functions, and route options are
 translated once during registration into immutable internal entries.
 
-The first relocation deliberately leaves Linux calls in their existing
-implementation files and keeps the current C++ runtime behavior intact. The
-next inventory phase will classify `epoll`,
-`eventfd`, `AF_UNIX`, `sockaddr_un`, `accept4`, `SO_PEERCRED`, `SCM_RIGHTS`,
-`chmod`/`unlink`, and `errno`, then move only the necessary pieces under
-`src/system/platform/linux/`. `src/system` owns the engine and must not depend
-on C or Python binding layers; `src/system/platform/linux` must not include
-`src/user/*`; and `src/user` must not depend on a platform implementation.
-Build-time backend selection is preferred over a hot-path `ITransport` virtual
-abstraction.
+Phase 4 begins the inventory-driven extraction with `endpoint.*`: pathname
+`AF_UNIX`/`sockaddr_un` validation and socket lifecycle calls are now concrete
+Linux capability functions. Readiness/wakeup, peer identity, descriptor
+passing, and error translation remain later capability units. `src/system`
+owns the engine and must not depend on C or Python binding layers;
+`src/system/platform/linux` must not include `src/user/*`; and `src/user` must
+not depend on a platform implementation. Build-time backend selection is
+preferred over a hot-path `ITransport` virtual abstraction.

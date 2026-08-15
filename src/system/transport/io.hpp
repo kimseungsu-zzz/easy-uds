@@ -7,6 +7,7 @@
 #include "easy_uds/options.hpp"
 #include "easy_uds/request.hpp"
 #include "../protocol/codec.hpp"
+#include "../platform/linux/endpoint.hpp"
 
 #include <algorithm>
 #include <array>
@@ -25,7 +26,6 @@
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <sys/uio.h>
-#include <sys/un.h>
 #include <unistd.h>
 
 namespace easy_uds::detail {
@@ -187,42 +187,16 @@ inline void configure_no_sigpipe(int fd) {
 }
 
 inline FileDescriptor make_socket() {
-    int socket_type = SOCK_STREAM;
-#if defined(__linux__) && defined(SOCK_CLOEXEC) && defined(SOCK_NONBLOCK)
-    socket_type |= SOCK_CLOEXEC | SOCK_NONBLOCK;
-#endif
-    FileDescriptor fd(::socket(AF_UNIX, socket_type, 0));
+    FileDescriptor fd(platform_linux::create_stream_socket());
     if (fd.get() < 0) {
         throw_system_error("socket failed");
     }
-#if !defined(__linux__) || !defined(SOCK_CLOEXEC) || !defined(SOCK_NONBLOCK)
-    set_close_on_exec(fd.get());
-    set_nonblocking(fd.get());
-#endif
     configure_no_sigpipe(fd.get());
     return fd;
 }
 
-inline sockaddr_un make_address(const std::string& socket_path) {
-    sockaddr_un address{};
-    address.sun_family = AF_UNIX;
-
-    if (socket_path.empty()) {
-        throw std::invalid_argument("socket path must not be empty");
-    }
-    if (socket_path.find('\0') != std::string::npos) {
-        throw std::invalid_argument("pathname socket path must not contain embedded NUL bytes");
-    }
-    if (socket_path.size() >= sizeof(address.sun_path)) {
-        throw std::invalid_argument("socket path is too long");
-    }
-
-    std::memcpy(address.sun_path, socket_path.c_str(), socket_path.size() + 1);
-    return address;
-}
-
-inline socklen_t address_length(const sockaddr_un& address) {
-    return static_cast<socklen_t>(offsetof(sockaddr_un, sun_path) + std::strlen(address.sun_path) + 1);
+inline platform_linux::UnixEndpoint make_address(const std::string& socket_path) {
+    return platform_linux::make_endpoint(socket_path);
 }
 
 inline Deadline deadline_from_now(std::chrono::milliseconds timeout) {
@@ -543,9 +517,10 @@ inline void write_header_frame(int fd, WireType type, std::uint32_t request_id, 
     write_exact(fd, header.data(), header.size(), inactivity_timeout, absolute_deadline);
 }
 
-inline void connect_nonblocking(int fd, const sockaddr_un& address, std::chrono::milliseconds connect_timeout,
+inline void connect_nonblocking(int fd, const platform_linux::UnixEndpoint& address,
+                                std::chrono::milliseconds connect_timeout,
                                 Deadline request_deadline) {
-    if (::connect(fd, reinterpret_cast<const sockaddr*>(&address), address_length(address)) == 0) {
+    if (platform_linux::connect_socket(fd, address) == 0) {
         return;
     }
 

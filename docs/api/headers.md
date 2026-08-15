@@ -52,7 +52,7 @@ src/system/protocol/          protocol-v2 codec boundary
 src/system/runtime/           concrete engine operations and Server lifecycle
 src/system/reactor/           epoll parser, dispatch, flow/output, workers
 src/system/transport/         shared descriptor, exact I/O, client framing
-src/system/platform/linux/    reserved Linux dependency boundary
+src/system/platform/linux/    concrete Linux endpoint/socket capability
 src/user/cpp/core/            installed Core C++ headers and public method glue
 src/user/cpp/simple/          installed Simple C++ header
 src/user/c/ and src/user/py/  reserved non-C++ language boundaries

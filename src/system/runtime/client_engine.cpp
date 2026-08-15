@@ -62,7 +62,7 @@ Response request(const std::string& socket_path, const ClientOptions& options,
     detail::client::validate_request_lengths(route, body, options.max_message_size);
     const Deadline deadline = detail::deadline_from_now(options.request_timeout);
     FileDescriptor fd = detail::make_socket();
-    const sockaddr_un address = detail::make_address(socket_path);
+    const auto address = detail::make_address(socket_path);
     detail::connect_nonblocking(fd.get(), address, options.connect_timeout, deadline);
     detail::client::write_request_frame(fd.get(), 0, route, body, options.io_timeout, deadline);
     BufferedReader reader(fd.get());
@@ -77,7 +77,7 @@ Response request_fd(const std::string& socket_path, const ClientOptions& options
     detail::client::validate_request_lengths(route, body, options.max_message_size);
     const Deadline deadline = detail::deadline_from_now(options.request_timeout);
     FileDescriptor socket_fd = detail::make_socket();
-    const sockaddr_un address = detail::make_address(socket_path);
+    const auto address = detail::make_address(socket_path);
     detail::connect_nonblocking(socket_fd.get(), address, options.connect_timeout, deadline);
     write_request_frame_with_fd(socket_fd.get(), 0, fd.get(), route, body,
                                 options.io_timeout, deadline);

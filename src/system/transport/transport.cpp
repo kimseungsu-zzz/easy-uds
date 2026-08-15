@@ -58,7 +58,7 @@ Status run_oneshot_stream(const std::string& socket_path, const ClientOptions& o
 
     const Deadline deadline = deadline_from_now(options.stream_timeout);
     FileDescriptor fd = make_socket();
-    const sockaddr_un address = make_address(socket_path);
+    const auto address = make_address(socket_path);
     connect_nonblocking(fd.get(), address, options.connect_timeout, deadline);
 
     write_stream_request(fd.get(), 0, route, request_body, options.stream_chunk_size,

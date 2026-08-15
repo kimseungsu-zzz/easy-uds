@@ -22,6 +22,11 @@ check_no_match \
     '^[[:space:]]*#[[:space:]]*include[[:space:]]*[<"]([^>"]*/)?(user/|easy_uds/simple\.hpp)' \
     "${root_dir}/src/system/platform/linux"
 
+check_no_match \
+    "system/protocol must not include platform/linux" \
+    '^[[:space:]]*#[[:space:]]*include[[:space:]]*[<"][^>"]*(platform/linux)[^>"]*[>"]' \
+    "${root_dir}/src/system/protocol"
+
 user_sources=()
 while IFS= read -r -d '' path; do
     user_sources+=("${path}")
@@ -29,7 +34,7 @@ done < <(find "${root_dir}/src/user" -type f \( -name '*.cpp' -o -name '*.c' -o 
 if ((${#user_sources[@]} > 0)); then
     check_no_match \
         "user implementation must not include platform/linux" \
-        '^[[:space:]]*#[[:space:]]*include[[:space:]]*[<"][^>"]*(platform/linux|sys/epoll|sys/eventfd|sys/un\.h)[^>"]*[>"]' \
+        '^[[:space:]]*#[[:space:]]*include[[:space:]]*[<"][^>"]*(platform/linux|sys/epoll|sys/eventfd|sys/socket\.h|sys/un\.h|unistd\.h)[^>"]*[>"]' \
         "${user_sources[@]}"
 fi
 

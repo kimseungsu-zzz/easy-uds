@@ -34,7 +34,7 @@ below rather than hidden behind a premature virtual interface.
 |---|---|---|---|
 | `system/core/error.cpp` | `error.hpp` | Defines `Error`, `ErrorCode`, and the error category | Public error contract implementation |
 | `system/protocol/codec.hpp` | `error.hpp` | Reports malformed magic/version/type/flags as `Error` | Engine error contract; protocol validation |
-| `system/transport/io.hpp` | `error.hpp`, `options.hpp`, `request.hpp` | Validates client/server limits and constructs peer credentials | Engine policy contract; platform capability value |
+| `system/transport/io.hpp` | `error.hpp`, `options.hpp`, `request.hpp` | Validates client/server limits and performs exact I/O around endpoint capability calls | Engine policy contract; platform capability value |
 | `system/transport/transport.hpp` | `options.hpp`, `response.hpp`, `stream.hpp` | Frames fixed and streaming requests and returns `Status` | Protocol values plus public stream contract |
 | `user/cpp/core/client.cpp` | `client.hpp` | Thin `Client` method glue | Public API implementation |
 | `system/runtime/client_engine.*` | client/options/response/stream contracts | One-shot connect, framing, and response operations | Concrete engine implementation |
@@ -114,7 +114,7 @@ this inventory.
 | `system/runtime/server` | Yes, transitively through reactor core | Lifecycle and route registration | Direct Linux includes remain |
 | `system/reactor` | Yes, transitively through `core.hpp` | Connections, parsing, workers, queues | Direct epoll/socket/eventfd/poll use |
 | `system/transport` | Yes: options/request/response/stream/error | Exact I/O and framing | Direct socket/uio/unix/fcntl use |
-| `system/platform/linux` | No code yet | Reserved capability boundary | Placeholder only |
+| `system/platform/linux/endpoint.*` | No public C++ API | Pathname endpoint and socket lifecycle capability | Linux `AF_UNIX`/socket syscalls |
 | `user/cpp` | Owns public C++ headers | Public call/handler syntax | Must not include backend headers |
 | `user/c`, `user/py` | No implementation yet | Future binding surfaces | Must depend downward only |
 
@@ -130,10 +130,11 @@ exercise malformed headers.
 
 ## Next phase, explicitly deferred
 
-This phase does not move Linux syscalls, add Windows code, add C/Python APIs,
-change protocol v2, optimize the hot path, or introduce a virtual transport.
-The concrete user/system seam is now in place. The next implementation step is
-an inventory-driven move of `epoll`,
-`eventfd`, `AF_UNIX`, `sockaddr_un`, `accept4`, `SO_PEERCRED`, `SCM_RIGHTS`,
-`chmod`/`unlink`, and `errno` into `system/platform/linux` where that reduces
-coupling without adding a call or allocation to the hot path.
+This phase does not add Windows code, C/Python APIs, change protocol v2,
+optimize the hot path, or introduce a virtual transport. The concrete
+user/system seam and the endpoint/socket capability are now in place. The next
+implementation step is an inventory-driven move of readiness/wakeup
+(`epoll`/`eventfd`), followed by peer identity, descriptor passing, and error
+translation. These capabilities should continue to land as small concrete
+units where that reduces coupling without adding a call or allocation to the
+hot path.

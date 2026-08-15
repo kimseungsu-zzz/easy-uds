@@ -27,6 +27,26 @@ p50 +3.5%, p99 -2.1%, CPU +4.4%). The warmed Session allocation probe counted
 near-zero steady-state behavior. The full static/shared release gate and the
 protocol golden test passed after this measurement.
 
+## Linux endpoint capability extraction (2026-08-15)
+
+Phase 4 moved pathname endpoint validation and socket lifecycle syscalls into
+`src/system/platform/linux/endpoint.*`. The same WSL2 Release alternating
+Simple/Core probe (10,000 requests, three repeats) remained within the gate:
+
+| Load | API | Throughput | p50 | p99 | CPU-s / 1M |
+|---|---|---:|---:|---:|---:|
+| c1 | Core | 12.69k/s | 64.987 us | 229.657 us | 70.39 |
+| c1 | Simple | 12.96k/s | 64.072 us | 224.840 us | 69.54 |
+| c8 | Core | 37.53k/s | 192.041 us | 510.290 us | 87.12 |
+| c8 | Simple | 41.77k/s | 176.581 us | 412.290 us | 76.64 |
+| c32 | Core | 32.76k/s | 821.114 us | 1965.580 us | 100.00 |
+| c32 | Simple | 38.78k/s | 710.481 us | 1529.120 us | 80.22 |
+
+The endpoint boundary adds no request-path allocation or virtual dispatch. The
+dedicated warm Session allocation probe measured `0` allocations over 5,000
+requests. Static/shared release gates, package consumers, and architecture
+guards all passed after the extraction.
+
 ## Functional public/internal layout (2026-08-14)
 
 Change: split the public umbrella into self-contained feature headers and move

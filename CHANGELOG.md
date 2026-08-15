@@ -53,8 +53,9 @@ All notable changes to this project are documented here.
 - Promoted the audited fixed-RPC `easy_uds::simple` facade with temporary-only
   route assignment, `ResponseError` application-status handling, deterministic
   null-C-string errors, installed package coverage, and Core/Simple A/B
-  benchmark probes. No new transport, protocol, retry, or runtime engine was
-  added.
+  benchmark probes. Successful response bodies and `ResponseError` bodies are
+  moved out of the Core response to avoid an adapter-only copy. No new
+  transport, protocol, retry, or runtime engine was added.
 
 - Split the public umbrella into self-contained client, Session, server,
   request, response, stream, and options headers while preserving

@@ -65,9 +65,9 @@ template <typename Handler>
 [[nodiscard]] Response invoke_handler(Handler& handler,
                                       std::string_view body) {
     if constexpr (std::is_invocable_v<Handler&, std::string_view>) {
-        return to_response(std::invoke(handler, body));
+        return to_response(handler(body));
     } else if constexpr (std::is_invocable_v<Handler&>) {
-        return to_response(std::invoke(handler));
+        return to_response(handler());
     } else {
         static_assert(dependent_false<Handler>,
                       "easy-uds simple handler: expected () or "
@@ -189,11 +189,11 @@ class Client {
 
     [[nodiscard]] std::string request(std::string_view route,
                                       std::string_view body = {}) const {
-        const Response response = core_.request(route, body);
+        Response response = core_.request(route, body);
         if (response.status != status_ok) {
-            throw ResponseError(response.status, response.body);
+            throw ResponseError(response.status, std::move(response.body));
         }
-        return response.body;
+        return std::move(response.body);
     }
 
     [[nodiscard]] easy_uds::Client& core() noexcept { return core_; }

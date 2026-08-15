@@ -49,8 +49,14 @@ int main() {
         server.on("/echo") = [](std::string_view body) {
             return std::string(body);
         };
+        const std::string prefix = "captured:";
+        server.on("/capture") = [prefix](std::string_view body) {
+            return prefix + std::string(body);
+        };
         server.on("/hello") = [] { return "hello"; };
         server.on("/null") = []() -> const char* { return nullptr; };
+        auto unassigned = server.on("/unassigned");
+        (void)unassigned;
         bool duplicate_rejected = false;
         try {
             server.on("/ping") = "replaced";
@@ -77,6 +83,8 @@ int main() {
                "rejected duplicate must leave the original route intact");
         expect(client.request("/echo", "hello") == "hello",
                "std::string_view handler must receive the request body");
+        expect(client.request("/capture", "hello") == "captured:hello",
+               "capturing simple handler must preserve its captured state");
         expect(client.request("/hello") == "hello",
                "no-argument handler must be supported");
         expect(client.request("/core") == "core",
@@ -102,6 +110,7 @@ int main() {
                    "null C string diagnostic must identify the cause");
         }
 
+        server.stop();
         server.stop();
         runner.join();
         cleanup(path);

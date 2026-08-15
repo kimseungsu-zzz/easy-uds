@@ -30,10 +30,10 @@ The intended levels remain separate:
 | Advanced | `RequestContext`, domains/policies, streams, FD ownership, stats, budgets |
 
 Simple is an adapter, not a second engine. It must reuse Core route
-registration, duplicate-route replacement, shutdown, errors, framing, and
-worker execution. Protocol v2 and the reactor are out of scope.
+registration, duplicate-route rejection, shutdown, errors, framing, and worker
+execution. Protocol v2 and the reactor are out of scope.
 
-## Prototype decisions
+## Promotion decisions
 
 - Header location: `include/easy_uds/simple.hpp`; the experiment shim remains
   under `experiments/simple_api/simple.hpp` for reproducible prototype builds.
@@ -46,13 +46,13 @@ worker execution. Protocol v2 and the reactor are out of scope.
   `const char*`; all become `Response::ok(...)`.
 - Custom statuses, `Request`, context, streams, FD passing, queue policy,
   stats, and memory controls stay in Core.
-- The prototype exposes an explicit `core()` escape hatch solely to test
-  coexistence. Promotion must decide whether that is worth the lifetime
-  surface or whether a separate registration helper is clearer.
-- Non-200 application responses currently become a temporary
-  `std::runtime_error` in the prototype. Before production promotion, choose
-  a result type or reuse of the Core error model; do not silently discard the
-  status.
+- The promoted facade exposes an explicit `core()` escape hatch so advanced
+  routes share the same server/client lifecycle and registry. It is a
+  reference to the underlying Core object, not a second engine or helper
+  registration path.
+- Non-200 application responses throw `simple::ResponseError`, preserving the
+  status and body. Transport, protocol, timeout, and closed-connection
+  failures continue to use `easy_uds::Error`; status is never discarded.
 
 ## Proxy/lifetime audit
 
@@ -100,6 +100,8 @@ The prototype may be promoted only if all of the following are demonstrated:
 - the API remains small enough that `simple.hpp` does not become a second
   advanced framework.
 
-The gate is now met for the narrow v1 surface. Typed RPC
+The gate is met for the narrow v1 surface and Simple v1 is frozen. Typed RPC
 (`server.on("/add") = add`, codecs, function traits) remains a separate future
-experiment and is not part of this adapter.
+experiment and is not part of this adapter. Changes to the frozen surface
+require a new design note, migration note, and fresh Core/Simple performance
+gate.

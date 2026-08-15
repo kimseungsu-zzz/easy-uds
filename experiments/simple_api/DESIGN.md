@@ -67,23 +67,28 @@ cmake -S . -B build-simple -DCMAKE_BUILD_TYPE=Release \
   -DEASY_UDS_BUILD_SIMPLE_EXPERIMENTS=ON \
   -DEASY_UDS_BUILD_EXAMPLES=OFF -DEASY_UDS_WARNINGS_AS_ERRORS=ON
 cmake --build build-simple --parallel
-bash scripts/simple_core_benchmark.sh build-simple 30000
+bash scripts/simple_core_benchmark_median.sh build-simple 30000 5
 ```
 
-WSL2, g++ 15.2, Release, 30,000 one-shot requests per row, one run after
-warmup (the 0.7 gate is a development signal, not a portable guarantee):
+WSL2, g++ 15.2, Release, 30,000 one-shot requests per row, five alternating
+runs per load/API, and the median of each metric (each binary performs its own
+1,000-request warmup). The order of Core and Simple is alternated for every
+repeat. This is a host-specific promotion signal, not a portable performance
+guarantee:
 
 | Load | Core throughput | Simple throughput | Core p50/p99 | Simple p50/p99 | Core CPU-s/1M | Simple CPU-s/1M |
 |---|---:|---:|---:|---:|---:|---:|
-| c1 | 11.51k/s | 13.21k/s | 69.85/255.99 us | 62.11/224.84 us | 81.51 | 68.53 |
-| c8 | 41.34k/s | 45.67k/s | 175.42/478.37 us | 161.79/379.36 us | 79.12 | 68.68 |
-| c32 | 44.81k/s | 46.95k/s | 654.51/1265.09 us | 632.28/1118.96 us | 73.91 | 71.10 |
+| c1 | 10.35k/s | 10.91k/s | 76.91/272.10 us | 69.17/270.29 us | 89.30 | 83.05 |
+| c8 | 32.75k/s | 36.49k/s | 218.69/555.43 us | 202.36/490.40 us | 99.55 | 88.27 |
+| c32 | 32.85k/s | 29.52k/s | 886.68/1832.91 us | 916.13/2163.85 us | 104.10 | 109.84 |
 
-The allocation probe reports `10.5001` Core allocations/request and `10.5001`
-Simple allocations/request at 30,000 requests. `/usr/bin/time` RSS was
-4,528–4,812 KiB across the six processes. The adapter adds no steady-state
-allocation in this one-shot workload and all measured rows remain inside
-the 0.7 regression gate. Repeat on a fixed host before changing the adapter.
+The allocation probe reports `10.5005` Core allocations/request and `10.5001`
+Simple allocations/request at 30,000 requests. Median RSS was 4,584--4,848
+KiB for Core and 4,680--4,716 KiB for Simple across the six load/API rows.
+The c32 row is the widest scheduling-sensitive spread (about 10% throughput
+and 18% p99 in this sample); c1/c8 are neutral-to-better. No extra
+steady-state allocation or RSS growth is present. Keep this table as the
+baseline and rerun it on a fixed host before changing the adapter.
 
 ## Promotion result
 

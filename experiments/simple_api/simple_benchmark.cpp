@@ -69,11 +69,11 @@ int main(int argc, char** argv) {
     options.stale_socket_grace_period = std::chrono::milliseconds{0};
     Server server(path, options);
 #ifdef EASY_UDS_SIMPLE_BENCHMARK
-    server.on("echo") = [](std::string_view body) {
+    server.on("/echo") = [](std::string_view body) {
         return std::string(body);
     };
 #else
-    server.on("echo", [](const easy_uds::Request& request) {
+    server.on("/echo", [](const easy_uds::Request& request) {
         return easy_uds::Response::ok(request.body);
     });
 #endif
@@ -90,9 +90,9 @@ int main(int argc, char** argv) {
     Client client(path);
     for (std::size_t index = 0; index < 1000; ++index) {
 #ifdef EASY_UDS_SIMPLE_BENCHMARK
-        (void)client.request("echo", "warmup");
+        (void)client.request("/echo", "warmup");
 #else
-        (void)client.request("echo", "warmup");
+        (void)client.request("/echo", "warmup");
 #endif
     }
 
@@ -115,7 +115,7 @@ int main(int argc, char** argv) {
             try {
                 for (std::size_t index = 0; index < count; ++index) {
                     const auto begin = Clock::now();
-                    const auto response = client.request("echo", "hello");
+                    const auto response = client.request("/echo", "hello");
                     samples.push_back(std::chrono::duration<double, std::micro>(
                                           Clock::now() - begin)
                                           .count());

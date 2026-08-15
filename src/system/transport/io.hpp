@@ -547,31 +547,4 @@ inline void connect_nonblocking(int fd, const platform_linux::UnixEndpoint& addr
     }
 }
 
-// Captures SO_PEERCRED (Linux) / getpeereid (BSD) for a connected socket.
-inline easy_uds::PeerCredentials capture_peer_credentials(int fd) noexcept {
-    easy_uds::PeerCredentials peer;
-#if defined(SO_PEERCRED)
-    struct ucred credentials {};
-    socklen_t length = sizeof(credentials);
-    if (::getsockopt(fd, SOL_SOCKET, SO_PEERCRED, &credentials, &length) == 0) {
-        peer.pid = static_cast<pid_t>(credentials.pid);
-        peer.uid = static_cast<uid_t>(credentials.uid);
-        peer.gid = static_cast<gid_t>(credentials.gid);
-        peer.present = true;
-    }
-#elif defined(__APPLE__) || defined(__FreeBSD__) || defined(__NetBSD__) || defined(__OpenBSD__)
-    uid_t uid = 0;
-    gid_t gid = 0;
-    if (::getpeereid(fd, &uid, &gid) == 0) {
-        peer.pid = -1;
-        peer.uid = static_cast<uid_t>(uid);
-        peer.gid = static_cast<gid_t>(gid);
-        peer.present = true;
-    }
-#else
-    (void)fd;
-#endif
-    return peer;
-}
-
 } // namespace easy_uds::detail

@@ -156,7 +156,7 @@ void run_reactor(const std::shared_ptr<ServerState>& state) {
                             continue;
                         }
                         auto connection = std::make_shared<Connection>(
-                            client_fd, capture_peer_credentials(client_fd));
+                            client_fd, peer_identity::capture(client_fd));
                         auto reactor_connection =
                             std::make_shared<ReactorConnection>();
                         reactor_connection->conn = connection;

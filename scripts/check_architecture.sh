@@ -38,6 +38,10 @@ if ((${#system_sources[@]} > 0)); then
         "system policy/state code must not include Linux readiness headers" \
         '^[[:space:]]*#[[:space:]]*include[[:space:]]*[<"](sys/epoll\.h|sys/eventfd\.h)[>"]' \
         "${system_sources[@]}"
+    check_no_match \
+        "system policy/state code must not own SO_PEERCRED" \
+        'SO_PEERCRED|struct[[:space:]]+ucred' \
+        "${system_sources[@]}"
 fi
 
 user_sources=()

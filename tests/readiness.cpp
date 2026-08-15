@@ -45,7 +45,27 @@ int main() {
     consume(wakeup);
     if (!require(wait(poller, &event, 1, 0) == 0,
                  "readiness consume left a pending event") ||
-        !require(control(poller, Control::remove, wakeup, 0, 0) == 0,
+        !require(control(poller, Control::modify, wakeup, readable | writable,
+                         token + 1) == 0,
+                 "readiness modify failed")) {
+        close(wakeup);
+        close(poller);
+        return 1;
+    }
+
+    signal(wakeup);
+    if (!require(wait(poller, &event, 1, 1000) == 1,
+                 "modified readiness registration did not return wakeup") ||
+        !require(event.token == token + 1,
+                 "modified readiness token was not preserved") ||
+        !require((event.mask & writable) != 0,
+                 "modified readiness mask was not translated")) {
+        close(wakeup);
+        close(poller);
+        return 1;
+    }
+    consume(wakeup);
+    if (!require(control(poller, Control::remove, wakeup, 0, 0) == 0,
                  "readiness remove failed")) {
         close(wakeup);
         close(poller);

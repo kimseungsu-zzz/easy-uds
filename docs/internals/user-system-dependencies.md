@@ -64,7 +64,7 @@ dependency is consequently transitive, not absent.
 | `RouteOptions` | `user/cpp/core/server_api.cpp` then handler registry | Engine scheduling contract exposed through public API | Domain/policy is translated once at registration, not per request |
 | `ServerOptions` | `ServerState`, option validation | Engine configuration contract | Contains limits/deadlines/backpressure that directly size engine state |
 | `ClientOptions` | one-shot client, `SessionState`, transport | Engine configuration contract | Used for deadlines, framing limits, stream limits, and optional stats |
-| `PeerCredentials` | `Connection`, `Request`, `capture_peer_credentials` | Platform capability value | Produced by Linux `SO_PEERCRED`; extraction target for `platform/linux` |
+| `PeerCredentials` | `Connection`, `Request`, `peer_identity::Identity` conversion | Platform capability value | Produced by the peer-identity capability; public value semantics remain unchanged |
 | `OwnedFd` / `BorrowedFd` | request FD delivery and client FD passing | Platform capability and ownership contract | The wrapper is public; raw descriptor acquisition belongs below the future platform boundary |
 | `RequestContext` | `RequestContextFactory`, contextual workers | Engine execution context exposed to handlers | Candidate for a small immutable adapter over internal arrival/deadline/stop state |
 | `QueuePolicy` | `RouteScheduling`, serialized worker | Engine scheduling contract | FIFO/latest-wins/reject-if-busy are concrete policy values, not polymorphic queues |
@@ -116,6 +116,7 @@ this inventory.
 | `system/transport` | Yes: options/request/response/stream/error | Exact I/O and framing | Direct socket/uio/unix/fcntl use |
 | `system/platform/linux/endpoint.*` | No public C++ API | Pathname endpoint and socket lifecycle capability | Linux `AF_UNIX`/socket syscalls |
 | `system/platform/linux/readiness.cpp` | No public C++ API | Readiness registration/wait and wakeup signal/consume | Linux `epoll`/`eventfd` syscalls |
+| `system/platform/linux/peer_identity.cpp` | No public C++ API | Connected-peer identity capture | Linux `SO_PEERCRED`/`getsockopt` |
 | `user/cpp` | Owns public C++ headers | Public call/handler syntax | Must not include backend headers |
 | `user/c`, `user/py` | No implementation yet | Future binding surfaces | Must depend downward only |
 
@@ -133,8 +134,8 @@ exercise malformed headers.
 
 This phase does not add Windows code, C/Python APIs, change protocol v2,
 optimize the hot path, or introduce a virtual transport. The concrete
-user/system seam, endpoint/socket capability, and readiness/wakeup capability
-are now in place. The next implementation step is an inventory-driven move of
-peer identity, descriptor passing, and error translation. These capabilities
-should continue to land as small concrete units where that reduces coupling
-without adding a call or allocation to the hot path.
+user/system seam, endpoint/socket capability, readiness/wakeup capability, and
+peer-identity capability are now in place. The next implementation step is an
+inventory-driven move of descriptor passing and error translation. These
+capabilities should continue to land as small concrete units where that reduces
+coupling without adding a call or allocation to the hot path.

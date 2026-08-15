@@ -57,6 +57,8 @@ add_library(easy_uds
     src/system/platform/linux/endpoint.hpp
     src/system/platform/linux/readiness.cpp
     src/system/platform/readiness.hpp
+    src/system/platform/linux/peer_identity.cpp
+    src/system/platform/peer_identity.hpp
     src/system/transport/transport.cpp
     src/system/transport/transport.hpp
     src/system/reactor/dispatch.cpp

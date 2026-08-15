@@ -4,6 +4,7 @@
 // public Server implementation.
 
 #include "easy_uds/server.hpp"
+#include "../platform/peer_identity.hpp"
 #include "../platform/readiness.hpp"
 #include "../transport/io.hpp"
 
@@ -96,8 +97,11 @@ struct OutgoingFrame {
 // either the reactor parses frames on it (connection in the readiness set) or a
 // stream worker owns it as an exclusive lease.
 struct Connection {
-    Connection(int fd, easy_uds::PeerCredentials peer)
-        : fd(fd), peer(peer), last_io_progress(Clock::now().time_since_epoch().count()),
+    Connection(int fd, peer_identity::Identity identity)
+        : fd(fd),
+          peer{static_cast<pid_t>(identity.pid), static_cast<uid_t>(identity.uid),
+               static_cast<gid_t>(identity.gid), identity.present},
+          last_io_progress(Clock::now().time_since_epoch().count()),
           last_output_progress(last_io_progress.load(std::memory_order_relaxed)) {}
     ~Connection() {
         if (fd >= 0) {

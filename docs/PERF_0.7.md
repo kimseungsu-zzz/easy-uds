@@ -106,6 +106,35 @@ The WSL2-only delta is therefore classified as scheduler-sensitive and is not
 profiled or optimized in the public Simple v1 surface. The full static/shared
 `scripts/release_gate.sh` was rerun after this confirmation and passed.
 
+## Readiness extraction A/B (2026-08-15)
+
+Phase 4B was measured before continuing with peer-identity extraction. The
+comparison used the same Release benchmark on WSL2, alternating the baseline
+`a329e4a` and readiness tree `016283a` in each repeat (5,000 requests, five
+repeats, c1/c8/c32, Core and Simple). The second alternating run was used for
+the gate decision after the first pass showed ordinary scheduler-sensitive tail
+variation:
+
+| Load / API | Baseline throughput | Current throughput | Baseline p50 | Current p50 | Baseline p99 | Current p99 | Baseline CPU-s/1M | Current CPU-s/1M |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| c1 / Core | 14.15k/s | 13.85k/s | 57.828 us | 58.537 us | 216.121 us | 222.653 us | 62.57 | 63.84 |
+| c1 / Simple | 14.15k/s | 14.03k/s | 58.512 us | 57.918 us | 225.146 us | 232.427 us | 62.97 | 63.55 |
+| c8 / Core | 41.36k/s | 42.16k/s | 175.830 us | 172.329 us | 482.780 us | 443.753 us | 74.50 | 73.06 |
+| c8 / Simple | 41.59k/s | 41.81k/s | 176.128 us | 176.169 us | 403.878 us | 413.069 us | 74.85 | 75.62 |
+| c32 / Core | 44.38k/s | 43.26k/s | 678.046 us | 691.420 us | 1387.520 us | 1305.030 us | 74.96 | 76.88 |
+| c32 / Simple | 44.10k/s | 43.21k/s | 680.257 us | 692.902 us | 1289.610 us | 1384.330 us | 76.19 | 76.69 |
+
+All second-run deltas remain within the existing gate (throughput >= -5%,
+p50 <= +5%, p99 <= +10%, CPU <= +5%). The first pass briefly exceeded some
+tail thresholds, which is why the alternating repeat was required; it did not
+reproduce. The warm Session allocation probe remained unchanged at about
+10.5 allocations/request in this benchmark's setup-inclusive counter for both
+trees. We therefore kept the reusable generic readiness contract and did not
+add a per-call scratch optimization or expose epoll types to the reactor.
+
+The contract is documented as the current reactor seam, not as the final
+cross-platform backend shape for a future Windows completion model.
+
 ## Explicit Session state (2026-08-14)
 
 Change: add `Session::status()` and `valid()` as lock-free snapshots of the

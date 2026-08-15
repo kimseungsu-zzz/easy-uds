@@ -1,9 +1,9 @@
 #pragma once
 
-// Platform-neutral readiness contract used by the reactor.  The Linux
+// Current reactor readiness contract used by the reactor. The Linux
 // implementation in platform/linux/readiness.cpp translates this small value
 // vocabulary to epoll and eventfd without exposing those types to policy or
-// state-machine code.
+// state-machine code. This is not the final cross-platform backend contract.
 
 #include <cstddef>
 #include <cstdint>

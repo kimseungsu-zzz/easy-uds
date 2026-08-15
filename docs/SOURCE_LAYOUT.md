@@ -12,7 +12,7 @@ src/
 │   ├── runtime/              concrete engine functions and server lifecycle
 │   ├── reactor/              readiness dispatch, parsing, workers, and streams
 │   ├── transport/            exact I/O and client framing helpers
-│   └── platform/linux/       endpoint/socket and readiness/wakeup capabilities
+│   └── platform/linux/       endpoint, readiness, and peer-identity capabilities
 └── user/
     ├── cpp/
     │   ├── core/             installed Core C++ headers and public method glue
@@ -35,10 +35,12 @@ translated once during registration into immutable internal entries.
 
 Phase 4 begins the inventory-driven extraction with `endpoint.*`: pathname
 `AF_UNIX`/`sockaddr_un` validation and socket lifecycle calls are now concrete
-Linux capability functions. Phase 4B adds the platform-neutral readiness
-contract and its concrete Linux `epoll`/`eventfd` implementation; reactor
-policy no longer includes Linux readiness headers. Peer identity, descriptor
-passing, and error translation remain later capability units. `src/system`
+Linux capability functions. Phase 4B adds the current reactor readiness
+contract and its concrete Linux `epoll`/`eventfd` implementation; this seam is
+not frozen as the final cross-platform backend contract. Phase 4C adds the
+concrete peer-identity capability, keeping `SO_PEERCRED`/`getsockopt` in Linux
+code and leaving the public `PeerCredentials` value unchanged. Descriptor
+passing and error translation remain later capability units. `src/system`
 owns the engine and must not depend on C or Python binding layers;
 `src/system/platform/linux` must not include `src/user/*`; and `src/user` must
 not depend on a platform implementation. Build-time backend selection is

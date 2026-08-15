@@ -85,6 +85,6 @@ run_variant OFF
 run_variant ON
 
 echo
-echo "release_gate: build, unit/integration, RC labels, compile-error UX,"
+echo "release_gate: build, unit/integration, release labels, compile-error UX,"
 echo "release_gate: static/shared package consumers, Simple API /echo smoke,"
 echo "release_gate: and beginner /echo smoke passed"

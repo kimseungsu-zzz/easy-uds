@@ -1,6 +1,7 @@
 #include "socket_common.hpp"
 
 #if defined(_WIN32)
+#include <algorithm>
 #include <cerrno>
 #include <mutex>
 #include <string>
@@ -35,43 +36,66 @@ platform_types::NativeSocket from_socket(SOCKET socket) noexcept {
     return static_cast<platform_types::NativeSocket>(socket);
 }
 
-void set_errno_from_wsa(int error) noexcept {
+int errno_from_wsa(int error) noexcept {
+    int mapped = EIO;
     switch (error) {
     case WSAEINTR:
-        errno = EINTR;
+        mapped = EINTR;
         break;
     case WSAEWOULDBLOCK:
-        errno = EAGAIN;
+        mapped = EAGAIN;
+        break;
+    case WSAEINPROGRESS:
+        mapped = EINPROGRESS;
+        break;
+    case WSAEALREADY:
+        mapped = EALREADY;
         break;
     case WSAETIMEDOUT:
-        errno = ETIMEDOUT;
+        mapped = ETIMEDOUT;
         break;
     case WSAECONNRESET:
+        mapped = ECONNRESET;
+        break;
     case WSAECONNABORTED:
-        errno = ECONNRESET;
+        mapped = ECONNABORTED;
         break;
     case WSAECONNREFUSED:
-        errno = ECONNREFUSED;
+        mapped = ECONNREFUSED;
         break;
     case WSAENOTCONN:
-        errno = ENOTCONN;
+        mapped = ENOTCONN;
+        break;
+    case WSAENOTSOCK:
+        mapped = EBADF;
         break;
     case WSAEADDRINUSE:
-        errno = EADDRINUSE;
+        mapped = EADDRINUSE;
         break;
     case WSAEACCES:
-        errno = EACCES;
+        mapped = EACCES;
         break;
     case WSAEINVAL:
-        errno = EINVAL;
+        mapped = EINVAL;
         break;
     case WSAEBADF:
-        errno = EBADF;
+        mapped = EBADF;
+        break;
+    case WSAEOPNOTSUPP:
+        mapped = EOPNOTSUPP;
+        break;
+    case WSAENOBUFS:
+        mapped = ENOBUFS;
         break;
     default:
-        errno = EIO;
         break;
     }
+    errno = mapped;
+    return mapped;
+}
+
+void set_errno_from_wsa(int error) noexcept {
+    (void)errno_from_wsa(error);
 }
 
 int last_wsa_error() noexcept {

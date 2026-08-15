@@ -155,6 +155,10 @@ inline FileDescriptor make_socket() {
     if (fd.get() < 0) {
         throw_system_error("socket failed");
     }
+    // Linux creates sockets with O_NONBLOCK in the platform call; Windows
+    // requires the equivalent setup explicitly. Keeping this at the cold
+    // socket-creation boundary makes listener and client behavior identical.
+    set_nonblocking(fd.get());
     configure_no_sigpipe(fd.get());
     return fd;
 }

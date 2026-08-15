@@ -78,6 +78,11 @@ int query_socket_error(platform_types::NativeSocket fd, int& socket_error) noexc
                                     &length);
     if (result != 0) {
         platform_windows::last_wsa_error();
+    } else if (socket_error != 0) {
+        // SO_ERROR returns a Winsock code, while the common transport maps
+        // failures through std::generic_category like the Linux backend.
+        platform_windows::set_errno_from_wsa(socket_error);
+        socket_error = errno;
     }
     return result;
 }

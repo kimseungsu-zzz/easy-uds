@@ -123,7 +123,7 @@ elseif(CMAKE_SYSTEM_NAME STREQUAL "Windows")
     )
 else()
     message(FATAL_ERROR
-        "easy-uds currently supports only the Linux platform backend")
+        "easy-uds currently supports only the Linux and Windows platform backends")
 endif()
 
 add_library(easy_uds

@@ -23,7 +23,8 @@ Result wait_once(platform_types::NativeSocket fd, Interest interest,
         return {Status::timed_out, 0};
     }
     if ((item.revents & POLLNVAL) != 0) {
-        return {Status::invalid_descriptor, WSAENOTSOCK};
+        platform_windows::set_errno_from_wsa(WSAENOTSOCK);
+        return {Status::invalid_descriptor, errno};
     }
     if ((item.revents & (POLLERR | POLLHUP | POLLRDNORM | POLLWRNORM)) != 0) {
         return {Status::ready, 0};

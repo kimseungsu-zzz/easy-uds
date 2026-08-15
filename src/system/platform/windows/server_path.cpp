@@ -52,9 +52,15 @@ LookupResult inspect(const char* path) noexcept {
         return {false, {}, static_cast<int>(error)};
     }
     const auto path_hash = static_cast<std::uint64_t>(std::hash<std::string_view>{}(path));
+    // Windows does not expose a POSIX socket inode/type through
+    // GetFileAttributes. Treat only paths known to this backend as sockets;
+    // an unrelated existing file must never become eligible for stale-socket
+    // removal merely because it is not a directory.
     const EntryKind kind = (attributes & FILE_ATTRIBUTE_DIRECTORY) != 0
                                ? EntryKind::other
-                               : EntryKind::socket;
+                               : (platform_windows::is_bound_path(path)
+                                      ? EntryKind::socket
+                                      : EntryKind::regular);
     return {true, {kind, 0, 0, path_hash, 1}, 0};
 }
 

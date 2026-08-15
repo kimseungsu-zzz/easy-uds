@@ -188,8 +188,14 @@ void run_reactor(const std::shared_ptr<ServerState>& state) {
                 break;
             }
 
-            const NativeSocket fd =
-                static_cast<NativeSocket>(static_cast<std::uint32_t>(token));
+            NativeSocket fd = events[index].fd;
+            if (!platform_types::valid(fd)) {
+                // Linux epoll stores the existing compact connection token;
+                // Windows carries the full SOCKET separately because its
+                // native value is not required to fit the token's low word.
+                fd = static_cast<NativeSocket>(
+                    static_cast<std::uint32_t>(token));
+            }
             const std::uint32_t generation =
                 static_cast<std::uint32_t>(token >> 32);
             std::shared_ptr<ReactorConnection> connection;

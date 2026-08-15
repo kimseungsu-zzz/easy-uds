@@ -36,6 +36,9 @@ int main() {
     if (!require(wait(poller, &event, 1, 1000) == 1,
                  "readiness wait did not return wakeup") ||
         !require(event.token == token, "readiness token was not preserved") ||
+#if defined(_WIN32)
+        !require(event.fd == wakeup, "readiness descriptor was not preserved") ||
+#endif
         !require((event.mask & readable) != 0, "readiness mask was not translated")) {
         close(wakeup);
         close(poller);
@@ -58,6 +61,9 @@ int main() {
                  "modified readiness registration did not return wakeup") ||
         !require(event.token == token + 1,
                  "modified readiness token was not preserved") ||
+#if defined(_WIN32)
+        !require(event.fd == wakeup, "modified readiness descriptor was not preserved") ||
+#endif
         !require((event.mask & writable) != 0,
                  "modified readiness mask was not translated")) {
         close(wakeup);

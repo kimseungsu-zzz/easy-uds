@@ -13,6 +13,7 @@ namespace easy_uds::detail::platform_windows {
 [[nodiscard]] SOCKET to_socket(platform_types::NativeSocket socket) noexcept;
 [[nodiscard]] platform_types::NativeSocket from_socket(SOCKET socket) noexcept;
 void set_errno_from_wsa(int error) noexcept;
+[[nodiscard]] int errno_from_wsa(int error) noexcept;
 [[nodiscard]] int last_wsa_error() noexcept;
 void remember_bound_path(std::string_view path);
 void forget_bound_path(std::string_view path) noexcept;

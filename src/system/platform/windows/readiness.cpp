@@ -3,6 +3,7 @@
 #include "socket_common.hpp"
 
 #if defined(_WIN32)
+#include <algorithm>
 #include <array>
 #include <cerrno>
 #include <mutex>
@@ -181,7 +182,8 @@ int wait(platform_types::NativeSocket poller_fd, Event* events,
         if ((revents & POLLHUP) != 0) {
             mask |= hangup | peer_hangup;
         }
-        events[output++] = Event{tokens[index], mask};
+        const auto fd = platform_windows::from_socket(native[index].fd);
+        events[output++] = Event{fd, tokens[index], mask};
     }
     return output;
 }

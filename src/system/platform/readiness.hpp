@@ -27,6 +27,10 @@ enum class Control {
 };
 
 struct Event {
+    // The concrete native descriptor is carried separately from the token so
+    // Windows SOCKET values are not truncated to the token's 32-bit routing
+    // portion. The token continues to carry generation/stale-event state.
+    platform_types::NativeSocket fd = platform_types::invalid_socket;
     std::uint64_t token = 0;
     std::uint32_t mask = 0;
 };

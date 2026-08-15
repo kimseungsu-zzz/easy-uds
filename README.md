@@ -425,10 +425,23 @@ architecture-neutral benchmark plus repeated test soak:
 ```bash
 ./scripts/final_linux_benchmarks.sh build-bench
 ./scripts/long_soak.sh build-bench 20
+# Add a one-shot/session/stream workload pass to every soak iteration:
+EASY_UDS_SOAK_BENCHMARKS=1 ./scripts/long_soak.sh build-bench 20
 ```
 
 The `workflow_dispatch` CI path runs the same matrix on native Ubuntu x86_64
 and hosted ARM64, then uploads both complete logs.
+
+Before requesting a 0.7.0 release, run the one-command RC gate. It builds
+static and shared variants, executes the labelled adversarial suite, checks
+invalid-usage diagnostics, and validates both installed-package consumers:
+
+```bash
+bash scripts/release_gate.sh
+```
+
+The gate never creates a tag or GitHub release; those remain an explicit
+maintainer approval step.
 
 The session spin window is a build-time tuning knob for latency experiments; the default is `100` microseconds. Build benchmark variants with `-DEASY_UDS_SESSION_SPIN_US=0`, `10`, `25`, `50`, or `100` and compare p50/p95/p99, throughput, CPU, and context switches. The session benchmark reports user/system CPU time and voluntary/involuntary context switches through `getrusage()`. It is intentionally not a public runtime option until measurements show a stable policy. On hosts with `perf` or `strace`, wrap the same benchmark to collect syscall/request, cache-miss, and branch-miss counters.
 

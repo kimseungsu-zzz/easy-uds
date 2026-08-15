@@ -25,6 +25,11 @@ new transport, or an embedded exporter/logger.
 
 ## Verification gates
 
+- The local one-command gate is `bash scripts/release_gate.sh`. It configures
+  and builds both static and shared Release/Werror trees, runs the complete
+  CTest suite plus `ctest -L rc`, compiles the invalid-usage probes, installs
+  each package variant, and runs both package consumers (including the real
+  beginner `/echo` process smoke).
 - Release/Werror unit and stress tests, plus the dedicated
   `easy_uds.rc_adversarial` test.
 - ASan/UBSan, TSan, protocol/session fuzz, and compile-error UX probes with
@@ -33,6 +38,17 @@ new transport, or an embedded exporter/logger.
   consumer in [`tests/beginner`](../tests/beginner).
 - Native x86_64 and ARM64 final benchmark/soak workflows.
 - Markdown link and example build checks.
+- The [public API freeze audit](api/public-api-audit.md) has no unresolved
+  ownership, lifetime, moved-from, thread-safety, or exception-contract item.
+
+`scripts/long_soak.sh` repeats the complete CTest suite for a caller-selected
+number of passes. Set `EASY_UDS_SOAK_BENCHMARKS=1` to add one-shot, shared
+Session, and streaming workloads to every pass; their benchmark output
+includes p50/p99/throughput and `/usr/bin/time` records RSS and context
+switches. Hosted workflows additionally run the native x86_64 and ARM64
+benchmark/soak jobs; their logs are artifacts rather than portable
+performance promises. This makes hour-scale, six-hour, or overnight runs a
+parameter choice without changing the test binary.
 
 The exact performance comparison and current stabilization status are kept in
 [PERF_0.7.md](PERF_0.7.md) and [ROADMAP_0.7.md](ROADMAP_0.7.md).

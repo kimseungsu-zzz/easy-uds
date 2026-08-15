@@ -175,7 +175,9 @@ if(EASY_UDS_BUILD_TESTS)
             )
         endif()
         add_test(NAME easy_uds.unit COMMAND easy_uds_test)
-        set_tests_properties(easy_uds.unit PROPERTIES TIMEOUT 20)
+        set_tests_properties(easy_uds.unit PROPERTIES
+            TIMEOUT 20
+            LABELS "rc;unit;integration;session;streaming;fd;serialized;latestwins;rejectifbusy;stats;budget;shutdown")
 
         add_executable(easy_uds_rc_adversarial
             tests/easy_uds_test/common.cpp
@@ -192,7 +194,9 @@ if(EASY_UDS_BUILD_TESTS)
             )
         endif()
         add_test(NAME easy_uds.rc_adversarial COMMAND easy_uds_rc_adversarial)
-        set_tests_properties(easy_uds.rc_adversarial PROPERTIES TIMEOUT 20)
+        set_tests_properties(easy_uds.rc_adversarial PROPERTIES
+            TIMEOUT 20
+            LABELS "rc;adversarial;session;serialized;latestwins;stats;shutdown")
 
         add_executable(easy_uds_stress_test tests/easy_uds_stress_test.cpp)
         target_link_libraries(easy_uds_stress_test PRIVATE easy_uds::easy_uds)
@@ -205,7 +209,21 @@ if(EASY_UDS_BUILD_TESTS)
             )
         endif()
         add_test(NAME easy_uds.stress COMMAND easy_uds_stress_test)
-        set_tests_properties(easy_uds.stress PROPERTIES TIMEOUT 30)
+        set_tests_properties(easy_uds.stress PROPERTIES
+            TIMEOUT 30
+            LABELS "rc;stress;session;streaming;shutdown;budget")
+
+        find_program(EASY_UDS_BASH_EXECUTABLE bash)
+        if(EASY_UDS_BASH_EXECUTABLE)
+            add_test(NAME easy_uds.compile_error_ux
+                COMMAND ${CMAKE_COMMAND} -E env
+                    "CXX=${CMAKE_CXX_COMPILER}"
+                    "${EASY_UDS_BASH_EXECUTABLE}"
+                    "${CMAKE_CURRENT_SOURCE_DIR}/scripts/compile_error_smoke.sh")
+            set_tests_properties(easy_uds.compile_error_ux PROPERTIES
+                TIMEOUT 30
+                LABELS "rc;compile-error;api")
+        endif()
     endif()
 endif()
 

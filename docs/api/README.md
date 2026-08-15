@@ -43,3 +43,6 @@ compose them without requiring a source-tree tour.
 
 For the beginner/advanced boundary and the final syntax comparison, see the
 [0.7 ergonomics audit](../ERGONOMICS_0.7.md).
+
+The final header-by-header freeze checklist is in the
+[public API audit](public-api-audit.md).

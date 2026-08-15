@@ -185,3 +185,18 @@ docs/                   getting-started, api, guides, internals, migration, hist
 한 줄 목표:
 
 > **0.6이 실제로 빠른 것만 남겼다면, 0.7은 그 성능을 누구나 쉽게 쓰게 만든다.**
+
+## Final RC gate (English command reference)
+
+The final audit is executable with:
+
+```bash
+bash scripts/release_gate.sh
+```
+
+It covers both static/shared package variants, the complete CTest suite,
+`ctest -L rc`, invalid-usage diagnostics, independent public-header
+compilation, and the real installed beginner `/echo` consumer. Sanitizer,
+fuzz, native Linux, and ARM64 jobs remain hosted workflow gates because they
+need their respective compiler/runner environments. No tag or release is
+created by the gate.

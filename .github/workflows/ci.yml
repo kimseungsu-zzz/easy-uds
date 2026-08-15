@@ -9,6 +9,18 @@ permissions:
   contents: read
 
 jobs:
+  architecture-guard:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Verify source-set and dependency ownership
+        run: bash scripts/check_architecture.sh
+
   arm64-smoke:
     if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-24.04-arm

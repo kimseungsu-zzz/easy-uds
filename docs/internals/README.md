@@ -26,3 +26,5 @@ before adding it to the beginner documentation.
 
 - [Simple API design audit](../design/simple-api.md) — assignment-style
   beginner facade promotion record and scope boundary.
+- [User/system dependency audit](user-system-dependencies.md) — current public
+  C++ edges and concrete separation candidates for 0.7.1.

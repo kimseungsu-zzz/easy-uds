@@ -181,6 +181,8 @@ The behavior-neutral 0.7.1 relocation and ownership rules are tracked in
 [`SOURCE_LAYOUT.md`](SOURCE_LAYOUT.md). Linux dependency extraction is a
 separate follow-up phase; this commit intentionally does not add a transport
 virtual interface or alter the hot path.
+The current `src/system` ↔ `src/user/cpp` edges are enumerated in
+[`internals/user-system-dependencies.md`](internals/user-system-dependencies.md).
 
 ## 0.7 완료 조건
 

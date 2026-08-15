@@ -26,12 +26,18 @@ the build it is sourced from `src/user/cpp/core/easy_uds/` and
 `src/user/cpp/simple/easy_uds/`, so public C++ ownership is visible without
 changing the package surface.
 
+The actual dependency inventory is maintained in
+[`internals/user-system-dependencies.md`](internals/user-system-dependencies.md).
+It records the current intentional `system → public C++ contract` edges and
+the concrete seams to use before any Linux syscall extraction.
+
 The first relocation deliberately leaves Linux calls in their existing
 implementation files and keeps the current C++ runtime behavior intact. The
 next inventory phase will classify `epoll`,
 `eventfd`, `AF_UNIX`, `sockaddr_un`, `accept4`, `SO_PEERCRED`, `SCM_RIGHTS`,
 `chmod`/`unlink`, and `errno`, then move only the necessary pieces under
 `src/system/platform/linux/`. `src/system` owns the engine and must not depend
-on C or Python binding layers; `src/user` must not depend on a platform
-implementation. Build-time backend selection is preferred over a hot-path
-`ITransport` virtual abstraction.
+on C or Python binding layers; `src/system/platform/linux` must not include
+`src/user/*`; and `src/user` must not depend on a platform implementation.
+Build-time backend selection is preferred over a hot-path `ITransport` virtual
+abstraction.

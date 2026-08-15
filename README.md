@@ -672,6 +672,7 @@ docs/ROADMAP_0.6.md     0.6.x technical experiment and release boundaries
 docs/ROADMAP_0.7.md     0.7 usability, API, and compatibility plan
 docs/ERGONOMICS_0.7.md  Beginner-first syntax and progressive disclosure audit
 docs/RELEASE_0.7.md     0.7.0 final scope and verification record
+docs/SOURCE_LAYOUT.md    0.7.1 source ownership and dependency boundary
 docs/PERF_0.7.md        0.7 regression measurements against v0.6.4
 docs/history/experiments/0.6.md  Standalone UDS capability probes (history)
 docs/history/README.md    Historical measurements and experiment index

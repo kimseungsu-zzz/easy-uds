@@ -58,13 +58,16 @@ src/user/cpp/simple/          installed Simple C++ header
 src/user/c/ and src/user/py/  reserved non-C++ language boundaries
 ```
 
-Files below `src/` are implementation details. Applications must not include
-them or rely on their names. The source-owned C++ headers under
-`src/user/cpp/` are installed as `include/easy_uds/` and are covered by the
-public compatibility policy.
+`src/system/` is private implementation and applications must not include it
+or rely on its names. `src/user/cpp/` is the source ownership of the public C++
+API; its headers are installed as `include/easy_uds/` and are covered by the
+public compatibility policy. `src/user/c/` is reserved for a future C ABI and
+`src/user/py/` for a future Python API.
 
 See [`docs/SOURCE_LAYOUT.md`](../SOURCE_LAYOUT.md) for the relocation rules and
-the next Linux dependency-inventory phase.
+[`internals/user-system-dependencies.md`](../internals/user-system-dependencies.md)
+for the current dependency inventory and the next Linux dependency-inventory
+phase.
 
 The grouping deliberately avoids one class per tiny file. Client and Session
 are separate because they have different lifetime and concurrency models;

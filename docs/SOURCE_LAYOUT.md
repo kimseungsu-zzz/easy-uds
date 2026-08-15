@@ -73,3 +73,12 @@ server pathname identity and instance-lock primitives. The capability preserves
 `O_NOFOLLOW`, ownership/type/link checks, `flock`, and before/current/after
 device/inode validation; runtime retains the stale/busy decision and public
 error policy.
+
+Phase 5 records the complete Linux/POSIX dependency inventory in
+[`internals/linux-dependency-audit.md`](internals/linux-dependency-audit.md).
+`CMakeLists.txt` now assembles common engine sources separately from the
+selected `src/system/platform/linux/` source set. The Windows branch is an
+explicit 0.8 entry point and still fails as unsupported in 0.7.1. The current
+`endpoint.hpp`, `descriptor_passing.hpp`, `socket_io.hpp`, `server_path.hpp`,
+and readiness/wait seams remain concrete POSIX/Linux contracts, not frozen
+cross-platform interfaces.

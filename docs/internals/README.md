@@ -1,5 +1,8 @@
 # Internals
 
+- [Linux dependency and backend audit](linux-dependency-audit.md) — complete
+  Phase 5 inventory, temporary POSIX seams, and CMake backend source selection.
+
 These pages explain implementation choices and benchmark evidence. They are
 not required to use the public API and may change without a source-compatible
 release promise.

@@ -37,6 +37,14 @@ The current security model depends on POSIX device/inode, effective UID,
 behavior remain an open design item rather than a `PortableInode` or universal
 file-lock API.
 
+Phase 5 completes the Linux dependency audit and makes backend assembly visible
+in CMake: `EASY_UDS_COMMON_SOURCES` is combined with a Linux capability source
+set at build time. The Windows branch is the documented 0.8 implementation
+entry point, but intentionally has no sources in 0.7.1. See
+[`internals/linux-dependency-audit.md`](internals/linux-dependency-audit.md) for
+the per-dependency classification and the list of POSIX-shaped seams that must
+not be mistaken for final Windows contracts.
+
 ## Capability decisions still open
 
 - Windows readiness may use a completion model rather than the current Linux

@@ -2,10 +2,6 @@ cmake_minimum_required(VERSION 3.20)
 
 project(easy_uds VERSION 0.7.0 LANGUAGES CXX)
 
-if(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
-    message(FATAL_ERROR "easy-uds currently requires Linux (epoll and SO_PEERCRED)")
-endif()
-
 include(CMakePackageConfigHelpers)
 include(GNUInstallDirs)
 
@@ -40,7 +36,7 @@ endif()
 
 find_package(Threads REQUIRED)
 
-add_library(easy_uds
+set(EASY_UDS_COMMON_SOURCES
     src/system/core/error.cpp
     src/system/runtime/server.cpp
     src/system/runtime/server_registration.cpp
@@ -53,22 +49,6 @@ add_library(easy_uds
     src/system/runtime/session_engine.cpp
     src/system/runtime/session_engine.hpp
     src/system/runtime/trace.hpp
-    src/system/platform/linux/endpoint.cpp
-    src/system/platform/endpoint.hpp
-    src/system/platform/linux/readiness.cpp
-    src/system/platform/readiness.hpp
-    src/system/platform/linux/peer_identity.cpp
-    src/system/platform/peer_identity.hpp
-    src/system/platform/linux/descriptor_passing.cpp
-    src/system/platform/descriptor_passing.hpp
-    src/system/platform/linux/socket_lifecycle.cpp
-    src/system/platform/socket_lifecycle.hpp
-    src/system/platform/linux/socket_io.cpp
-    src/system/platform/socket_io.hpp
-    src/system/platform/linux/socket_wait.cpp
-    src/system/platform/socket_wait.hpp
-    src/system/platform/linux/server_path.cpp
-    src/system/platform/server_path.hpp
     src/system/transport/transport.cpp
     src/system/transport/transport.hpp
     src/system/reactor/dispatch.cpp
@@ -84,6 +64,46 @@ add_library(easy_uds
     src/system/reactor/stream_io.hpp
     src/system/protocol/codec.hpp
     src/system/transport/io.hpp
+)
+
+# Backend ownership is selected at build time.  Keep this list concrete: the
+# engine has no runtime IPlatform/ITransport object or type-erased dispatch.
+# 0.7.1 ships only the Linux set; the Windows branch is an explicit 0.8 entry
+# point, not an advertised implementation.
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    message(STATUS "easy-uds platform backend: Linux")
+    set(EASY_UDS_PLATFORM_SOURCES
+        src/system/platform/linux/endpoint.cpp
+        src/system/platform/linux/readiness.cpp
+        src/system/platform/linux/peer_identity.cpp
+        src/system/platform/linux/descriptor_passing.cpp
+        src/system/platform/linux/socket_lifecycle.cpp
+        src/system/platform/linux/socket_io.cpp
+        src/system/platform/linux/socket_wait.cpp
+        src/system/platform/linux/server_path.cpp
+    )
+    set(EASY_UDS_PLATFORM_HEADERS
+        src/system/platform/endpoint.hpp
+        src/system/platform/readiness.hpp
+        src/system/platform/peer_identity.hpp
+        src/system/platform/descriptor_passing.hpp
+        src/system/platform/socket_lifecycle.hpp
+        src/system/platform/socket_io.hpp
+        src/system/platform/socket_wait.hpp
+        src/system/platform/server_path.hpp
+    )
+elseif(CMAKE_SYSTEM_NAME STREQUAL "Windows")
+    message(FATAL_ERROR
+        "easy-uds Windows backend is a 0.8 design entry point and is not implemented in 0.7.1")
+else()
+    message(FATAL_ERROR
+        "easy-uds currently supports only the Linux platform backend")
+endif()
+
+add_library(easy_uds
+    ${EASY_UDS_COMMON_SOURCES}
+    ${EASY_UDS_PLATFORM_SOURCES}
+    ${EASY_UDS_PLATFORM_HEADERS}
 )
 add_library(easy_uds::easy_uds ALIAS easy_uds)
 

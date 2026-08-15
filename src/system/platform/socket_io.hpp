@@ -1,8 +1,8 @@
 #pragma once
 
-// Raw byte-I/O and connect-completion capability.  These functions deliberately
-// return syscall results and preserve errno; retry, timeout, peer-closed, and
-// public Error semantics remain in system/transport.
+// Raw byte-I/O and connect-completion capability. These functions deliberately
+// return native results and preserve the mapped errno/native error; retry,
+// timeout, peer-closed, and public Error semantics remain in system/transport.
 
 #include <cstddef>
 #include <cstdint>

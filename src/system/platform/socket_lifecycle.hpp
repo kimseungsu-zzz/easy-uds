@@ -1,9 +1,8 @@
 #pragma once
 
-// Concrete internal descriptor ownership and socket setup seam.  The current
-// implementation is Linux/POSIX, but the public OwnedFd/BorrowedFd API is not
-// involved here.  Functions report native errno (0 on success) so callers can
-// retain the existing easy_uds::Error mapping at the system boundary.
+// Concrete internal socket ownership and setup seam. The selected platform
+// implementation reports native setup failures; the public OwnedFd/BorrowedFd
+// API is not involved here.
 
 #include <utility>
 #include "native_socket.hpp"

@@ -1,8 +1,8 @@
 #pragma once
 
-// Concrete Linux pathname/instance lifecycle seam. It reports identity,
-// ownership, lock state, and native errors; Server runtime code retains the
-// stale/busy policy and public Error mapping.
+// Concrete pathname/instance lifecycle seam. Linux provides the hardened
+// device/inode/UID implementation; Windows provides its own endpoint and
+// lock capability without pretending that POSIX identity is portable.
 
 #include "socket_lifecycle.hpp"
 

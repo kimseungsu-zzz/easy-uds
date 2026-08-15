@@ -331,6 +331,18 @@ jobs:
           bash scripts/beginner_consumer_smoke.sh \
             beginner-build "$RUNNER_TEMP/easy-uds-beginner.sock"
 
+      - name: Build installed Simple API consumer
+        run: |
+          cmake -S tests/simple_consumer -B simple-consumer-build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_PREFIX_PATH="$RUNNER_TEMP/easy-uds-prefix"
+          cmake --build simple-consumer-build --parallel
+
+      - name: Run installed Simple API consumer
+        run: |
+          bash scripts/simple_consumer_smoke.sh \
+            simple-consumer-build "$RUNNER_TEMP/easy-uds-simple.sock"
+
   release-gate:
     if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
@@ -381,3 +393,6 @@ jobs:
 
       - name: Run Simple API syntax and diagnostic probes
         run: ctest --test-dir build-simple -L simple --output-on-failure
+
+      - name: Run Simple/Core A-B and allocation probes
+        run: bash scripts/simple_core_benchmark.sh build-simple 5000

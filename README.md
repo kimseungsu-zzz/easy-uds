@@ -50,6 +50,34 @@ Documentation map: [Getting started](docs/getting-started/README.md) ·
 [API reference](docs/api/README.md) · [Guides](docs/guides/README.md) ·
 [Internals and experiments](docs/internals/README.md)
 
+### Quickest way: Simple API
+
+For a fixed `/ping` or `/echo` RPC, the installed beginner facade keeps the
+first program to `Server`, `on`, `run`, `Client`, and `request`:
+
+```cpp
+#include <easy_uds/simple.hpp>
+
+#include <iostream>
+
+using namespace easy_uds::simple;
+
+int main() {
+    Server server("/tmp/easy-uds.sock");
+    server.on("/ping") = "pong";
+    server.on("/echo") = [](std::string_view body) {
+        return std::string(body);
+    };
+    server.run();
+}
+```
+
+The matching client is `Client client(path); client.request("/echo", "hello")`.
+See the [Simple API guide](docs/simple-api/getting-started.md) for
+`ResponseError` and the explicit Core escape hatch. Need request metadata,
+streaming, queue policies, FD passing, or custom statuses? Continue with the
+Core API below.
+
 ### Server
 
 ```cpp
@@ -443,9 +471,9 @@ bash scripts/release_gate.sh
 The gate never creates a tag or GitHub release; those remain an explicit
 maintainer approval step.
 
-The proposed assignment-style beginner facade is intentionally experimental
-and is not part of 0.7. To try it without changing the installed API, build
-`experiments/simple_api/` explicitly:
+The assignment-style beginner facade is now available as the narrow v1
+`<easy_uds/simple.hpp>` API. The original prototype and its diagnostic probes
+remain reproducible under `experiments/simple_api/`:
 
 ```bash
 cmake -S . -B build-simple -DCMAKE_BUILD_TYPE=Release \
@@ -455,8 +483,9 @@ cmake --build build-simple --parallel
 ctest --test-dir build-simple -L simple --output-on-failure
 ```
 
-Promotion requires a separate design/performance/error audit; the Core API
-and protocol remain the supported 0.7 surface.
+The Core API and protocol remain available for request metadata, streaming,
+queue policies, FD passing, and custom statuses; the Simple facade adds no
+second runtime engine.
 
 The session spin window is a build-time tuning knob for latency experiments; the default is `100` microseconds. Build benchmark variants with `-DEASY_UDS_SESSION_SPIN_US=0`, `10`, `25`, `50`, or `100` and compare p50/p95/p99, throughput, CPU, and context switches. The session benchmark reports user/system CPU time and voluntary/involuntary context switches through `getrusage()`. It is intentionally not a public runtime option until measurements show a stable policy. On hosts with `perf` or `strace`, wrap the same benchmark to collect syscall/request, cache-miss, and branch-miss counters.
 

@@ -50,6 +50,7 @@ int main() {
             return std::string(body);
         };
         server.on("/hello") = [] { return "hello"; };
+        server.on("/null") = []() -> const char* { return nullptr; };
         bool duplicate_rejected = false;
         try {
             server.on("/ping") = "replaced";
@@ -62,6 +63,10 @@ int main() {
         // The escape hatch proves that Simple and Core routes can coexist.
         server.core().on("/core", [](const easy_uds::Request&) {
             return easy_uds::Response::ok("core");
+        });
+        server.core().on("/missing", [](const easy_uds::Request&) {
+            return easy_uds::Response{easy_uds::status_not_found,
+                                      "motor not found"};
         });
 
         std::thread runner([&] { server.run(); });
@@ -76,6 +81,26 @@ int main() {
                "no-argument handler must be supported");
         expect(client.request("/core") == "core",
                "Simple and Core routes must coexist");
+
+        try {
+            (void)client.request("/missing");
+            throw std::runtime_error("Simple Client accepted an application error");
+        } catch (const easy_uds::simple::ResponseError& error) {
+            expect(error.status() == easy_uds::status_not_found,
+                   "ResponseError must preserve application status");
+            expect(error.body() == "motor not found",
+                   "ResponseError must preserve application body");
+        }
+
+        try {
+            (void)client.request("/null");
+            throw std::runtime_error("null C string did not fail");
+        } catch (const easy_uds::simple::ResponseError& error) {
+            expect(error.status() == easy_uds::status_internal_error,
+                   "null C string must become a deterministic handler error");
+            expect(error.body().find("null C string") != std::string_view::npos,
+                   "null C string diagnostic must identify the cause");
+        }
 
         server.stop();
         runner.join();

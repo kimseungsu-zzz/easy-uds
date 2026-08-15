@@ -20,6 +20,7 @@ set(EASY_UDS_PUBLIC_HEADERS
     response
     server
     session
+    simple
     stats
     stream
     version

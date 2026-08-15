@@ -349,9 +349,41 @@ if(EASY_UDS_BUILD_SIMPLE_EXPERIMENTS)
     target_link_libraries(easy_uds_simple_client_experiment PRIVATE
         easy_uds::easy_uds)
 
+    add_executable(easy_uds_simple_api_benchmark
+        experiments/simple_api/simple_benchmark.cpp)
+    target_include_directories(easy_uds_simple_api_benchmark PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/experiments/simple_api)
+    target_compile_definitions(easy_uds_simple_api_benchmark PRIVATE
+        EASY_UDS_SIMPLE_BENCHMARK=1)
+    target_link_libraries(easy_uds_simple_api_benchmark PRIVATE
+        easy_uds::easy_uds)
+
+    add_executable(easy_uds_core_api_benchmark
+        experiments/simple_api/simple_benchmark.cpp)
+    target_include_directories(easy_uds_core_api_benchmark PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/experiments/simple_api)
+    target_link_libraries(easy_uds_core_api_benchmark PRIVATE
+        easy_uds::easy_uds)
+
+    add_executable(easy_uds_simple_api_allocation_benchmark
+        experiments/simple_api/simple_allocation_benchmark.cpp)
+    target_compile_definitions(easy_uds_simple_api_allocation_benchmark PRIVATE
+        EASY_UDS_SIMPLE_BENCHMARK=1)
+    target_link_libraries(easy_uds_simple_api_allocation_benchmark PRIVATE
+        easy_uds::easy_uds)
+
+    add_executable(easy_uds_core_api_allocation_benchmark
+        experiments/simple_api/simple_allocation_benchmark.cpp)
+    target_link_libraries(easy_uds_core_api_allocation_benchmark PRIVATE
+        easy_uds::easy_uds)
+
     foreach(simple_target IN ITEMS
             easy_uds_simple_server_experiment
-            easy_uds_simple_client_experiment)
+            easy_uds_simple_client_experiment
+            easy_uds_simple_api_benchmark
+            easy_uds_core_api_benchmark
+            easy_uds_simple_api_allocation_benchmark
+            easy_uds_core_api_allocation_benchmark)
         target_compile_features(${simple_target} PRIVATE cxx_std_17)
         target_compile_options(${simple_target} PRIVATE
             $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Wall;-Wextra;-Wpedantic>

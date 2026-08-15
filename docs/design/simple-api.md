@@ -1,9 +1,9 @@
 # Simple API design experiment
 
-This document is the handoff for a possible beginner facade. It is not a
-commitment to add a production header in 0.7. The first implementation lives
-under `experiments/simple_api/` so syntax, lifetime, diagnostics, and
-performance can be measured without destabilizing the frozen Core API.
+This document records the promotion audit for the beginner facade. The
+implementation was first measured under `experiments/simple_api/`; the narrow
+v1 adapter now lives in `include/easy_uds/simple.hpp` without destabilizing the
+frozen Core API. The experiment directory retains the full decision record.
 
 ## Goal
 
@@ -11,7 +11,7 @@ Keep the existing Core API exactly as it is while making the first fixed RPC
 readable to someone who knows basic C++:
 
 ```cpp
-#include "simple.hpp"  // experimental include path only
+#include <easy_uds/simple.hpp>
 
 easy_uds::simple::Server server("/tmp/app.sock");
 server.on("/ping") = "pong";
@@ -35,7 +35,8 @@ worker execution. Protocol v2 and the reactor are out of scope.
 
 ## Prototype decisions
 
-- Header location: `experiments/simple_api/simple.hpp`; never installed yet.
+- Header location: `include/easy_uds/simple.hpp`; the experiment shim remains
+  under `experiments/simple_api/simple.hpp` for reproducible prototype builds.
 - Namespace: `easy_uds::simple`; `simple` makes the boundary visible and leaves
   the existing `easy_uds::Server` names untouched.
 - `on(route)` returns a non-copyable, short-lived assignment proxy. Assignment
@@ -99,6 +100,6 @@ The prototype may be promoted only if all of the following are demonstrated:
 - the API remains small enough that `simple.hpp` does not become a second
   advanced framework.
 
-Until that gate is met, `simple.hpp` stays experimental and the 0.7 Core API
-remains frozen. Typed RPC (`server.on("/add") = add`, codecs, function traits)
-is a separate future experiment and is not part of this adapter.
+The gate is now met for the narrow v1 surface. Typed RPC
+(`server.on("/add") = add`, codecs, function traits) remains a separate future
+experiment and is not part of this adapter.

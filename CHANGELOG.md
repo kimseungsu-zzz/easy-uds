@@ -50,6 +50,11 @@ All notable changes to this project are documented here.
   aggregate responses for explicit statuses. Split fixed-RPC and streaming
   examples, added the installed beginner package consumer, compile-error UX
   probes, and a dedicated release-candidate adversarial audit.
+- Promoted the audited fixed-RPC `easy_uds::simple` facade with temporary-only
+  route assignment, `ResponseError` application-status handling, deterministic
+  null-C-string errors, installed package coverage, and Core/Simple A/B
+  benchmark probes. No new transport, protocol, retry, or runtime engine was
+  added.
 
 - Split the public umbrella into self-contained client, Session, server,
   request, response, stream, and options headers while preserving

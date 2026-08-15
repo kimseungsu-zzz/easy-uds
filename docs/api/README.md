@@ -19,6 +19,7 @@ performance cost.
 | Descriptor ownership | [`fd.hpp`](../../include/easy_uds/fd.hpp) | [FD passing](fd-passing.md) |
 | Request metadata | [`request_context.hpp`](../../include/easy_uds/request_context.hpp) | [Request context](request-context.md) |
 | Operational snapshots | [`stats.hpp`](../../include/easy_uds/stats.hpp) | [Runtime statistics](stats.md) |
+| Beginner fixed RPC facade | [`simple.hpp`](../../include/easy_uds/simple.hpp) | [Simple API guide](../simple-api/getting-started.md) |
 | Public include/layout | [`easy_uds.hpp`](../../include/easy_uds/easy_uds.hpp) | [Headers and source layout](headers.md) |
 
 ## Contract checklist

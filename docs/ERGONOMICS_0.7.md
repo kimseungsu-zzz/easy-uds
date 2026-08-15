@@ -111,3 +111,12 @@ each compiler to fail with a non-empty diagnostic instead of silently accepting
 an unsafe conversion. Runtime-only contracts such as empty serialization
 domains and moved-from object use remain normal unit-test cases because C++
 cannot diagnose them statically without hiding the explicit API model.
+
+## Simple facade promotion boundary
+
+The optional fixed-RPC facade is now promoted separately as
+`<easy_uds/simple.hpp>` under `easy_uds::simple`. It does not replace the Core
+examples above: it is a string-body adapter with a temporary-only route proxy.
+Application non-200 responses use `simple::ResponseError`, while transport and
+protocol failures remain `easy_uds::Error`. Streaming, sessions, queue policy,
+FD ownership, stats, and strict budgets intentionally stay Core concepts.

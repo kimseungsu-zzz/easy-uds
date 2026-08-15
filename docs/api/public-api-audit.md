@@ -20,6 +20,7 @@ layer. Protocol v2, the wire header, and the 0.6.4 hot path remain unchanged.
 | `fd.hpp` | `BorrowedFd` never closes; `OwnedFd` is one-int, move-only, closes on destruction | `duplicate()` is the only operation that allocates a descriptor; invalid use reports `Error` |
 | `error.hpp` | `Error` is an ordinary exception value; copied `ErrorCode`/system code remain valid | Semantic `ErrorCode` is paired with the original OS `system_code()` and remains catchable as `std::system_error` |
 | `stats.hpp` | Snapshots are values; optional cumulative counters are shared internally | Snapshots are best-effort/non-transactional; disabled counters do not add per-request atomic RMWs |
+| `simple.hpp` | `simple::Server`/`simple::Client` own one underlying Core object each; route assignment is a temporary-only proxy | Fixed-request facade only; Core transport failures are `Error`, non-200 application replies are `ResponseError`; no implicit retry/reconnect |
 | `version.hpp` | Compile-time version constants only | No runtime state or ABI ownership |
 
 ## Review questions applied
@@ -35,6 +36,9 @@ layer. Protocol v2, the wire header, and the 0.6.4 hot path remain unchanged.
   handler.
 - Beginner code does not need `RouteOptions`, streams, descriptors, stats, or
   context. Those concepts are linked as progressive-disclosure next steps.
+- The optional Simple facade keeps that beginner path narrow: only `()` and
+  `(std::string_view)` handlers are accepted, and it exposes `core()` as the
+  explicit boundary to advanced APIs.
 
 ## Mechanical checks
 

@@ -19,6 +19,7 @@ run_consumer() {
     local suffix=$3
     local consumer_build="${variant_build}/package-consumer"
     local beginner_build="${variant_build}/beginner-consumer"
+    local simple_build="${variant_build}/simple-consumer"
     local socket_path="/tmp/easy-uds-release-gate-${suffix}.sock"
 
     cmake --install "${variant_build}" --prefix "${prefix_dir}"
@@ -35,6 +36,12 @@ run_consumer() {
         -DCMAKE_PREFIX_PATH="${prefix_dir}"
     cmake --build "${beginner_build}" --parallel
 
+    cmake -S "${root_dir}/tests/simple_consumer" \
+        -B "${simple_build}" \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_PREFIX_PATH="${prefix_dir}"
+    cmake --build "${simple_build}" --parallel
+
     local ld_path="${prefix_dir}/lib"
     if [[ -n "${LD_LIBRARY_PATH:-}" ]]; then
         ld_path="${ld_path}:${LD_LIBRARY_PATH}"
@@ -44,6 +51,9 @@ run_consumer() {
     LD_LIBRARY_PATH="${ld_path}" \
         bash "${root_dir}/scripts/beginner_consumer_smoke.sh" \
             "${beginner_build}" "${socket_path}"
+    LD_LIBRARY_PATH="${ld_path}" \
+        bash "${root_dir}/scripts/simple_consumer_smoke.sh" \
+            "${simple_build}" "/tmp/easy-uds-release-gate-simple-${suffix}.sock"
 }
 
 run_variant() {
@@ -76,4 +86,5 @@ run_variant ON
 
 echo
 echo "release_gate: build, unit/integration, RC labels, compile-error UX,"
-echo "release_gate: static/shared package consumers, and beginner /echo smoke passed"
+echo "release_gate: static/shared package consumers, Simple API /echo smoke,"
+echo "release_gate: and beginner /echo smoke passed"

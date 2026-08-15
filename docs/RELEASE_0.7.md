@@ -8,14 +8,17 @@ still requires explicit user approval.
 
 0.7 keeps protocol v2, explicit ownership, cooperative deadlines, no implicit
 retry/replay, named serialization domains, queue policies, bounded stats
-snapshots, and the 0.6.4 hot path. The RC does not add protocol v3, auto
-reconnect, priority scheduling, full-duplex streaming, multiple-FD frames, a
-new transport, or an embedded exporter/logger.
+snapshots, and the 0.6.4 hot path. It adds only the narrow fixed-RPC
+`easy_uds::simple` facade as a Core adapter. The RC does not add protocol v3,
+auto reconnect, priority scheduling, full-duplex streaming, multiple-FD
+frames, a new transport, or an embedded exporter/logger.
 
 ## Beginner path
 
-- [Getting Started](getting-started/README.md) reaches fixed `/echo` with only
-  `Server`, `on`, `run`, `Client`, `request`, and `Response::ok`.
+- [Simple API getting started](simple-api/getting-started.md) reaches fixed
+  `/echo` with only `Server`, `on`, `run`, `Client`, and `request`; the Core
+  [Getting Started](getting-started/README.md) path remains available for
+  explicit `Request`/`Response` control.
 - [`examples/server.cpp`](../examples/server.cpp) and
   [`examples/client.cpp`](../examples/client.cpp) are fixed-RPC only.
 - Streaming has a separate [example pair](examples/streaming.md); Robot HAL is
@@ -35,7 +38,10 @@ new transport, or an embedded exporter/logger.
 - ASan/UBSan, TSan, protocol/session fuzz, and compile-error UX probes with
   GCC/Clang.
 - Static/shared install consumers, including the real beginner package
-  consumer in [`tests/beginner`](../tests/beginner).
+  consumer in [`tests/beginner`](../tests/beginner), plus the promoted Simple
+  API consumer in [`tests/simple_consumer`](../tests/simple_consumer).
+- Simple/Core c1/c8/c32 A/B and allocation probes are recorded in
+  [`experiments/simple_api/DESIGN.md`](../experiments/simple_api/DESIGN.md).
 - Native x86_64 and ARM64 final benchmark/soak workflows.
 - Markdown link and example build checks.
 - The [public API freeze audit](api/public-api-audit.md) has no unresolved
@@ -55,8 +61,11 @@ The exact performance comparison and current stabilization status are kept in
 
 ## Known tradeoffs accepted for 0.7
 
-- `Response::ok()` is intentionally the only new beginner response helper;
-  aggregate construction remains the escape hatch for explicit statuses.
+- `simple::ResponseError` separates application non-200 responses from Core
+  transport errors; aggregate `Response` construction remains the escape hatch
+  for explicit statuses.
+- The Simple route proxy is temporary-only, and only `()`/
+  `(std::string_view)` handlers with string-like results are supported.
 - `RouteOptions{handler}.serialize_in(...)` is explicit and slightly verbose,
   but avoids a template-heavy handler/options API and preserves compile-error
   locality.

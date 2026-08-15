@@ -45,6 +45,25 @@ organization-only change is retained.
 - Release/Werror unit and stress, ASan/UBSan, TSan, and every portable
   experimental probe pass after the move.
 
+## Simple API native confirmation (2026-08-15)
+
+The WSL2 Simple/Core one-shot c32 median showed an approximately 10%
+throughput and 18% p99 disadvantage for Simple. Before treating that as a
+regression, the same `simple_core_benchmark_median.sh` command (30,000
+requests, five alternating runs, c1/c8/c32) was run on native x86_64 and
+native ARM64 using commit `5d1622b`.
+
+- Native x86_64 c32: Simple `69.17k/s`, p99 `646.28 us`; Core `66.26k/s`,
+  p99 `697.66 us`.
+- Native ARM64 c32: Simple `16.45k/s`, p99 `2260.55 us`; Core `16.51k/s`,
+  p99 `2253.86 us`.
+- Native c1/c8 rows stayed within normal run-to-run variation; allocation
+  counts remained 10.5/request for both APIs.
+
+The WSL2-only delta is therefore classified as scheduler-sensitive and is not
+profiled or optimized in the public Simple v1 surface. The full static/shared
+`scripts/release_gate.sh` was rerun after this confirmation and passed.
+
 ## Explicit Session state (2026-08-14)
 
 Change: add `Session::status()` and `valid()` as lock-free snapshots of the

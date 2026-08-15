@@ -42,6 +42,9 @@ frames, a new transport, or an embedded exporter/logger.
   API consumer in [`tests/simple_consumer`](../tests/simple_consumer).
 - Simple/Core c1/c8/c32 A/B and allocation probes are recorded in
   [`experiments/simple_api/DESIGN.md`](../experiments/simple_api/DESIGN.md).
+- The same five-run alternating probe on native x86_64 and ARM64 did not
+  reproduce the WSL2 c32 delta; the result is recorded as scheduler-sensitive
+  rather than treated as a public Simple regression.
 - Native x86_64 and ARM64 final benchmark/soak workflows.
 - Markdown link and example build checks.
 - The [public API freeze audit](api/public-api-audit.md) has no unresolved

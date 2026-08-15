@@ -90,6 +90,30 @@ and 18% p99 in this sample); c1/c8 are neutral-to-better. No extra
 steady-state allocation or RSS growth is present. Keep this table as the
 baseline and rerun it on a fixed host before changing the adapter.
 
+## Native confirmation
+
+The same commit and the same alternating five-run script were rebuilt and
+measured on native Linux x86_64 (GCC 14/15) and native ARM64 (GCC 14). The
+native x86_64 c32 result does not reproduce the WSL2 signal: Simple is faster
+than Core in both throughput and p99. ARM64 is effectively tied at every
+concurrency. The two native runs also passed the Simple CTest/diagnostic
+probes before measuring.
+
+| Host / load | Core throughput | Simple throughput | Core p50/p99 | Simple p50/p99 | Core CPU-s/1M | Simple CPU-s/1M |
+|---|---:|---:|---:|---:|---:|---:|
+| native x86_64 c1 | 31.38k/s | 31.08k/s | 30.80/44.64 us | 31.19/44.74 us | 41.01 | 41.29 |
+| native x86_64 c8 | 66.86k/s | 67.36k/s | 113.59/265.60 us | 114.82/247.07 us | 43.91 | 43.12 |
+| native x86_64 c32 | 66.26k/s | 69.17k/s | 453.66/697.66 us | 443.28/646.28 us | 45.50 | 43.09 |
+| native ARM64 c1 | 11.90k/s | 11.83k/s | 81.07/122.89 us | 81.46/124.68 us | 115.64 | 116.18 |
+| native ARM64 c8 | 21.22k/s | 21.30k/s | 365.03/674.23 us | 363.20/674.49 us | 98.29 | 98.68 |
+| native ARM64 c32 | 16.51k/s | 16.45k/s | 1912.44/2253.86 us | 1920.12/2260.55 us | 129.58 | 130.35 |
+
+`/usr/bin/time` was unavailable on the ARM64 host, so its RSS column is not
+reported; allocation counts remained 10.5/request for both APIs. Because the
+WSL2 c32 delta is absent on both native architectures, it is documented as a
+WSL2 scheduler-sensitive observation rather than a reproducible Simple API
+regression. No profiling or public API change is justified by this result.
+
 ## Promotion result
 
 The production header is promoted with a deliberately narrow v1 surface:

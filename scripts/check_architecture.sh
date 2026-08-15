@@ -27,6 +27,11 @@ check_no_match \
     '^[[:space:]]*#[[:space:]]*include[[:space:]]*[<"][^>"]*(platform/linux)[^>"]*[>"]' \
     "${root_dir}/src/system/protocol"
 
+check_no_match \
+    "Linux capabilities must not include user-facing public headers" \
+    '^[[:space:]]*#[[:space:]]*include[[:space:]]*[<"]easy_uds/(client|server|session|simple|error|request|response|options|stats|fd|stream|request_context)\.hpp[>"]' \
+    "${root_dir}/src/system/platform/linux"
+
 system_sources=()
 while IFS= read -r -d '' path; do
     system_sources+=("${path}")

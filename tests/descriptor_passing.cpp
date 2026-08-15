@@ -79,6 +79,7 @@ void send_multiple_rights(int socket, const int* descriptors, std::size_t count,
 }
 
 void expect_rejected(bool separate_messages, const char* message) {
+    const std::size_t before = open_fd_count();
     int descriptors[2] = {-1, -1};
     require(::pipe(descriptors) == 0, "pipe failed for malformed descriptor");
     int sockets[2] = {-1, -1};
@@ -90,8 +91,11 @@ void expect_rejected(bool separate_messages, const char* message) {
         int received = -1;
         bool rejected = false;
         try {
-            (void)easy_uds::detail::descriptor_passing::receive(
-                sockets[1], &byte, sizeof(byte), received);
+            const auto result = easy_uds::detail::descriptor_passing::receive(
+                sockets[1], &byte, sizeof(byte));
+            received = result.received_fd;
+            rejected = result.error ==
+                       easy_uds::detail::descriptor_passing::ReceiveError::invalid_ancillary;
         } catch (const std::runtime_error&) {
             rejected = true;
         }
@@ -108,6 +112,9 @@ void expect_rejected(bool separate_messages, const char* message) {
     close_checked(sockets[1]);
     close_checked(descriptors[0]);
     close_checked(descriptors[1]);
+    const std::size_t after = open_fd_count();
+    require(after == before,
+            "rejected ancillary data leaked a materialized descriptor");
 }
 
 void test_round_trip_and_ownership() {
@@ -128,9 +135,11 @@ void test_round_trip_and_ownership() {
             "sending a descriptor consumed caller ownership");
 
     char received_byte = 0;
-    int received_fd = -1;
-    require(easy_uds::detail::descriptor_passing::receive(
-                sockets[1], &received_byte, sizeof(received_byte), received_fd) == 1,
+    const auto receive_result = easy_uds::detail::descriptor_passing::receive(
+        sockets[1], &received_byte, sizeof(received_byte));
+    const int received_fd = receive_result.received_fd;
+    require(receive_result.bytes == 1 && receive_result.error ==
+                easy_uds::detail::descriptor_passing::ReceiveError::none,
             "descriptor receive did not make progress");
     require(received_byte == payload && received_fd >= 0,
             "descriptor round-trip returned the wrong payload");
@@ -163,9 +172,11 @@ void test_repeated_round_trips_do_not_leak() {
         close_checked(pipe_fds[0]);
         close_checked(pipe_fds[1]);
         char received_byte = 0;
-        int received_fd = -1;
-        require(easy_uds::detail::descriptor_passing::receive(
-                    sockets[1], &received_byte, sizeof(received_byte), received_fd) == 1,
+        const auto receive_result = easy_uds::detail::descriptor_passing::receive(
+            sockets[1], &received_byte, sizeof(received_byte));
+        const int received_fd = receive_result.received_fd;
+        require(receive_result.bytes == 1 && receive_result.error ==
+                    easy_uds::detail::descriptor_passing::ReceiveError::none,
                 "descriptor leak test receive failed");
         require(received_fd >= 0, "descriptor leak test lost descriptor");
         close_checked(received_fd);
@@ -173,7 +184,7 @@ void test_repeated_round_trips_do_not_leak() {
     const std::size_t after = open_fd_count();
     close_checked(sockets[0]);
     close_checked(sockets[1]);
-    require(after <= before + 2, "repeated descriptor round-trips leaked descriptors");
+    require(after == before, "repeated descriptor round-trips leaked descriptors");
 }
 
 } // namespace

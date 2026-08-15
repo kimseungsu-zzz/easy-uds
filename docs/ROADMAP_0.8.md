@@ -16,6 +16,11 @@ portable value, a platform-specific optional capability, or a separate
 platform header. Do not silently rename it to `NativeHandle` or widen
 `OwnedFd`/`BorrowedFd`; those remain POSIX descriptor APIs in 0.7.x.
 
+The current `src/system/platform/descriptor_passing.hpp` also exposes POSIX
+`ssize_t`, `iovec`, and integer descriptors. In 0.8, decide whether to retain
+that Linux-oriented seam, move it under the Linux directory, or replace it with
+a system-owned buffer description after the Windows transport shape is known.
+
 ## Capability decisions still open
 
 - Windows readiness may use a completion model rather than the current Linux

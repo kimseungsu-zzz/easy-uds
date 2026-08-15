@@ -1,11 +1,8 @@
 #include "../descriptor_passing.hpp"
 
-#include "easy_uds/error.hpp"
-
+#include <array>
 #include <cerrno>
 #include <cstring>
-#include <stdexcept>
-#include <system_error>
 
 #include <fcntl.h>
 #include <sys/socket.h>
@@ -14,23 +11,23 @@
 namespace easy_uds::detail::descriptor_passing {
 namespace {
 
-#ifndef MSG_CMSG_CLOEXEC
-[[noreturn]] void throw_cloexec_error(const char* operation, int error) {
-    const std::error_code system_code(error, std::generic_category());
-    throw easy_uds::Error(easy_uds::detail::classify_system_error(system_code),
-                          operation, system_code);
-}
-#endif
+// Linux limits one SCM_RIGHTS message to SCM_MAX_FD (253) descriptors. Keep
+// enough control storage to materialize every accepted descriptor so a
+// malformed/truncated message can close all kernel-created copies.
+constexpr std::size_t max_received_descriptors = 253;
 
 #ifndef MSG_CMSG_CLOEXEC
-void set_close_on_exec(int fd) {
+int set_close_on_exec(int fd, ReceiveError& error) noexcept {
     const int flags = ::fcntl(fd, F_GETFD);
     if (flags < 0) {
-        throw_cloexec_error("fcntl(F_GETFD) failed", errno);
+        error = ReceiveError::close_on_exec_getfd;
+        return errno;
     }
     if (::fcntl(fd, F_SETFD, flags | FD_CLOEXEC) < 0) {
-        throw_cloexec_error("fcntl(F_SETFD) failed", errno);
+        error = ReceiveError::close_on_exec_setfd;
+        return errno;
     }
+    return 0;
 }
 #endif
 
@@ -58,55 +55,90 @@ ssize_t send_iovecs(int fd, iovec* parts, std::size_t part_count, int passed_fd,
 #endif
 }
 
-ssize_t receive(int fd, void* data, std::size_t size, int& received_fd) {
-    received_fd = -1;
+ReceiveResult receive(int fd, void* data, std::size_t size) {
+    ReceiveResult output;
     iovec vector{data, size};
     msghdr message{};
     message.msg_iov = &vector;
     message.msg_iovlen = 1;
-    char control[CMSG_SPACE(sizeof(int))]{};
-    message.msg_control = control;
-    message.msg_controllen = sizeof(control);
+    // Reuse the large defensive control area per reactor thread. Descriptor
+    // receive is also used for ordinary frames, so this must not add a heap
+    // allocation or repeatedly zero a kilobyte-sized stack buffer.
+    thread_local std::array<char, CMSG_SPACE(sizeof(int) * max_received_descriptors)> control{};
+    message.msg_control = control.data();
+    message.msg_controllen = control.size();
     int receive_flags = 0;
 #ifdef MSG_CMSG_CLOEXEC
     receive_flags |= MSG_CMSG_CLOEXEC;
 #endif
     const ssize_t result = ::recvmsg(fd, &message, receive_flags);
     if (result <= 0) {
-        return result;
+        output.bytes = result;
+        return output;
     }
 
-    int captured_fd = -1;
+    // The count tracks every descriptor copied from a valid ancillary payload,
+    // so the storage does not need to be initialized on the ordinary no-FD
+    // path.  This keeps descriptor receive from adding a kilobyte memset to
+    // every fixed request while still retaining all descriptors for cleanup
+    // when ancillary validation fails.
+    std::array<int, max_received_descriptors> captured_fds;
+    std::size_t captured_count = 0;
     bool malformed = false;
-    for (cmsghdr* header = CMSG_FIRSTHDR(&message); header != nullptr;
-         header = CMSG_NXTHDR(&message, header)) {
-        if (header->cmsg_level != SOL_SOCKET || header->cmsg_type != SCM_RIGHTS) {
-            continue;
-        }
-        if (header->cmsg_len != CMSG_LEN(sizeof(int)) || captured_fd >= 0) {
+    const auto* control_begin = reinterpret_cast<const unsigned char*>(control.data());
+    const auto* control_end = control_begin + message.msg_controllen;
+    for (cmsghdr* header = CMSG_FIRSTHDR(&message); header != nullptr;) {
+        const auto* header_bytes = reinterpret_cast<const unsigned char*>(header);
+        if (header_bytes + sizeof(cmsghdr) > control_end ||
+            header->cmsg_len < CMSG_LEN(0) ||
+            header_bytes + header->cmsg_len > control_end) {
             malformed = true;
+            break;
+        }
+        if (header->cmsg_level != SOL_SOCKET || header->cmsg_type != SCM_RIGHTS) {
+            header = CMSG_NXTHDR(&message, header);
             continue;
         }
-        std::memcpy(&captured_fd, CMSG_DATA(header), sizeof(captured_fd));
+        const std::size_t payload_bytes = header->cmsg_len - CMSG_LEN(0);
+        const std::size_t descriptor_count = payload_bytes / sizeof(int);
+        if (payload_bytes == 0 || payload_bytes % sizeof(int) != 0 ||
+            descriptor_count > max_received_descriptors - captured_count) {
+            malformed = true;
+            break;
+        }
+        std::memcpy(captured_fds.data() + captured_count, CMSG_DATA(header),
+                    descriptor_count * sizeof(int));
+        captured_count += descriptor_count;
+        if (descriptor_count != 1 || captured_count != 1) {
+            malformed = true;
+        }
+        header = CMSG_NXTHDR(&message, header);
     }
     if ((message.msg_flags & MSG_CTRUNC) != 0 || malformed) {
-        if (captured_fd >= 0) {
-            (void)::close(captured_fd);
+        for (std::size_t index = 0; index < captured_count; ++index) {
+            (void)::close(captured_fds[index]);
         }
-        throw std::runtime_error("invalid or truncated ancillary descriptor");
+        output.bytes = result;
+        output.error = ReceiveError::invalid_ancillary;
+        return output;
     }
-    if (captured_fd >= 0) {
+    if (captured_count == 1) {
 #ifndef MSG_CMSG_CLOEXEC
-        try {
-            set_close_on_exec(captured_fd);
-        } catch (...) {
-            (void)::close(captured_fd);
-            throw;
+        ReceiveError close_on_exec_error_kind = ReceiveError::none;
+        const int close_on_exec_error =
+            set_close_on_exec(captured_fds[0], close_on_exec_error_kind);
+        if (close_on_exec_error != 0) {
+            (void)::close(captured_fds[0]);
+            output.bytes = result;
+            output.error = close_on_exec_error_kind;
+            output.native_error = close_on_exec_error;
+            return output;
         }
 #endif
-        received_fd = captured_fd;
+        output.received_fd = captured_fds[0];
     }
-    return result;
+    output.bytes = result;
+    return output;
 }
 
 } // namespace easy_uds::detail::descriptor_passing

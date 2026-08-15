@@ -42,8 +42,17 @@ concrete peer-identity capability, keeping `SO_PEERCRED`/`getsockopt` in Linux
 code and leaving the public `PeerCredentials` value unchanged. Descriptor
 passing is now isolated as the concrete Linux ancillary-data capability while
 preserving first-successful-send-only attachment and fatal malformed/truncated
-receive semantics. Error translation remains a later capability unit. `src/system`
+receive semantics. Phase 4E removes the public `Error` dependency from that
+backend and lets the reactor map its raw/native results. The remaining generic
+low-level error translation is still an inventory-driven follow-up. `src/system`
 owns the engine and must not depend on C or Python binding layers;
 `src/system/platform/linux` must not include `src/user/*`; and `src/user` must
 not depend on a platform implementation. Build-time backend selection is
 preferred over a hot-path `ITransport` virtual abstraction.
+
+Phase 4D/4E keeps descriptor passing in the concrete Linux capability while
+moving native ancillary results upward before public error construction. The
+current `platform/descriptor_passing.hpp` seam intentionally exposes POSIX
+`ssize_t`/`iovec` and is not a final Windows transport contract. The errno and
+`io.hpp` responsibility inventory is maintained in
+[`internals/error-and-io-inventory.md`](internals/error-and-io-inventory.md).

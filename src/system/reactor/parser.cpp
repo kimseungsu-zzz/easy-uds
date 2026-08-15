@@ -15,12 +15,20 @@ namespace {
 using protocol::WireType;
 
 ssize_t recv_with_fds(int fd, char* data, std::size_t size, std::deque<int>& fds) {
-    int captured_fd = -1;
-    const ssize_t result = descriptor_passing::receive(fd, data, size, captured_fd);
-    if (result > 0 && captured_fd >= 0) {
-        fds.push_back(captured_fd);
+    const auto result = descriptor_passing::receive(fd, data, size);
+    if (result.error == descriptor_passing::ReceiveError::invalid_ancillary) {
+        throw std::runtime_error("invalid or truncated ancillary descriptor");
     }
-    return result;
+    if (result.error == descriptor_passing::ReceiveError::close_on_exec_getfd) {
+        throw_system_error("fcntl(F_GETFD) failed", result.native_error);
+    }
+    if (result.error == descriptor_passing::ReceiveError::close_on_exec_setfd) {
+        throw_system_error("fcntl(F_SETFD) failed", result.native_error);
+    }
+    if (result.bytes > 0 && result.received_fd >= 0) {
+        fds.push_back(result.received_fd);
+    }
+    return result.bytes;
 }
 
 } // namespace

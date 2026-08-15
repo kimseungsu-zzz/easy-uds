@@ -15,7 +15,6 @@
 #include <utility>
 
 #include <poll.h>
-#include <sys/epoll.h>
 #include <unistd.h>
 
 namespace easy_uds::detail {
@@ -167,8 +166,8 @@ bool try_acquire_continuation_lease(const std::shared_ptr<ServerState>& state,
         return false;
     }
 
-    epoll_event event{};
-    if (::epoll_ctl(state->epoll_fd, EPOLL_CTL_DEL, connection->fd, &event) != 0 &&
+    if (readiness::control(state->readiness_fd, readiness::Control::remove,
+                           connection->fd, 0, 0) != 0 &&
         errno != ENOENT) {
         connection->closing.store(true, std::memory_order_release);
         return false;
@@ -334,7 +333,7 @@ void rearm_connection(const std::shared_ptr<ServerState>& state,
 
         fresh->conn = connection;
         fresh->generation = allocate_connection_generation(state);
-        fresh->registered_events = EPOLLIN;
+        fresh->registered_events = readiness::readable;
         fresh->phase = ParsePhase::header;
         fresh->header.fill(0);
         fresh->header_received = 0;
@@ -360,13 +359,15 @@ void rearm_connection(const std::shared_ptr<ServerState>& state,
         connection->stream_active.store(false, std::memory_order_release);
         connection->worker_owned.store(false, std::memory_order_release);
 
-        epoll_event event{};
-        event.events = fresh->registered_events;
-        event.data.u64 = connection_token(fd, fresh->generation);
-        if (::epoll_ctl(state->epoll_fd, EPOLL_CTL_ADD, fd, &event) != 0) {
+        if (readiness::control(state->readiness_fd, readiness::Control::add, fd,
+                               fresh->registered_events,
+                               connection_token(fd, fresh->generation)) != 0) {
             const int add_error = errno;
             if (add_error != EEXIST ||
-                ::epoll_ctl(state->epoll_fd, EPOLL_CTL_MOD, fd, &event) != 0) {
+                readiness::control(state->readiness_fd,
+                                   readiness::Control::modify, fd,
+                                   fresh->registered_events,
+                                   connection_token(fd, fresh->generation)) != 0) {
                 connection->closing.store(true, std::memory_order_release);
                 rearm_failed = true;
             }

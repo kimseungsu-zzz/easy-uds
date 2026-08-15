@@ -88,7 +88,7 @@ contents can be divided without changing behavior as follows:
 | Connection/reactor state | `Connection`, `ReactorConnection`, `ParsePhase`, output queue, parser offsets, generation, read-pause flags | Genuine reactor/transport state |
 | Server lifecycle/configuration | `ServerState`, worker/serialized queues, lifecycle mutexes, `ServerOptions` | Mixed: public options enter at the API edge; state is system-owned |
 | Protocol values | `HeaderBytes`, request id, wire arguments, frame offsets | Protocol codec/dispatch value |
-| Linux capability residue | raw `fd`, `close()` in `Connection::~Connection`, `dev_t`, `ino_t`, epoll/wakeup/lock descriptor fields, received FD queue | Future `system/platform/linux` extraction target |
+| Linux capability residue | raw `fd`, `close()` in `Connection::~Connection`, `dev_t`, `ino_t`, lock descriptor fields, received FD queue | Future `system/platform/linux` extraction target |
 
 The first minimal boundary is therefore not an `IServer`/`ITransport` class. It
 is a concrete translation seam at registration and lifecycle boundaries:
@@ -112,9 +112,10 @@ this inventory.
 | `system/runtime/session_engine` | Yes: Response/options/stats values | In-flight table, reader/waiter, send serialization | Through transport helpers |
 | `user/cpp/core/client/session` | Owns public member glue | Calls concrete engine functions and state | No platform backend dependency |
 | `system/runtime/server` | Yes, transitively through reactor core | Lifecycle and route registration | Direct Linux includes remain |
-| `system/reactor` | Yes, transitively through `core.hpp` | Connections, parsing, workers, queues | Direct epoll/socket/eventfd/poll use |
+| `system/reactor` | Yes, transitively through `core.hpp` | Connections, parsing, workers, queues, readiness policy | Uses the platform-neutral readiness contract; no direct epoll/eventfd headers |
 | `system/transport` | Yes: options/request/response/stream/error | Exact I/O and framing | Direct socket/uio/unix/fcntl use |
 | `system/platform/linux/endpoint.*` | No public C++ API | Pathname endpoint and socket lifecycle capability | Linux `AF_UNIX`/socket syscalls |
+| `system/platform/linux/readiness.cpp` | No public C++ API | Readiness registration/wait and wakeup signal/consume | Linux `epoll`/`eventfd` syscalls |
 | `user/cpp` | Owns public C++ headers | Public call/handler syntax | Must not include backend headers |
 | `user/c`, `user/py` | No implementation yet | Future binding surfaces | Must depend downward only |
 
@@ -132,9 +133,8 @@ exercise malformed headers.
 
 This phase does not add Windows code, C/Python APIs, change protocol v2,
 optimize the hot path, or introduce a virtual transport. The concrete
-user/system seam and the endpoint/socket capability are now in place. The next
-implementation step is an inventory-driven move of readiness/wakeup
-(`epoll`/`eventfd`), followed by peer identity, descriptor passing, and error
-translation. These capabilities should continue to land as small concrete
-units where that reduces coupling without adding a call or allocation to the
-hot path.
+user/system seam, endpoint/socket capability, and readiness/wakeup capability
+are now in place. The next implementation step is an inventory-driven move of
+peer identity, descriptor passing, and error translation. These capabilities
+should continue to land as small concrete units where that reduces coupling
+without adding a call or allocation to the hot path.

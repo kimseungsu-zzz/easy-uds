@@ -10,10 +10,6 @@
 #include <stdexcept>
 #include <vector>
 
-#include <sys/epoll.h>
-#include <sys/eventfd.h>
-#include <unistd.h>
-
 namespace easy_uds::detail {
 namespace {
 
@@ -108,16 +104,15 @@ Deadline expire_reactor_connections(const std::shared_ptr<ServerState>& state) {
 
 void run_reactor(const std::shared_ptr<ServerState>& state) {
     const int listener = state->listener_fd;
-    const int wake_read = state->wake_read_fd;
-    const int epoll_fd = state->epoll_fd;
+    const int wakeup_fd = state->wakeup_fd;
+    const int readiness_fd = state->readiness_fd;
 
-    std::array<epoll_event, 128> events{};
+    std::array<readiness::Event, readiness::max_events> events{};
     while (state->running.load()) {
         process_resumed_connections(state);
         const Deadline next_deadline = expire_reactor_connections(state);
-        const int count = ::epoll_wait(epoll_fd, events.data(),
-                                       static_cast<int>(events.size()),
-                                       poll_timeout_ms(next_deadline));
+        const int count = readiness::wait(readiness_fd, events.data(), events.size(),
+                                          poll_timeout_ms(next_deadline));
         if (count < 0) {
             if (errno == EINTR) {
                 continue;
@@ -125,18 +120,18 @@ void run_reactor(const std::shared_ptr<ServerState>& state) {
             if (!state->running.load()) {
                 break;
             }
-            throw_system_error("epoll_wait failed");
+            throw_system_error("readiness wait failed");
         }
         if (count == 0) {
             continue;
         }
 
         for (int index = 0; index < count; ++index) {
-            const std::uint64_t token = events[index].data.u64;
-            const std::uint32_t mask = events[index].events;
+            const std::uint64_t token = events[index].token;
+            const std::uint32_t mask = events[index].mask;
 
             if (token == listener_token) {
-                if ((mask & (EPOLLERR | EPOLLHUP)) != 0) {
+                if ((mask & (readiness::error | readiness::hangup)) != 0) {
                     throw std::runtime_error("listening socket failed");
                 }
                 std::size_t accepted = 0;
@@ -167,14 +162,13 @@ void run_reactor(const std::shared_ptr<ServerState>& state) {
                         reactor_connection->conn = connection;
                         reactor_connection->generation =
                             allocate_connection_generation(state);
-                        reactor_connection->registered_events = EPOLLIN;
+                        reactor_connection->registered_events = readiness::readable;
                         state->connections[client_fd] = reactor_connection;
-                        epoll_event event{};
-                        event.events = reactor_connection->registered_events;
-                        event.data.u64 = connection_token(
-                            client_fd, reactor_connection->generation);
-                        if (::epoll_ctl(epoll_fd, EPOLL_CTL_ADD, client_fd,
-                                        &event) != 0) {
+                        if (readiness::control(
+                                readiness_fd, readiness::Control::add, client_fd,
+                                reactor_connection->registered_events,
+                                connection_token(client_fd,
+                                                 reactor_connection->generation)) != 0) {
                             state->connections.erase(client_fd);
                         } else {
                             record_accepted_connection(state);
@@ -186,12 +180,10 @@ void run_reactor(const std::shared_ptr<ServerState>& state) {
 
             if (token == wake_token) {
                 // Clear before draining: a concurrent producer that observes
-                // false will enqueue another eventfd count, while producers
+                // false will enqueue another wakeup count, while producers
                 // that observed true are covered by the count being drained.
                 state->wake_pending.store(false, std::memory_order_release);
-                std::uint64_t counter = 0;
-                while (::read(wake_read, &counter, sizeof(counter)) > 0) {
-                }
+                readiness::consume(wakeup_fd);
                 index = count;
                 break;
             }
@@ -225,16 +217,17 @@ void run_reactor(const std::shared_ptr<ServerState>& state) {
                 close_connection(state, fd);
                 continue;
             }
-            if ((mask & (EPOLLERR | EPOLLHUP | EPOLLRDHUP)) != 0) {
+            if ((mask & (readiness::error | readiness::hangup |
+                         readiness::peer_hangup)) != 0) {
                 close_connection(state, fd);
                 continue;
             }
-            if ((mask & EPOLLOUT) != 0 &&
+            if ((mask & readiness::writable) != 0 &&
                 !flush_connection_output(state, connection)) {
                 close_connection(state, fd);
                 continue;
             }
-            if ((mask & EPOLLIN) != 0 && read_allowed) {
+            if ((mask & readiness::readable) != 0 && read_allowed) {
                 try {
                     consume(state, connection);
                 } catch (...) {

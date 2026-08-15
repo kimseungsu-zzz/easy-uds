@@ -55,6 +55,8 @@ add_library(easy_uds
     src/system/runtime/trace.hpp
     src/system/platform/linux/endpoint.cpp
     src/system/platform/linux/endpoint.hpp
+    src/system/platform/linux/readiness.cpp
+    src/system/platform/readiness.hpp
     src/system/transport/transport.cpp
     src/system/transport/transport.hpp
     src/system/reactor/dispatch.cpp
@@ -208,6 +210,23 @@ if(EASY_UDS_BUILD_TESTS)
         add_test(NAME easy_uds.protocol_golden COMMAND easy_uds_protocol_golden)
         set_tests_properties(easy_uds.protocol_golden PROPERTIES
             TIMEOUT 5 LABELS "rc;protocol;portability")
+
+        add_executable(easy_uds_readiness_test tests/readiness.cpp)
+        target_include_directories(easy_uds_readiness_test PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/src/system)
+        target_link_libraries(easy_uds_readiness_test PRIVATE easy_uds::easy_uds)
+        target_compile_features(easy_uds_readiness_test PRIVATE cxx_std_17)
+        target_compile_options(easy_uds_readiness_test PRIVATE
+            $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Wall;-Wextra;-Wpedantic>
+        )
+        if(EASY_UDS_WARNINGS_AS_ERRORS)
+            target_compile_options(easy_uds_readiness_test PRIVATE
+                $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Werror>
+            )
+        endif()
+        add_test(NAME easy_uds.readiness COMMAND easy_uds_readiness_test)
+        set_tests_properties(easy_uds.readiness PROPERTIES
+            TIMEOUT 5 LABELS "rc;platform;readiness")
 
         add_executable(easy_uds_rc_adversarial
             tests/easy_uds_test/common.cpp

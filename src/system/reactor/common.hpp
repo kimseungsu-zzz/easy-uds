@@ -7,16 +7,11 @@
 #include <limits>
 #include <string>
 
-#include <sys/eventfd.h>
-#include <unistd.h>
-
 namespace easy_uds::detail {
 
 inline constexpr std::size_t reactor_read_scratch_size = 64U * 1024U;
 inline constexpr std::size_t reactor_read_batch_size = 256U * 1024U;
 inline constexpr int max_accept_batch = 64;
-inline constexpr std::uint64_t listener_token = std::numeric_limits<std::uint64_t>::max();
-inline constexpr std::uint64_t wake_token = listener_token - 1;
 
 inline void clear_reusable_buffer(std::string& buffer) {
     if (buffer.capacity() > reactor_read_scratch_size) {
@@ -43,7 +38,7 @@ inline Deadline connection_inactivity_deadline(const std::shared_ptr<Connection>
 }
 
 inline void wake_reactor(const std::shared_ptr<ServerState>& state) noexcept {
-    if (state->wake_write_fd < 0) {
+    if (state->wakeup_fd < 0) {
         return;
     }
     bool expected = false;
@@ -51,9 +46,7 @@ inline void wake_reactor(const std::shared_ptr<ServerState>& state) noexcept {
                                                      std::memory_order_relaxed)) {
         return;
     }
-    const std::uint64_t increment = 1;
-    const ssize_t ignored = ::write(state->wake_write_fd, &increment, sizeof(increment));
-    (void)ignored;
+    readiness::signal(state->wakeup_fd);
 }
 
 inline std::uint32_t allocate_connection_generation(const std::shared_ptr<ServerState>& state) noexcept {

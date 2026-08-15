@@ -27,6 +27,19 @@ check_no_match \
     '^[[:space:]]*#[[:space:]]*include[[:space:]]*[<"][^>"]*(platform/linux)[^>"]*[>"]' \
     "${root_dir}/src/system/protocol"
 
+system_sources=()
+while IFS= read -r -d '' path; do
+    system_sources+=("${path}")
+done < <(find "${root_dir}/src/system" -type f \
+    ! -path "${root_dir}/src/system/platform/linux/*" \
+    \( -name '*.cpp' -o -name '*.hpp' -o -name '*.h' \) -print0)
+if ((${#system_sources[@]} > 0)); then
+    check_no_match \
+        "system policy/state code must not include Linux readiness headers" \
+        '^[[:space:]]*#[[:space:]]*include[[:space:]]*[<"](sys/epoll\.h|sys/eventfd\.h)[>"]' \
+        "${system_sources[@]}"
+fi
+
 user_sources=()
 while IFS= read -r -d '' path; do
     user_sources+=("${path}")

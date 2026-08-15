@@ -12,8 +12,6 @@
 #include <utility>
 #include <vector>
 
-#include <sys/epoll.h>
-#include <sys/eventfd.h>
 #include <sys/file.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
@@ -145,14 +143,6 @@ void remove_stale_socket(const std::string& socket_path, std::chrono::millisecon
     }
 }
 
-FileDescriptor make_wakeup_eventfd() {
-    const int fd = ::eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK);
-    if (fd < 0) {
-        throw_system_error("eventfd failed");
-    }
-    return FileDescriptor(fd);
-}
-
 void unlink_owned_socket(const std::shared_ptr<detail::ServerState>& state) noexcept {
     struct stat current {};
     if (state->socket_identity_valid && ::lstat(state->socket_path.c_str(), &current) == 0 &&
@@ -167,24 +157,14 @@ void close_lifecycle_fds_locked(const std::shared_ptr<detail::ServerState>& stat
         (void)::close(state->listener_fd);
         state->listener_fd = -1;
     }
-    const int wake_read = state->wake_read_fd;
-    const int wake_write = state->wake_write_fd;
-    if (wake_read >= 0) {
-        (void)::close(wake_read);
-    }
-    if (wake_write >= 0 && wake_write != wake_read) {
-        (void)::close(wake_write);
-    }
-    state->wake_read_fd = -1;
-    state->wake_write_fd = -1;
+    readiness::close(state->wakeup_fd);
+    state->wakeup_fd = -1;
     if (state->instance_lock_fd >= 0) {
         (void)::close(state->instance_lock_fd);
         state->instance_lock_fd = -1;
     }
-    if (state->epoll_fd >= 0) {
-        (void)::close(state->epoll_fd);
-        state->epoll_fd = -1;
-    }
+    readiness::close(state->readiness_fd);
+    state->readiness_fd = -1;
 }
 
 // Signals every component to stop and wakes the reactor. Connection fds are
@@ -198,11 +178,7 @@ void stop_state(const std::shared_ptr<detail::ServerState>& state) noexcept {
         std::lock_guard<std::mutex> lock(state->lifecycle_mutex);
         state->stopped = true;
         close_without_run = !state->run_active;
-        if (state->wake_write_fd >= 0) {
-            const std::uint64_t increment = 1;
-            const ssize_t result = ::write(state->wake_write_fd, &increment, sizeof(increment));
-            (void)result;
-        }
+        readiness::signal(state->wakeup_fd);
     }
 
     unlink_owned_socket(state);
@@ -319,18 +295,15 @@ Server::Server(std::string socket_path, ServerOptions options) : state_(std::mak
         throw_system_error("listen failed", error);
     }
 
-    FileDescriptor wake_event;
-    try {
-        wake_event = make_wakeup_eventfd();
-    } catch (...) {
+    const int wakeup_fd = readiness::create_wakeup();
+    if (wakeup_fd < 0) {
         unlink_owned_socket(state_);
-        throw;
+        throw_system_error("wakeup event creation failed");
     }
 
     std::lock_guard<std::mutex> lock(state_->lifecycle_mutex);
     state_->listener_fd = listener.release();
-    state_->wake_read_fd = wake_event.get();
-    state_->wake_write_fd = wake_event.release();
+    state_->wakeup_fd = wakeup_fd;
     state_->instance_lock_fd = instance_lock.release();
 }
 
@@ -359,41 +332,34 @@ void Server::run() {
     const auto state = state_;
 
     int listener = -1;
-    int wake_read = -1;
     {
         std::lock_guard<std::mutex> lock(state->lifecycle_mutex);
         if (state->run_started) {
             throw std::logic_error("server run() can only be called once");
         }
         state->run_started = true;
-        if (state->stopped || state->listener_fd < 0 || state->wake_read_fd < 0) {
+        if (state->stopped || state->listener_fd < 0 || state->wakeup_fd < 0) {
             throw std::logic_error("server has already been stopped");
         }
         state->run_active = true;
         listener = state->listener_fd;
-        wake_read = state->wake_read_fd;
     }
 
     RunActiveGuard active_guard(state);
 
-    // Create the epoll instance and register the listener + wakeup pipe.
-    const int epoll_fd = ::epoll_create1(EPOLL_CLOEXEC);
-    if (epoll_fd < 0) {
-        throw_system_error("epoll_create1 failed");
+    // Create the readiness set and register the listener + wakeup source.
+    const int readiness_fd = readiness::create_poller();
+    if (readiness_fd < 0) {
+        throw_system_error("readiness set creation failed");
     }
-    state->epoll_fd = epoll_fd;
-
-    epoll_event listener_event{};
-    listener_event.events = EPOLLIN;
-    listener_event.data.u64 = std::numeric_limits<std::uint64_t>::max();
-    if (::epoll_ctl(epoll_fd, EPOLL_CTL_ADD, listener, &listener_event) != 0) {
-        throw_system_error("epoll_ctl(listener) failed");
+    state->readiness_fd = readiness_fd;
+    if (readiness::control(readiness_fd, readiness::Control::add, listener,
+                           readiness::readable, listener_token) != 0) {
+        throw_system_error("readiness listener registration failed");
     }
-    epoll_event wake_event{};
-    wake_event.events = EPOLLIN;
-    wake_event.data.u64 = std::numeric_limits<std::uint64_t>::max() - 1;
-    if (::epoll_ctl(epoll_fd, EPOLL_CTL_ADD, wake_read, &wake_event) != 0) {
-        throw_system_error("epoll_ctl(wakeup) failed");
+    if (readiness::control(readiness_fd, readiness::Control::add, state->wakeup_fd,
+                           readiness::readable, wake_token) != 0) {
+        throw_system_error("readiness wakeup registration failed");
     }
 
     {

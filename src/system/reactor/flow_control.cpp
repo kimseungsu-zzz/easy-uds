@@ -4,8 +4,6 @@
 #include <limits>
 #include <vector>
 
-#include <unistd.h>
-
 namespace easy_uds::detail {
 namespace {
 
@@ -75,7 +73,7 @@ void resume_paused_connections(const std::shared_ptr<ServerState>& state,
 }
 
 void wake_reactor(const std::shared_ptr<ServerState>& state) noexcept {
-    if (state->wake_write_fd < 0) {
+    if (state->wakeup_fd < 0) {
         return;
     }
     bool expected = false;
@@ -83,9 +81,7 @@ void wake_reactor(const std::shared_ptr<ServerState>& state) noexcept {
                                                      std::memory_order_relaxed)) {
         return;
     }
-    const std::uint64_t increment = 1;
-    const ssize_t ignored = ::write(state->wake_write_fd, &increment, sizeof(increment));
-    (void)ignored;
+    readiness::signal(state->wakeup_fd);
 }
 
 } // namespace

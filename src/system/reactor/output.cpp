@@ -7,7 +7,6 @@
 #include <limits>
 #include <string_view>
 
-#include <sys/epoll.h>
 #include <sys/socket.h>
 #include <sys/uio.h>
 #include <unistd.h>
@@ -28,7 +27,7 @@ void mark_output_progress(const std::shared_ptr<Connection>& connection) noexcep
 }
 
 void wake_reactor(const std::shared_ptr<ServerState>& state) noexcept {
-    if (state->wake_write_fd < 0) {
+    if (state->wakeup_fd < 0) {
         return;
     }
     bool expected = false;
@@ -36,9 +35,7 @@ void wake_reactor(const std::shared_ptr<ServerState>& state) noexcept {
                                                      std::memory_order_relaxed)) {
         return;
     }
-    const std::uint64_t increment = 1;
-    const ssize_t ignored = ::write(state->wake_write_fd, &increment, sizeof(increment));
-    (void)ignored;
+    readiness::signal(state->wakeup_fd);
 }
 
 std::size_t output_queue_limit(const std::shared_ptr<ServerState>& state) noexcept {
@@ -115,29 +112,32 @@ bool refresh_connection_events(const std::shared_ptr<ServerState>& state,
                                const std::shared_ptr<Connection>& connection) noexcept {
     std::lock_guard<std::mutex> lock(state->connections_mutex);
     const auto it = state->connections.find(connection->fd);
-    if (it == state->connections.end() || it->second->conn != connection || state->epoll_fd < 0 ||
+    if (it == state->connections.end() || it->second->conn != connection ||
+        state->readiness_fd < 0 ||
         connection->closing.load(std::memory_order_acquire) ||
         connection->stream_active.load(std::memory_order_acquire) ||
         connection->worker_owned.load(std::memory_order_acquire)) {
         return false;
     }
-    epoll_event event{};
+    std::uint32_t events = 0;
     if (!it->second->read_paused) {
-        event.events |= EPOLLIN;
+        events |= readiness::readable;
     }
     if (connection->queued_output_bytes.load(std::memory_order_acquire) != 0) {
-        event.events |= EPOLLOUT;
+        events |= readiness::writable;
     }
-    if (it->second->registered_events == event.events) {
+    if (it->second->registered_events == events) {
         return true;
     }
-    event.data.u64 = connection_token(connection->fd, it->second->generation);
-    if (::epoll_ctl(state->epoll_fd, EPOLL_CTL_MOD, connection->fd, &event) != 0) {
+    if (readiness::control(state->readiness_fd, readiness::Control::modify,
+                           connection->fd, events,
+                           connection_token(connection->fd,
+                                            it->second->generation)) != 0) {
         connection->closing.store(true, std::memory_order_release);
         (void)::shutdown(connection->fd, SHUT_RDWR);
         return false;
     }
-    it->second->registered_events = event.events;
+    it->second->registered_events = events;
     return true;
 }
 

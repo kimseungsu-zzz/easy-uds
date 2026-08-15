@@ -4,13 +4,16 @@
 // public Server implementation.
 
 #include "easy_uds/server.hpp"
+#include "../platform/readiness.hpp"
 #include "../transport/io.hpp"
 
 #include <atomic>
 #include <array>
+#include <cstdint>
 #include <condition_variable>
 #include <deque>
 #include <exception>
+#include <limits>
 #include <memory>
 #include <mutex>
 #include <stdexcept>
@@ -25,6 +28,8 @@ namespace easy_uds::detail {
 inline constexpr unsigned char handler_serialized_flag = 0x01U;
 inline constexpr unsigned char handler_contextual_flag = 0x02U;
 inline constexpr unsigned char handler_advanced_options_flag = 0x04U;
+inline constexpr std::uint64_t listener_token = std::numeric_limits<std::uint64_t>::max();
+inline constexpr std::uint64_t wake_token = listener_token - 1;
 
 struct HandlerEntry {
     easy_uds::Server::Handler handler;
@@ -88,7 +93,7 @@ struct OutgoingFrame {
 };
 
 // A connected client. fd access is governed by the reactor phase machine:
-// either the reactor parses frames on it (connection in the epoll set) or a
+// either the reactor parses frames on it (connection in the readiness set) or a
 // stream worker owns it as an exclusive lease.
 struct Connection {
     Connection(int fd, easy_uds::PeerCredentials peer)
@@ -119,7 +124,7 @@ struct Connection {
 
     // Streams hold write_mutex for their exclusive blocking exchange. Fixed
     // responses use output_mutex: a worker performs one nonblocking fast-path
-    // send and the reactor drains any remainder through EPOLLOUT.
+    // send and the reactor drains any remainder through writable readiness.
     std::mutex write_mutex;
     std::mutex output_mutex;
     std::deque<OutgoingFrame> output_queue;
@@ -244,11 +249,10 @@ struct ServerState {
     std::mutex lifecycle_mutex;
     std::condition_variable lifecycle_cv;
     int listener_fd = -1;
-    int wake_read_fd = -1;
-    int wake_write_fd = -1;
+    int wakeup_fd = -1;
     std::atomic<bool> wake_pending{false};
     int instance_lock_fd = -1;
-    int epoll_fd = -1;
+    int readiness_fd = -1;
     dev_t socket_device = 0;
     ino_t socket_inode = 0;
     bool socket_identity_valid = false;
@@ -423,7 +427,7 @@ void write_error_response(const std::shared_ptr<ServerState>& state,
 bool flush_connection_output(const std::shared_ptr<ServerState>& state,
                              const std::shared_ptr<ReactorConnection>& connection);
 
-// Recomputes EPOLLIN/EPOLLOUT interest for a reactor-owned connection.
+// Recomputes readable/writable interest for a reactor-owned connection.
 bool refresh_connection_events(const std::shared_ptr<ServerState>& state,
                                const std::shared_ptr<Connection>& connection) noexcept;
 
@@ -433,7 +437,7 @@ Deadline connection_output_deadline(const std::shared_ptr<ServerState>& state,
 
 // Per-connection input flow control. With a configured aggregate budget,
 // byte accounting starts after the header and includes partially received,
-// queued, and executing requests. Pause/resume toggles only EPOLLIN.
+// queued, and executing requests. Pause/resume toggles only readable interest.
 bool try_reserve_connection_request_bytes(const std::shared_ptr<ServerState>& state,
                                           const std::shared_ptr<Connection>& connection,
                                           std::size_t request_bytes) noexcept;

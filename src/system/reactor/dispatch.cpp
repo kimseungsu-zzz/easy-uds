@@ -6,7 +6,6 @@
 #include <string_view>
 #include <utility>
 
-#include <sys/epoll.h>
 #include <sys/socket.h>
 
 namespace easy_uds::detail {
@@ -134,9 +133,9 @@ void close_connection(const std::shared_ptr<ServerState>& state, int fd) {
         it->second->request_fd = -1;
     }
     connection->closing.store(true, std::memory_order_release);
-    if (state->epoll_fd >= 0) {
-        epoll_event event{};
-        (void)::epoll_ctl(state->epoll_fd, EPOLL_CTL_DEL, fd, &event);
+    if (state->readiness_fd >= 0) {
+        (void)readiness::control(state->readiness_fd,
+                                 readiness::Control::remove, fd, 0, 0);
     }
     (void)::shutdown(fd, SHUT_RDWR);
     {
@@ -277,9 +276,10 @@ void dispatch_stream(const std::shared_ptr<ServerState>& state,
     // Stream workers take the fd lease and carry unread reactor bytes with it.
     {
         std::lock_guard<std::mutex> lock(state->connections_mutex);
-        if (state->epoll_fd >= 0) {
-            epoll_event event{};
-            (void)::epoll_ctl(state->epoll_fd, EPOLL_CTL_DEL, connection->fd, &event);
+        if (state->readiness_fd >= 0) {
+            (void)readiness::control(state->readiness_fd,
+                                     readiness::Control::remove,
+                                     connection->fd, 0, 0);
         }
         connection->stream_active.store(true, std::memory_order_release);
     }

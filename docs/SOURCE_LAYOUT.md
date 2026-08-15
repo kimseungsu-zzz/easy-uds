@@ -10,9 +10,9 @@ src/
 │   ├── core/                 shared engine state and error implementation
 │   ├── protocol/             protocol-v2 codec boundary
 │   ├── runtime/              concrete engine functions and server lifecycle
-│   ├── reactor/              epoll dispatch, parsing, workers, and streams
+│   ├── reactor/              readiness dispatch, parsing, workers, and streams
 │   ├── transport/            exact I/O and client framing helpers
-│   └── platform/linux/       endpoint/socket and future Linux capabilities
+│   └── platform/linux/       endpoint/socket and readiness/wakeup capabilities
 └── user/
     ├── cpp/
     │   ├── core/             installed Core C++ headers and public method glue
@@ -35,7 +35,9 @@ translated once during registration into immutable internal entries.
 
 Phase 4 begins the inventory-driven extraction with `endpoint.*`: pathname
 `AF_UNIX`/`sockaddr_un` validation and socket lifecycle calls are now concrete
-Linux capability functions. Readiness/wakeup, peer identity, descriptor
+Linux capability functions. Phase 4B adds the platform-neutral readiness
+contract and its concrete Linux `epoll`/`eventfd` implementation; reactor
+policy no longer includes Linux readiness headers. Peer identity, descriptor
 passing, and error translation remain later capability units. `src/system`
 owns the engine and must not depend on C or Python binding layers;
 `src/system/platform/linux` must not include `src/user/*`; and `src/user` must

@@ -50,6 +50,12 @@ void set_errno_from_wsa(int error) noexcept {
     case WSAECONNABORTED:
         errno = ECONNRESET;
         break;
+    case WSAECONNREFUSED:
+        errno = ECONNREFUSED;
+        break;
+    case WSAENOTCONN:
+        errno = ENOTCONN;
+        break;
     case WSAEADDRINUSE:
         errno = EADDRINUSE;
         break;

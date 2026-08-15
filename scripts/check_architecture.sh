@@ -82,6 +82,11 @@ check_no_match \
     "${root_dir}/src/system/protocol"
 
 check_no_match \
+    "system/platform/windows must not include user layers" \
+    '^[[:space:]]*#[[:space:]]*include[[:space:]]*[<"]([^>"]*/)?(user/|easy_uds/simple\.hpp)' \
+    "${root_dir}/src/system/platform/windows"
+
+check_no_match \
     "Linux capabilities must not include user-facing public headers" \
     '^[[:space:]]*#[[:space:]]*include[[:space:]]*[<"]easy_uds/(client|server|session|simple|error|request|response|options|stats|fd|stream|request_context)\.hpp[>"]' \
     "${root_dir}/src/system/platform/linux"
@@ -122,7 +127,7 @@ system_sources=()
 while IFS= read -r -d '' path; do
     system_sources+=("${path}")
 done < <(find "${root_dir}/src/system" -type f \
-    ! -path "${root_dir}/src/system/platform/linux/*" \
+    ! -path "${root_dir}/src/system/platform/*" \
     \( -name '*.cpp' -o -name '*.hpp' -o -name '*.h' \) -print0)
 if ((${#system_sources[@]} > 0)); then
     check_no_match \
@@ -136,6 +141,10 @@ if ((${#system_sources[@]} > 0)); then
     check_no_match \
         "system policy/state code must not own Linux descriptor ancillary operations" \
         'SCM_RIGHTS|MSG_CTRUNC|MSG_CMSG_CLOEXEC|CMSG_[A-Z_]+|cmsghdr' \
+        "${system_sources[@]}"
+    check_no_match \
+        "system policy/state code must not include Windows implementation headers" \
+        '^[[:space:]]*#[[:space:]]*include[[:space:]]*[<"](winsock2\.h|afunix\.h|windows\.h)[>"]' \
         "${system_sources[@]}"
 fi
 

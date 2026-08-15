@@ -323,7 +323,7 @@ void Server::enqueue_maintenance(std::function<void()> task) {
 void Server::run() {
     const auto state = state_;
 
-    int listener = -1;
+    NativeSocket listener = platform_types::invalid_socket;
     {
         std::lock_guard<std::mutex> lock(state->lifecycle_mutex);
         if (state->run_started) {

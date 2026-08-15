@@ -10,7 +10,7 @@
 
 - C++17 with no third-party runtime dependencies
 - Named request handlers with arbitrary binary request/response bodies
-- Optional one-descriptor request passing with `SCM_RIGHTS` (`Client::request_fd()` → `Request::fd`)
+- Optional one-descriptor request passing with `SCM_RIGHTS` (`Client::request_fd()` → POSIX request capabilities)
 - Multiplexed persistent sessions: concurrent `request()` calls on one connection, correlated by request id and answered in any order
 - Peer credentials (`pid`/`uid`/`gid`) via Linux `SO_PEERCRED`
 - Exact and longest-prefix route registration (`on()` / `on_prefix()`)
@@ -609,9 +609,7 @@ struct PeerCredentials {
 struct Request {
     std::string route;
     std::string body;
-    PeerCredentials peer;
     std::uint32_t request_id;
-    OwnedFd fd;  // received descriptor; closes automatically with Request
 };
 
 struct Response {
@@ -630,6 +628,13 @@ struct StreamResponse {
 FD ownership and retention semantics are documented in
 [`docs/api/fd-passing.md`](docs/api/fd-passing.md). Source changes from 0.6 are
 listed in [`docs/migration/0.6-to-0.7.md`](docs/migration/0.6-to-0.7.md).
+The 0.7-to-0.8 Request capability migration is in
+[`docs/migration/0.7-to-0.8.md`](docs/migration/0.7-to-0.8.md).
+On Linux, include `<easy_uds/posix.hpp>` and call
+`easy_uds::posix::request_capabilities(context)` from a contextual handler to
+observe peer credentials or borrow a received descriptor. The returned
+`BorrowedFd` is valid only during the handler; call `duplicate()` when an
+independent `OwnedFd` must outlive it.
 Error classification and preserved OS details are documented in
 [`docs/api/errors.md`](docs/api/errors.md). Session state, retry, and
 concurrency semantics are documented in

@@ -43,6 +43,7 @@ set(EASY_UDS_COMMON_SOURCES
     src/system/runtime/server_registration.hpp
     src/user/cpp/core/client.cpp
     src/user/cpp/core/server_api.cpp
+    src/user/cpp/core/posix_capabilities.cpp
     src/system/runtime/client_engine.cpp
     src/system/runtime/client_engine.hpp
     src/user/cpp/core/session.cpp
@@ -56,11 +57,13 @@ set(EASY_UDS_COMMON_SOURCES
     src/system/reactor/flow_control.cpp
     src/system/reactor/output.cpp
     src/system/reactor/parser.cpp
+    src/system/reactor/request_capabilities.cpp
     src/system/reactor/stream.cpp
     src/system/reactor/workers.cpp
     src/system/reactor/common.hpp
     src/system/reactor/core.hpp
     src/system/reactor/parser.hpp
+    src/system/reactor/request_capabilities.hpp
     src/system/reactor/stream_io.hpp
     src/system/protocol/codec.hpp
     src/system/transport/io.hpp
@@ -83,6 +86,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         src/system/platform/linux/server_path.cpp
     )
     set(EASY_UDS_PLATFORM_HEADERS
+        src/system/platform/descriptor_owner.hpp
         src/system/platform/endpoint.hpp
         src/system/platform/readiness.hpp
         src/system/platform/peer_identity.hpp

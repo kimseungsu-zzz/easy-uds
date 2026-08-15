@@ -1,34 +1,41 @@
 # File descriptor passing
 
 easy-uds can attach one Linux file descriptor to a one-shot fixed request. The
-API distinguishes the client's non-owning input from the server's owning
-request value:
+server keeps the received descriptor in an internal job owner and exposes only
+a non-owning view to a contextual handler:
 
 ```cpp
+#include <easy_uds/posix.hpp>
+
 const easy_uds::Response response =
     client.request_fd("/config/load", easy_uds::borrow_fd(fd));
 
-server.on("/config/load", [](const easy_uds::Request& request) {
-    if (!request.fd.valid()) {
+server.on("/config/load", easy_uds::RouteOptions{
+  [](const easy_uds::Request&, const easy_uds::RequestContext& context) {
+    const easy_uds::BorrowedFd fd =
+        easy_uds::posix::request_capabilities(context).received_fd();
+    if (!fd.valid()) {
         return easy_uds::Response{400, "descriptor required"};
     }
-    const int fd = request.fd.get();
     // Read from fd while the handler is running.
     return easy_uds::Response{200, "ok"};
-});
+  }});
 ```
 
 ## Ownership and lifetime
 
 - `BorrowedFd` is a non-owning view. `Client::request_fd()` never closes or
   consumes it; the caller must keep it open until the call finishes.
-- `Request::fd` is an `OwnedFd`. It owns the descriptor received through
-  `SCM_RIGHTS` and closes it automatically when the request is destroyed.
+- The internal request job owns the descriptor received through `SCM_RIGHTS`
+  and closes it when the job is destroyed. `Request` itself is platform-neutral.
+- `posix::RequestCapabilities::received_fd()` returns a `BorrowedFd` view. It
+  never transfers ownership and is valid only for the handler invocation.
 - `OwnedFd` is move-only. Moving transfers ownership and leaves the source
   empty. It occupies one `int` and performs no allocation.
 - A handler that needs the descriptor after returning must call
-  `request.fd.duplicate()` and move the returned `OwnedFd` into longer-lived
-  storage.
+  `received_fd().duplicate()` and move the returned `OwnedFd` into longer-lived
+  storage. `BorrowedFd::duplicate()` has the same invalid/error semantics as
+  `OwnedFd::duplicate()`.
 - `duplicate()` and the descriptor sent by `SCM_RIGHTS` refer to the same open
   file description as the original. File offset and status flags are shared.
 

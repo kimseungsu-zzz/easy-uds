@@ -12,7 +12,8 @@ layer. Protocol v2, the wire header, and the 0.6.4 hot path remain unchanged.
 | `server.hpp` | `Server` owns its reactor, workers, and listening socket until `stop()`/destruction | Registration precedes `run()`; `stop()` is idempotent and wakes blocked work |
 | `client.hpp` | `Client` owns one-shot connection setup; `session()` returns a move-only `Session` | One-shot calls are concurrent-safe; failures throw `Error` |
 | `session.hpp` | `Session` is move-only; moved-from objects are explicit `moved_from` | `request()` calls may be concurrent; move/destruction cannot race an active call; broken sessions do not reconnect or replay |
-| `request.hpp` | `Request::fd` is an owning `OwnedFd` when present | Handler receives the request by const reference; descriptor lifetime ends with the handler/job |
+| `request.hpp` | Platform-neutral route/body/request-id value; explicitly move-only | Handler receives the request by const reference; POSIX capabilities are opt-in through `RequestContext` |
+| `posix.hpp` | Copyable, pointer-sized non-owning `RequestCapabilities` view | `received_fd()` is a handler-scoped `BorrowedFd`; `duplicate()` is required to retain a descriptor |
 | `response.hpp` | Value type; aggregate construction remains supported | `Response::ok()` is a convenience for status 200; status integers are easy-uds conventions, not HTTP |
 | `stream.hpp` | `StreamReader` is a non-owning callback view for one stream invocation | Stream callbacks run under the documented deadline/backpressure contract; no hidden buffering promise |
 | `options.hpp` | Options are copied/moved at registration or construction; defaults are explicit | `RouteOptions` opt-in enables context/domain/policy; no automatic retry/reconnect |

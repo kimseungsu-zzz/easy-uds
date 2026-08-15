@@ -66,6 +66,11 @@ check_no_match \
     "${root_dir}/src/system/platform/linux"
 
 check_no_match \
+    "system implementation must not own public POSIX request values" \
+    'easy_uds::(OwnedFd|PeerCredentials)' \
+    "${root_dir}/src/system"
+
+check_no_match \
     "transport policy must not include Linux backend headers" \
     '^[[:space:]]*#[[:space:]]*include[[:space:]]*[<"][^>"]*platform/linux[^>"]*[>"]' \
     "${root_dir}/src/system/transport"

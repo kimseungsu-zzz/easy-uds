@@ -1,5 +1,6 @@
 #include <easy_uds/client.hpp>
 #include <easy_uds/error.hpp>
+#include <easy_uds/posix.hpp>
 #include <easy_uds/server.hpp>
 #include <easy_uds/stats.hpp>
 #include <easy_uds/version.hpp>
@@ -16,6 +17,11 @@ static_assert(easy_uds::protocol_version == 2U);
 static_assert(sizeof(easy_uds::BorrowedFd) == sizeof(int));
 static_assert(sizeof(easy_uds::OwnedFd) == sizeof(int));
 static_assert(std::is_aggregate_v<easy_uds::Response>);
+static_assert(!std::is_copy_constructible_v<easy_uds::Request>);
+static_assert(std::is_move_constructible_v<easy_uds::Request>);
+static_assert(std::is_copy_constructible_v<easy_uds::posix::RequestCapabilities>);
+static_assert(std::is_move_constructible_v<easy_uds::posix::RequestCapabilities>);
+static_assert(sizeof(easy_uds::posix::RequestCapabilities) == sizeof(void*));
 static_assert(!std::is_copy_constructible_v<easy_uds::OwnedFd>);
 static_assert(std::is_same_v<decltype(std::declval<const easy_uds::Session&>().status()),
                              easy_uds::SessionStatus>);

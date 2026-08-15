@@ -19,7 +19,7 @@
 - 큰 데이터를 메모리에 전부 올리지 않는 chunk streaming
 - Unix socket backpressure를 통한 자연스러운 흐름 제어
 - versioned binary protocol
-- `Client::request_fd()`로 `SCM_RIGHTS` descriptor 1개 전달 (`Request::fd`)
+- `Client::request_fd()`로 `SCM_RIGHTS` descriptor 1개 전달 (contextual handler의 POSIX capability view로 사용)
 - connection마다 detached thread를 만들지 않는 고정 worker pool
 - 느린 고정 응답의 쓰기가 reactor나 worker pool을 점유하지 않는 `EPOLLOUT` 출력 큐
 - 최대 connection 수, I/O inactivity timeout, absolute request deadline, connect timeout 설정
@@ -656,9 +656,7 @@ struct PeerCredentials {
 struct Request {
     std::string route;
     std::string body;
-    PeerCredentials peer;
     std::uint32_t request_id;
-    OwnedFd fd;  // Request와 함께 자동으로 닫히는 수신 descriptor
 };
 
 struct Response {
@@ -674,11 +672,18 @@ struct StreamResponse {
 };
 ```
 
+Linux contextual handler에서는 `<easy_uds/posix.hpp>`를 include하고
+`posix::request_capabilities(context)`로 peer credential과 수신 descriptor
+view를 읽습니다. `BorrowedFd`는 handler 동안만 유효하며, 더 오래 보관하려면
+`duplicate()`로 독립적인 `OwnedFd`를 만듭니다.
+
 FD 소유권은 [`docs/api/fd-passing.md`](docs/api/fd-passing.md), 오류 의미와
 원본 OS 오류 보존 방식은 [`docs/api/errors.md`](docs/api/errors.md), 0.6에서
 변경된 코드는 [`docs/migration/0.6-to-0.7.md`](docs/migration/0.6-to-0.7.md)에
-정리되어 있습니다. Session 상태, 재시도, 동시성 의미는
-[`docs/api/session.md`](docs/api/session.md)에 정리되어 있습니다.
+정리되어 있습니다. 0.7→0.8 Request capability migration은
+[`docs/migration/0.7-to-0.8.md`](docs/migration/0.7-to-0.8.md)에, Session 상태,
+재시도, 동시성 의미는 [`docs/api/session.md`](docs/api/session.md)에 정리되어
+있습니다.
 요청 시각, 연결 관찰, cooperative cancellation 의미는
 [`docs/api/request-context.md`](docs/api/request-context.md)에 정리되어 있습니다.
 Stats의 비용, accounting 경계, snapshot 일관성은

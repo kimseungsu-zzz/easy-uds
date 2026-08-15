@@ -1,5 +1,7 @@
 #include "common.hpp"
 
+#include <easy_uds/posix.hpp>
+
 #include <cstdio>
 #include <dirent.h>
 #include <future>
@@ -57,6 +59,8 @@ void test_fd_passing() {
     static_assert(std::is_nothrow_move_constructible_v<OwnedFd>);
     static_assert(std::is_nothrow_move_assignable_v<OwnedFd>);
     static_assert(!std::is_copy_constructible_v<Request>);
+    static_assert(std::is_move_constructible_v<Request>);
+    static_assert(std::is_move_assignable_v<Request>);
 
     // Ownership transfer invalidates the source and release() makes the
     // caller responsible for closing the descriptor again.
@@ -86,6 +90,17 @@ void test_fd_passing() {
                    std::error_code(EBADF, std::generic_category()),
                "empty OwnedFd should preserve EBADF");
     }
+    try {
+        (void)BorrowedFd{}.duplicate();
+        throw std::runtime_error(
+            "test failed: duplicating an empty BorrowedFd should report EBADF");
+    } catch (const Error& error) {
+        expect(error.kind() == ErrorCode::invalid_request,
+               "empty BorrowedFd should report invalid_request");
+        expect(error.system_code() ==
+                   std::error_code(EBADF, std::generic_category()),
+               "empty BorrowedFd should preserve EBADF");
+    }
 
     const std::string payload = "fd-passing-content";
     const std::string path = socket_path("fd-passing");
@@ -95,31 +110,50 @@ void test_fd_passing() {
     server_options.max_connections = 16;
     server_options.stale_socket_grace_period = 0ms;
     Server server(path, server_options);
-    server.on("read-fd", [payload](const Request& request) {
-        if (!request.fd.valid()) {
+    server.on("read-fd", RouteOptions{[payload](const Request&,
+                                                 const RequestContext& context) {
+        const auto fd = posix::request_capabilities(context).received_fd();
+        if (!fd.valid()) {
             return Response{500, "no-descriptor"};
         }
         std::string content;
         std::array<char, 32> buffer{};
-        while (const ssize_t count = ::read(request.fd.get(), buffer.data(), buffer.size())) {
+        while (const ssize_t count = ::read(fd.get(), buffer.data(), buffer.size())) {
             if (count < 0) {
                 return Response{500, "read-failed"};
             }
             content.append(buffer.data(), static_cast<std::size_t>(count));
         }
         return content == payload ? Response{200, "ok"} : Response{500, "content-mismatch"};
-    });
+    }});
     std::promise<OwnedFd> retained_promise;
     std::future<OwnedFd> retained_future = retained_promise.get_future();
-    server.on("retain-fd", [&retained_promise](const Request& request) {
+    server.on("retain-fd", RouteOptions{[&retained_promise](const Request&,
+                                                             const RequestContext& context) {
         try {
-            retained_promise.set_value(request.fd.duplicate());
+            retained_promise.set_value(
+                posix::request_capabilities(context).received_fd().duplicate());
             return Response{200, "retained"};
         } catch (...) {
             retained_promise.set_exception(std::current_exception());
             return Response{500, "duplicate-failed"};
         }
+    }});
+    server.on("no-fd", RouteOptions{[](const Request&, const RequestContext& context) {
+        return posix::request_capabilities(context).received_fd().valid()
+                   ? Response{500, "unexpected-descriptor"}
+                   : Response{200, "no-descriptor"};
+    }});
+    server.on("ignore-fd", [](const Request&) {
+        return Response{200, "ignored"};
     });
+    server.on("throw-fd", RouteOptions{[](const Request&, const RequestContext& context) {
+        const auto fd = posix::request_capabilities(context).received_fd();
+        if (!fd.valid()) {
+            return Response{500, "no-descriptor"};
+        }
+        throw std::runtime_error("intentional descriptor handler failure");
+    }});
 
     std::thread server_thread([&] { server.run(); });
     wait_until_running(server);
@@ -138,6 +172,23 @@ void test_fd_passing() {
         expect_throws<std::invalid_argument>(
             [&client] { (void)client.request_fd("read-fd", BorrowedFd{}); },
             "request_fd should reject an empty BorrowedFd");
+
+        expect(client.request("no-fd").status == 200,
+               "a request without SCM_RIGHTS should expose an invalid borrowed view");
+
+        // A legacy one-argument handler need not opt into the POSIX view; the
+        // internal owner is still released when the normal job is destroyed.
+        {
+            FILE* const file = ::tmpfile();
+            if (file == nullptr) {
+                throw std::runtime_error("prepare ignored tmpfile failed");
+            }
+            const Response response =
+                client.request_fd("ignore-fd", borrow_fd(::fileno(file)));
+            expect(response.status == 200 && response.body == "ignored",
+                   "normal handlers should safely release an unobserved descriptor");
+            (void)::fclose(file);
+        }
 
         // Round trip: the server receives a duplicate and reads its content.
         {
@@ -165,6 +216,20 @@ void test_fd_passing() {
             }
             const Response response = client.request_fd("missing-route", borrow_fd(::fileno(file)));
             expect(response.status == 404, "request_fd to a missing route should return 404");
+            (void)::fclose(file);
+        }
+
+        // Handler exceptions still destroy the job-local owner after the
+        // response path has converted the exception to status 500.
+        {
+            FILE* const file = ::tmpfile();
+            if (file == nullptr) {
+                throw std::runtime_error("prepare throwing tmpfile failed");
+            }
+            const Response response =
+                client.request_fd("throw-fd", borrow_fd(::fileno(file)));
+            expect(response.status == 500,
+                   "descriptor handler exceptions should become a 500 response");
             (void)::fclose(file);
         }
 

@@ -73,10 +73,12 @@ The route must contain at least one byte. Route and body are length-delimited an
 ### Passing one file descriptor
 
 `Client::request_fd()` sets flag bit 0 and attaches one descriptor with
-`SCM_RIGHTS` to the fixed request. The server exposes the received duplicate as
-the move-only `Request::fd`. The `Request` owns and automatically closes that
-descriptor; a handler calls `duplicate()` to retain access beyond the request
-lifetime. The caller retains ownership of its original descriptor. Descriptor passing is not supported on
+`SCM_RIGHTS` to the fixed request. The server stores the received descriptor in
+the request job and exposes a handler-scoped `BorrowedFd` through
+`posix::request_capabilities(context)`. The job owns and automatically closes
+the descriptor; a handler calls `received_fd().duplicate()` to retain access
+beyond the callback. The caller retains ownership of its original descriptor.
+Descriptor passing is not supported on
 sessions or stream frames; malformed, truncated, or mismatched ancillary data
 is a protocol error.
 

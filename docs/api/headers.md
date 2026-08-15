@@ -23,7 +23,9 @@ feature headers they expose or use:
 | `client.hpp` | One-shot `Client` API and Session factory |
 | `session.hpp` | Persistent Session, state snapshots, fixed and streamed calls |
 | `server.hpp` | Server lifecycle and route registration |
-| `request.hpp` | `Request` and `PeerCredentials` |
+| `request.hpp` | Platform-neutral move-only `Request` values |
+| `peer_credentials.hpp` | Linux/POSIX `PeerCredentials` value |
+| `posix.hpp` | Linux/POSIX `RequestCapabilities` view and accessor |
 | `request_context.hpp` | Handler timing and cooperative-stop observations |
 | `stats.hpp` | Server/Session operational snapshots and optional counters |
 | `response.hpp` | `Status`, status constants, and `Response` |
@@ -37,10 +39,11 @@ Every header is self-contained under C++17 and is installed by the CMake
 package. A direct include does not require `easy_uds.hpp` to appear first.
 Including the umbrella remains source-compatible with 0.6.
 
-The split changes neither object layout nor symbol names. It does not change
-the protocol-v2 wire format. It only gives declarations stable ownership and
-prevents unrelated public declarations from being parsed when a narrow header
-is sufficient.
+The header split gives declarations stable ownership and prevents unrelated
+public declarations from being parsed when a narrow header is sufficient. The
+0.8 Request capability change intentionally makes `Request` platform-neutral
+and explicitly move-only; this is a source-level migration, not a wire-format
+change. Protocol v2 remains byte-for-byte unchanged.
 
 ## Internal source map
 

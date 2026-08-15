@@ -60,11 +60,13 @@ bool find_stream_handler(const std::shared_ptr<ServerState>& state, const std::s
 bool enqueue_worker_job(const std::shared_ptr<ServerState>& state, std::shared_ptr<Connection> connection,
                         easy_uds::Request request, Clock::time_point arrival_time,
                         Deadline deadline, std::shared_ptr<const HandlerEntry> handler,
-                        bool is_stream, bool request_bytes_reserved, std::string buffered,
+                        RequestCapabilityStorage capabilities, bool is_stream,
+                        bool request_bytes_reserved, std::string buffered,
                         std::size_t buffered_offset) {
     PendingJob job;
     job.connection = std::move(connection);
     job.request = std::move(request);
+    job.capabilities = std::move(capabilities);
     job.deadline = deadline;
     job.handler = std::move(handler);
     job.is_stream = is_stream;
@@ -122,14 +124,8 @@ void close_connection(const std::shared_ptr<ServerState>& state, int fd) {
     // Descriptors that were received via ancillary data but never delivered to
     // a handler (the frame errored or the connection died mid-parse) must not
     // outlive the connection.
-    for (const int leftover : it->second->received_fds) {
-        socket_lifecycle::close(leftover);
-    }
     it->second->received_fds.clear();
-    if (it->second->request_fd >= 0) {
-        socket_lifecycle::close(it->second->request_fd);
-        it->second->request_fd = -1;
-    }
+    it->second->capabilities = {};
     connection->closing.store(true, std::memory_order_release);
     if (state->readiness_fd >= 0) {
         (void)readiness::control(state->readiness_fd,
@@ -168,10 +164,8 @@ bool dispatch_request(const std::shared_ptr<ServerState>& state,
     easy_uds::Request request;
     request.route = std::move(reactor_connection->route_buffer);
     request.body = std::move(reactor_connection->body_buffer);
-    request.peer = reactor_connection->conn->peer;
     request.request_id = reactor_connection->request_id;
-    request.fd = easy_uds::OwnedFd::adopt(
-        std::exchange(reactor_connection->request_fd, -1));
+    reactor_connection->capabilities.peer = reactor_connection->conn->peer;
 
     std::shared_ptr<const HandlerEntry> handler;
     if (!find_request_handler(state, request.route, handler)) {
@@ -184,6 +178,7 @@ bool dispatch_request(const std::shared_ptr<ServerState>& state,
         SerializedJob job;
         job.connection = reactor_connection->conn;
         job.request = std::move(request);
+        job.capabilities = std::move(reactor_connection->capabilities);
         job.arrival_time = reactor_connection->arrival_time;
         job.deadline = reactor_connection->deadline;
         job.handler = std::move(handler);
@@ -240,7 +235,9 @@ bool dispatch_request(const std::shared_ptr<ServerState>& state,
     reactor_connection->reserved_request_bytes = 0;
     if (!enqueue_worker_job(state, reactor_connection->conn, std::move(request),
                             reactor_connection->arrival_time, reactor_connection->deadline,
-                            std::move(handler), false, request_bytes_reserved, {}, 0)) {
+                            std::move(handler),
+                            std::move(reactor_connection->capabilities), false,
+                            request_bytes_reserved, {}, 0)) {
         reactor_connection->conn->closing.store(true, std::memory_order_release);
         return false;
     }
@@ -264,8 +261,9 @@ void dispatch_stream(const std::shared_ptr<ServerState>& state,
 
     easy_uds::Request request;
     request.route = std::move(reactor_connection->route_buffer);
-    request.peer = connection->peer;
     request.request_id = reactor_connection->request_id;
+    RequestCapabilityStorage capabilities;
+    capabilities.peer = connection->peer;
     const Deadline stream_deadline = reactor_connection->deadline;
     const bool request_bytes_reserved =
         state->options.max_total_inflight_bytes != 0;
@@ -286,8 +284,8 @@ void dispatch_stream(const std::shared_ptr<ServerState>& state,
     reactor_connection->pending.clear();
     reactor_connection->pending_offset = 0;
     if (!enqueue_worker_job(state, connection, std::move(request),
-                            reactor_connection->arrival_time, stream_deadline, {}, true,
-                            request_bytes_reserved,
+                            reactor_connection->arrival_time, stream_deadline, {},
+                            std::move(capabilities), true, request_bytes_reserved,
                             std::move(leftover), leftover_offset)) {
         connection->closing.store(true, std::memory_order_release);
     }

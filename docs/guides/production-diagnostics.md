@@ -46,8 +46,9 @@ resource-aware composition is shown in the [Robot HAL walkthrough](../examples/r
 
 Sample diagnostics at the monitoring layer; do not poll once per request. A
 diagnostics response can include peer or route information only when the
-application's access policy permits it. `Request::peer` is local credential
-metadata, not an authorization decision. Keep `include_handler_error_messages`
+application's access policy permits it. On Linux, read peer metadata through
+`posix::request_capabilities(context).peer_credentials()`; it is local
+credential metadata, not an authorization decision. Keep `include_handler_error_messages`
 disabled when response bodies must not expose internal details.
 
 ## What is intentionally out of scope

@@ -21,10 +21,10 @@ class Client {
     [[nodiscard]] Response request(std::string_view route,
                                    std::string_view body = {}) const;
 
-    // One-shot request that also passes a borrowed descriptor (a duplicate is
-    // sent via SCM_RIGHTS; the caller keeps ownership). The server delivers an
-    // owning `Request::fd` to the handler. The response is read as a normal
-    // fixed response.
+    // One-shot POSIX request that also passes a borrowed descriptor (a
+    // duplicate is sent via SCM_RIGHTS; the caller keeps ownership). The
+    // server exposes the received descriptor through the POSIX capability view
+    // during a contextual handler callback. The response is read normally.
     [[nodiscard]] Response request_fd(std::string_view route, BorrowedFd fd,
                                       std::string_view body = {}) const;
 

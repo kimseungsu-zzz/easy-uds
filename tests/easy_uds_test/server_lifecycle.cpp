@@ -1,5 +1,7 @@
 #include "common.hpp"
 
+#include <easy_uds/posix.hpp>
+
 namespace easy_uds::test {
 
 void test_option_validation() {
@@ -261,13 +263,15 @@ void test_peer_credentials() {
     ServerOptions options;
     options.io_timeout = 500ms;
     Server server(path, options);
-    server.on("who", [](const Request& request) {
-        if (!request.peer.present) {
+    server.on("who", RouteOptions{[](const Request&, const RequestContext& context) {
+        const auto peer = posix::request_capabilities(context).peer_credentials();
+        if (!peer.present) {
             return Response{500, "no-peer"};
         }
-        return Response{200, std::to_string(request.peer.pid) + ":" + std::to_string(request.peer.uid) + ":" +
-                                std::to_string(request.peer.gid)};
-    });
+        return Response{200, std::to_string(peer.pid) + ":" +
+                                std::to_string(peer.uid) + ":" +
+                                std::to_string(peer.gid)};
+    }});
 
     std::thread server_thread([&] { server.run(); });
     wait_until_running(server);

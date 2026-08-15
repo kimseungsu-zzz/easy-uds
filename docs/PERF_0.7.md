@@ -289,11 +289,14 @@ the alternating WSL runs; the exception-only abstraction is retained.
 
 ## Typed FD ownership (2026-08-13)
 
-Change: replace raw server-side `Request::fd` ownership with a one-`int`,
-move-only `OwnedFd`; make the client input an explicit `BorrowedFd`. Request
-queue moves now transfer ownership automatically, and normal, rejected,
-expired, disconnected, and exception paths share the same destructor cleanup.
-The wrapper adds no allocation, lock, or syscall unless a handler explicitly
+Change: remove POSIX `PeerCredentials`/`OwnedFd` members from the common
+`Request`, keep the request explicitly move-only, and move received-descriptor
+ownership into an internal one-`int` job owner. Contextual Linux handlers see a
+`BorrowedFd` view through `posix::request_capabilities(context)` and can call
+`duplicate()` only when they need an independent owner. Request queue moves now
+transfer the internal owner automatically, and normal, rejected, expired,
+disconnected, and exception paths share the same destructor cleanup. The
+capability view adds no allocation, lock, or syscall unless a handler explicitly
 calls `duplicate()`.
 
 ### Default hot-path A/B

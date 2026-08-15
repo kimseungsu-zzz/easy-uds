@@ -75,8 +75,10 @@ consumed by system policy, but their current shapes are explicitly temporary:
 - `descriptor_passing.hpp` exposes `ssize_t`, `iovec`, and integer FDs.
 - `socket_io.hpp` exposes `ssize_t`, `iovec`, and integer FDs.
 - `server_path.hpp` exposes `uid_t`, `dev_t`, `ino_t`, and `nlink_t`.
-- `peer_identity.hpp` is internal, while the public `PeerCredentials` header
-  still exposes POSIX credential types.
+- `peer_identity.hpp` is internal. The public POSIX `PeerCredentials` value is
+  now in `peer_credentials.hpp` and is delivered only through the explicit
+  `posix::RequestCapabilities` view; the common `Request` header no longer
+  exposes POSIX credential types.
 - `readiness.hpp` and `socket_wait.hpp` are concrete Linux-driven seams, not a
   promise that Windows will use epoll/poll-shaped readiness.
 

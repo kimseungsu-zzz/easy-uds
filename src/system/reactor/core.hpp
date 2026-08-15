@@ -4,8 +4,8 @@
 // public Server implementation.
 
 #include "easy_uds/server.hpp"
-#include "../platform/peer_identity.hpp"
 #include "../platform/readiness.hpp"
+#include "request_capabilities.hpp"
 #include "../transport/io.hpp"
 
 #include <atomic>
@@ -98,9 +98,7 @@ struct OutgoingFrame {
 // stream worker owns it as an exclusive lease.
 struct Connection {
     Connection(int fd, peer_identity::Identity identity)
-        : fd(fd),
-          peer{static_cast<pid_t>(identity.pid), static_cast<uid_t>(identity.uid),
-               static_cast<gid_t>(identity.gid), identity.present},
+        : fd(fd), peer(identity),
           last_io_progress(Clock::now().time_since_epoch().count()),
           last_output_progress(last_io_progress.load(std::memory_order_relaxed)) {}
     ~Connection() {
@@ -113,7 +111,7 @@ struct Connection {
     Connection& operator=(const Connection&) = delete;
 
     int fd = -1;
-    easy_uds::PeerCredentials peer;
+    peer_identity::Identity peer;
     std::atomic<bool> stream_active{false};  // a stream worker owns the fd (exclusive lease)
     std::atomic<bool> worker_owned{false};   // a fixed-request worker is leasing the fd
     std::atomic<bool> closing{false};
@@ -163,14 +161,15 @@ struct ReactorConnection {
     std::size_t pending_offset = 0;   // consumed prefix of pending
     // Descriptors received via ancillary data, in the order their frames
     // arrived (reactor-thread only). A frame carrying carries_fd_flag pops
-    // one, and the popped descriptor is delivered to the request handler.
-    std::deque<int> received_fds;
-    int request_fd = -1;               // fd attached to the frame being parsed
+    // one, and the popped owner is moved into the request/job capability.
+    std::deque<platform::descriptor_owner> received_fds;
+    RequestCapabilityStorage capabilities;
 };
 
 struct PendingJob {
     std::shared_ptr<Connection> connection;
     easy_uds::Request request;
+    RequestCapabilityStorage capabilities;
     Deadline deadline = Deadline::max();
     std::shared_ptr<const HandlerEntry> handler;
     bool is_stream = false;
@@ -197,6 +196,7 @@ struct PendingJob {
 struct SerializedJob {
     std::shared_ptr<Connection> connection;  // null for maintenance jobs
     easy_uds::Request request;
+    RequestCapabilityStorage capabilities;
     Clock::time_point arrival_time{};
     Deadline deadline = Deadline::max();
     std::shared_ptr<const HandlerEntry> handler;
@@ -367,9 +367,11 @@ struct RequestContextFactory {
     static easy_uds::RequestContext make(
         const easy_uds::Request& request, Clock::time_point arrival_time,
         Deadline deadline, const std::atomic<bool>& connection_closing,
-        const std::atomic<bool>& server_running) noexcept {
+        const std::atomic<bool>& server_running,
+        const RequestCapabilityStorage& capabilities) noexcept {
         return easy_uds::RequestContext(request, arrival_time, deadline,
-                                        connection_closing, server_running);
+                                        connection_closing, server_running,
+                                        &capabilities);
     }
 };
 
@@ -464,7 +466,8 @@ bool pause_connection_reads_if_needed(const std::shared_ptr<ServerState>& state,
 bool enqueue_worker_job(const std::shared_ptr<ServerState>& state, std::shared_ptr<Connection> connection,
                         easy_uds::Request request, Clock::time_point arrival_time,
                         Deadline deadline, std::shared_ptr<const HandlerEntry> handler,
-                        bool is_stream, bool request_bytes_reserved, std::string buffered,
+                        RequestCapabilityStorage capabilities, bool is_stream,
+                        bool request_bytes_reserved, std::string buffered,
                         std::size_t buffered_offset);
 
 // Removes and shuts down a connection; the fd closes when the last worker/

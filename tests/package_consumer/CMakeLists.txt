@@ -15,6 +15,8 @@ set(EASY_UDS_PUBLIC_HEADERS
     error
     fd
     options
+    peer_credentials
+    posix
     request
     request_context
     response

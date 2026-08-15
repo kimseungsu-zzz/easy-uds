@@ -1,5 +1,7 @@
 #include "common.hpp"
 
+#include <easy_uds/posix.hpp>
+
 #include <type_traits>
 
 namespace easy_uds::test {
@@ -36,11 +38,13 @@ void test_request_context() {
     server.on(
         "context",
         RouteOptions{[&](const Request& request, const RequestContext& context) {
+            const auto capabilities = posix::request_capabilities(context);
+            const auto peer = capabilities.peer_credentials();
             const auto deadline = context.deadline();
             exact_metadata_ok.store(
                 context.request_id() == request.request_id &&
-                    context.peer().present &&
-                    context.peer().pid == ::getpid() &&
+                    peer.present &&
+                    peer.pid == ::getpid() &&
                     context.arrival_time() <= RequestContext::Clock::now() &&
                     deadline.has_value() &&
                     *deadline > context.arrival_time() &&

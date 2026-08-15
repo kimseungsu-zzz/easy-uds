@@ -47,6 +47,7 @@ const std::string& serialized_job_domain(const SerializedJob& job) {
 easy_uds::Response invoke_request_handler(
     const std::shared_ptr<const HandlerEntry>& handler,
     const easy_uds::Request& request,
+    const RequestCapabilityStorage& capabilities,
     const std::shared_ptr<ServerState>& state,
     const std::shared_ptr<Connection>& connection,
     Clock::time_point arrival_time, Deadline deadline) {
@@ -59,7 +60,7 @@ easy_uds::Response invoke_request_handler(
             }
             const auto context = RequestContextFactory::make(
                 request, arrival_time, deadline, connection->closing,
-                state->running);
+                state->running, capabilities);
             return adapter->handler(request, context);
         }
         return handler->handler(request);
@@ -77,6 +78,7 @@ easy_uds::Response invoke_request_handler(
 bool serve_fixed_request(const std::shared_ptr<ServerState>& state,
                          const std::shared_ptr<Connection>& connection,
                          easy_uds::Request& request,
+                         RequestCapabilityStorage capabilities,
                          Clock::time_point arrival_time, Deadline deadline) {
     std::shared_ptr<const HandlerEntry> handler;
     if (!find_request_handler(state, request.route, handler)) {
@@ -94,6 +96,7 @@ bool serve_fixed_request(const std::shared_ptr<ServerState>& state,
         SerializedJob job;
         job.connection = connection;
         job.request = std::move(request);
+        job.capabilities = std::move(capabilities);
         job.arrival_time = arrival_time;
         job.deadline = deadline;
         job.handler = std::move(handler);
@@ -125,7 +128,8 @@ bool serve_fixed_request(const std::shared_ptr<ServerState>& state,
     }
 
     easy_uds::Response response = invoke_request_handler(
-        handler, request, state, connection, arrival_time, deadline);
+        handler, request, capabilities, state, connection, arrival_time,
+        deadline);
     try {
         write_fixed_response(state, connection, request.request_id, std::move(response),
                              state->options.io_timeout, deadline);
@@ -248,8 +252,9 @@ void continue_connection(const std::shared_ptr<ServerState>& state,
                 source.read(request.body.data(), request.body.size(),
                             state->options.io_timeout, request_deadline);
             }
-            request.peer = connection->peer;
             request.request_id = decoded.request_id;
+            RequestCapabilityStorage capabilities;
+            capabilities.peer = connection->peer;
             const std::size_t request_bytes =
                 request.route.size() + request.body.size();
 
@@ -261,7 +266,8 @@ void continue_connection(const std::shared_ptr<ServerState>& state,
             }
             rearm_connection(state, connection, std::move(buffered), buffered_offset);
             const bool completed_inline =
-                serve_fixed_request(state, connection, request, arrival_time,
+                serve_fixed_request(state, connection, request,
+                                    std::move(capabilities), arrival_time,
                                     request_deadline);
             if (!complete_regular_request(state, connection, request_bytes,
                                           completed_inline)) {
@@ -319,14 +325,8 @@ void rearm_connection(const std::shared_ptr<ServerState>& state,
         // Replacing a parse state must not leak descriptors that were received
         // but never delivered to a handler.
         if (existing != state->connections.end() && fresh != existing->second) {
-            for (const int leftover : existing->second->received_fds) {
-                socket_lifecycle::close(leftover);
-            }
             existing->second->received_fds.clear();
-            if (existing->second->request_fd >= 0) {
-                socket_lifecycle::close(existing->second->request_fd);
-                existing->second->request_fd = -1;
-            }
+            existing->second->capabilities = {};
         }
 
         fresh->conn = connection;
@@ -407,7 +407,8 @@ void worker_loop(const std::shared_ptr<ServerState>& state) {
                                      state->options.io_timeout, Deadline::max(), 408);
             } else if (state->running.load()) {
                 easy_uds::Response response =
-                    invoke_request_handler(job.handler, job.request, state,
+                    invoke_request_handler(job.handler, job.request,
+                                           job.capabilities, state,
                                            job.connection,
                                            job.fixed_arrival_time(),
                                            job.deadline);
@@ -714,7 +715,7 @@ void serialized_worker_loop(const std::shared_ptr<ServerState>& state) {
                 continue;
             }
             easy_uds::Response response = invoke_request_handler(
-                job.handler, job.request, state, job.connection,
+                job.handler, job.request, job.capabilities, state, job.connection,
                 job.arrival_time, job.deadline);
             try {
                 write_fixed_response(state, job.connection,

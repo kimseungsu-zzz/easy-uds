@@ -36,7 +36,6 @@ adding another family of `on_*` methods.
 | Member | Meaning |
 |---|---|
 | `request_id()` | The protocol-v2 correlation id. It is `0` for a one-shot request and normally nonzero for a Session request. |
-| `peer()` | The same captured `SO_PEERCRED` snapshot as `Request::peer`. |
 | `arrival_time()` | `steady_clock` time when the server observed the first byte of the request frame. It is not a client send timestamp. |
 | `deadline()` | Absolute server request deadline, or an empty optional when `ServerOptions::request_timeout` is disabled. |
 | `deadline_expired()` | Whether that absolute deadline has passed at the instant of the call. |
@@ -65,4 +64,29 @@ observations and may change while the handler runs.
 Contextual handlers run under the same worker, serialized-executor, exception,
 and response rules as simple handlers. The context adds no allocation per
 request. A simple handler pays only one predictable route-entry branch; the
-fixed-request body and `Request` layout remain unchanged.
+fixed-request body remains unchanged; the platform-neutral `Request` layout is
+documented in the 0.8 capability migration record.
+
+## POSIX capabilities
+
+On Linux, include `<easy_uds/posix.hpp>` and opt into the capability view:
+
+```cpp
+server.on("/inspect", easy_uds::RouteOptions{
+    [](const easy_uds::Request&, const easy_uds::RequestContext& context) {
+        const auto capabilities =
+            easy_uds::posix::request_capabilities(context);
+        const easy_uds::PeerCredentials peer = capabilities.peer_credentials();
+        const easy_uds::BorrowedFd fd = capabilities.received_fd();
+        // `peer.present` is false when the platform cannot provide identity.
+        // `fd` is valid only during this callback.
+        return easy_uds::Response{200, fd.valid() && peer.present ? "ok" : "none"};
+    }});
+```
+
+`RequestCapabilities` is a copyable, pointer-sized non-owning view. Copying or
+moving it never extends the `RequestContext` lifetime. A received descriptor is
+owned by the internal request job; call `BorrowedFd::duplicate()` to retain an
+independent `OwnedFd` beyond the callback. The common `Request` type therefore
+contains only route, body, and request-id values and remains explicitly
+move-only.

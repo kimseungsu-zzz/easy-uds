@@ -8,13 +8,15 @@
 #include <cerrno>
 #include <cstring>
 #include <stdexcept>
+#include <utility>
 
 namespace easy_uds::detail {
 namespace {
 
 using protocol::WireType;
 
-ssize_t recv_with_fds(int fd, char* data, std::size_t size, std::deque<int>& fds) {
+ssize_t recv_with_fds(int fd, char* data, std::size_t size,
+                      std::deque<platform::descriptor_owner>& fds) {
     const auto result = descriptor_passing::receive(fd, data, size);
     if (result.error == descriptor_passing::ReceiveError::invalid_ancillary) {
         throw std::runtime_error("invalid or truncated ancillary descriptor");
@@ -26,7 +28,8 @@ ssize_t recv_with_fds(int fd, char* data, std::size_t size, std::deque<int>& fds
         throw_system_error("fcntl(F_SETFD) failed", result.native_error);
     }
     if (result.bytes > 0 && result.received_fd >= 0) {
-        fds.push_back(result.received_fd);
+        auto owner = platform::descriptor_owner::adopt(result.received_fd);
+        fds.push_back(std::move(owner));
     }
     return result.bytes;
 }
@@ -171,7 +174,8 @@ void consume(const std::shared_ptr<ServerState>& state,
                     if (rc->received_fds.empty()) {
                         throw std::runtime_error("fd frame without ancillary descriptor");
                     }
-                    rc->request_fd = rc->received_fds.front();
+                    rc->capabilities.received_fd =
+                        std::move(rc->received_fds.front());
                     rc->received_fds.pop_front();
                 }
                 protocol::validate_request_lengths(decoded.arg1, decoded.arg2,

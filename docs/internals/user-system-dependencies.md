@@ -64,7 +64,7 @@ dependency is consequently transitive, not absent.
 | `RouteOptions` | `user/cpp/core/server_api.cpp` then handler registry | Engine scheduling contract exposed through public API | Domain/policy is translated once at registration, not per request |
 | `ServerOptions` | `ServerState`, option validation | Engine configuration contract | Contains limits/deadlines/backpressure that directly size engine state |
 | `ClientOptions` | one-shot client, `SessionState`, transport | Engine configuration contract | Used for deadlines, framing limits, stream limits, and optional stats |
-| `PeerCredentials` | `Connection`, `Request`, `peer_identity::Identity` conversion | Platform capability value | Produced by the peer-identity capability; public value semantics remain unchanged |
+| `PeerCredentials` | `peer_identity::Identity` snapshot -> `posix::RequestCapabilities` | Platform capability value | It is no longer stored in `Request`; the public POSIX view is created from a job-local snapshot |
 | `OwnedFd` / `BorrowedFd` | request FD delivery and client FD passing | Platform capability and ownership contract | The wrapper is public; raw descriptor acquisition belongs below the future platform boundary |
 | `RequestContext` | `RequestContextFactory`, contextual workers | Engine execution context exposed to handlers | Candidate for a small immutable adapter over internal arrival/deadline/stop state |
 | `QueuePolicy` | `RouteScheduling`, serialized worker | Engine scheduling contract | FIFO/latest-wins/reject-if-busy are concrete policy values, not polymorphic queues |

@@ -33,7 +33,7 @@ void wait_until_running(const easy_uds::simple::Server& server) {
     const auto deadline = std::chrono::steady_clock::now() + 2s;
     while (!server.is_running()) {
         if (std::chrono::steady_clock::now() >= deadline) {
-            throw std::runtime_error("simple experiment server did not start");
+            throw std::runtime_error("Simple API test server did not start");
         }
         std::this_thread::yield();
     }
@@ -114,7 +114,7 @@ int main() {
         server.stop();
         runner.join();
         cleanup(path);
-        std::cout << "Simple API experiment passed.\n";
+        std::cout << "Simple API tests passed.\n";
         return 0;
     } catch (const std::exception& error) {
         cleanup(path);

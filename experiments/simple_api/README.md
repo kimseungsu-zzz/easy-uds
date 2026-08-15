@@ -1,16 +1,15 @@
-# Simple API prototype (experimental)
+# Simple API historical probes
 
-This directory retains the syntax and diagnostics experiment that preceded the
-promotion. The shim is deliberately outside the installed include tree and is
-not enabled by the normal build; the promoted header is now
+This directory retains the syntax and diagnostics probes that preceded the
+promotion. The shim remains outside the installed include tree; the promoted header is now
 `include/easy_uds/simple.hpp`.
 
-Build and run the prototype explicitly:
+Build and run the historical probes explicitly:
 
 ```bash
 cmake -S . -B build-simple \
   -DCMAKE_BUILD_TYPE=Release \
-  -DEASY_UDS_BUILD_SIMPLE_EXPERIMENTS=ON \
+  -DEASY_UDS_BUILD_SIMPLE_API=ON \
   -DEASY_UDS_WARNINGS_AS_ERRORS=ON
 cmake --build build-simple --parallel
 ctest --test-dir build-simple -L simple --output-on-failure

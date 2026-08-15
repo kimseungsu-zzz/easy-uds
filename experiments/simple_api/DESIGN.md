@@ -64,7 +64,7 @@ Command:
 
 ```bash
 cmake -S . -B build-simple -DCMAKE_BUILD_TYPE=Release \
-  -DEASY_UDS_BUILD_SIMPLE_EXPERIMENTS=ON \
+  -DEASY_UDS_BUILD_SIMPLE_API=ON \
   -DEASY_UDS_BUILD_EXAMPLES=OFF -DEASY_UDS_WARNINGS_AS_ERRORS=ON
 cmake --build build-simple --parallel
 bash scripts/simple_core_benchmark_median.sh build-simple 30000 5

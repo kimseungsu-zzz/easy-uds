@@ -9,7 +9,9 @@ trap 'rm -rf "${tmp_dir}"' EXIT
 
 for source in invalid_assignment invalid_input invalid_return invalid_lifetime; do
     echo "checking expected Simple API compile failure: ${source} (${cxx})"
-    if "${cxx}" -std=c++17 -Wall -Wextra -Wpedantic -I"${root_dir}/include" \
+    if "${cxx}" -std=c++17 -Wall -Wextra -Wpedantic \
+        -I"${root_dir}/src/user/cpp/core" \
+        -I"${root_dir}/src/user/cpp/simple" \
         -I"${root_dir}/experiments/simple_api" -c \
         "${root_dir}/experiments/simple_api/${source}.cpp" \
         -o "${tmp_dir}/${source}.o" 2>"${tmp_dir}/${source}.err"; then

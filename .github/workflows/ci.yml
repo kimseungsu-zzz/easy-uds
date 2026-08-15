@@ -356,7 +356,7 @@ jobs:
       - name: Run one-command 0.7 release-candidate gate
         run: bash scripts/release_gate.sh "$RUNNER_TEMP/easy-uds-release-gate"
 
-  simple-api-experiment:
+  simple-api:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     strategy:
@@ -380,18 +380,18 @@ jobs:
             echo "CXX=g++" >> "$GITHUB_ENV"
           fi
 
-      - name: Configure Simple API experiment
+      - name: Configure Simple API tests and benchmarks
         run: >-
           cmake -S . -B build-simple
           -DCMAKE_BUILD_TYPE=Release
-          -DEASY_UDS_BUILD_SIMPLE_EXPERIMENTS=ON
+          -DEASY_UDS_BUILD_SIMPLE_API=ON
           -DEASY_UDS_BUILD_EXAMPLES=OFF
           -DEASY_UDS_WARNINGS_AS_ERRORS=ON
 
-      - name: Build Simple API experiment
+      - name: Build Simple API targets
         run: cmake --build build-simple --parallel
 
-      - name: Run Simple API syntax and diagnostic probes
+      - name: Run Simple API tests and diagnostics
         run: ctest --test-dir build-simple -L simple --output-on-failure
 
       - name: Run Simple/Core A-B and allocation probes

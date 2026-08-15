@@ -477,7 +477,7 @@ remain reproducible under `experiments/simple_api/`:
 
 ```bash
 cmake -S . -B build-simple -DCMAKE_BUILD_TYPE=Release \
-  -DEASY_UDS_BUILD_SIMPLE_EXPERIMENTS=ON \
+  -DEASY_UDS_BUILD_SIMPLE_API=ON \
   -DEASY_UDS_BUILD_EXAMPLES=OFF
 cmake --build build-simple --parallel
 ctest --test-dir build-simple -L simple --output-on-failure

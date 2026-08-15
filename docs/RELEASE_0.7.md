@@ -1,8 +1,7 @@
-# easy-uds 0.7 release-candidate record
+# easy-uds 0.7.0 release record
 
-This document records why the public API is ready to freeze. It is a release
-candidate audit, not a release announcement; creating a tag or GitHub release
-still requires explicit user approval.
+This document records the final 0.7.0 scope, verification gates, and accepted
+tradeoffs. The public API is frozen for the 0.7.x maintenance line.
 
 ## Scope freeze
 
@@ -77,8 +76,9 @@ The exact performance comparison and current stabilization status are kept in
 - Session and handler cancellation remain cooperative. A deadline does not
   interrupt a blocking hardware operation.
 
-## Approval boundary
+## Release status
 
-After the final CI workflow is green, the remaining operation is a user-facing
-decision: create an annotated `v0.7.0` tag and release notes, or continue the
-RC audit. No release is implied by passing this document's checklist.
+The final release uses annotated tag `v0.7.0` and the title
+`easy-uds v0.7.0 — Again Easily`. Passing this checklist does not authorize
+future feature additions to the 0.7.x line; only bug fixes, documentation, and
+small compatibility corrections are in scope.

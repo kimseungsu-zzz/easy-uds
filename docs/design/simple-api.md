@@ -83,9 +83,10 @@ The implementation must not expose a wall of `std::function` or
 belong beside the prototype and must be kept separate from the production
 Core compile-error suite.
 
-## Promotion gate
+## Historical promotion gate
 
-The prototype may be promoted only if all of the following are demonstrated:
+The production facade was promoted after all of the following were
+demonstrated:
 
 - static/shared package consumer can use the installed facade without
   changing Core behavior;

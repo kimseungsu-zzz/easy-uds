@@ -2,7 +2,41 @@
 
 All notable changes to this project are documented here.
 
-## Unreleased 0.7.0 — 🌱 Usability Foundation
+## easy-uds 0.7.0 — Again Easily
+
+### Added
+
+- `easy_uds::simple` beginner facade for fixed RPC.
+- `OwnedFd`/`BorrowedFd`, semantic `Error`, explicit Session state,
+  `RequestContext`, `ServerStats`/`SessionStats`, and named serialization
+  domains.
+- FIFO, `LatestWins`, and `RejectIfBusy` queue policies.
+
+### Changed
+
+- Strict aggregate request-memory budgets and preserved 0.6.4 hot-path
+  accounting.
+- Self-contained public headers and responsibility-based internal layout.
+- Beginner-first documentation, Robot HAL examples, migration guidance, and
+  installed package consumers.
+
+### Compatibility
+
+- Protocol remains v2; no implicit retry or replay is performed.
+- The 0.6 → 0.7 source migration is documented in
+  `docs/migration/0.6-to-0.7.md`.
+- Simple v1 remains intentionally narrow: no Session, stream, typed RPC,
+  serialization, reconnect, or retry facade.
+
+### Performance
+
+- 0.6.4 regression gates are retained.
+- Native x86_64 and ARM64 alternating A/B measurements showed no reproducible
+  Simple regression; the WSL2 c32 variance is scheduler-sensitive.
+- Detailed measurements and rejected alternatives remain in `docs/PERF_0.7.md`
+  and `experiments/simple_api/DESIGN.md`.
+
+### Detailed implementation history
 
 - Added opt-in serialized scheduling domains through
   `RouteOptions::serialize_in()`. Different domains execute concurrently while
@@ -49,7 +83,7 @@ All notable changes to this project are documented here.
 - Added the layout-neutral `Response::ok()` beginner helper while retaining
   aggregate responses for explicit statuses. Split fixed-RPC and streaming
   examples, added the installed beginner package consumer, compile-error UX
-  probes, and a dedicated release-candidate adversarial audit.
+  probes, and a dedicated adversarial audit.
 - Promoted the audited fixed-RPC `easy_uds::simple` facade with temporary-only
   route assignment, `ResponseError` application-status handling, deterministic
   null-C-string errors, installed package coverage, and Core/Simple A/B

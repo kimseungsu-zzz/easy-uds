@@ -658,7 +658,7 @@ docs/                   protocol 문서
 docs/ROADMAP_0.6.md     0.6.x 기술 실험 및 릴리즈 경계
 docs/ROADMAP_0.7.md     0.7 사용성·API·호환성 계획
 docs/ERGONOMICS_0.7.md  beginner-first syntax 및 progressive disclosure audit
-docs/RELEASE_0.7.md     release candidate 범위와 승인 경계
+docs/RELEASE_0.7.md     0.7.0 최종 범위와 검증 기록
 docs/PERF_0.7.md        v0.6.4 대비 0.7 성능 회귀 측정
 docs/history/experiments/0.6.md  독립 UDS 기술 capability probe (history)
 docs/history/README.md    history 및 실험 인덱스

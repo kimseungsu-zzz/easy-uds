@@ -2,7 +2,7 @@
 
 set -euo pipefail
 
-# One-command release-candidate gate. This validates the installed package as
+# One-command release gate. This validates the installed package as
 # well as in-tree targets; it does not create tags or releases.
 
 root_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)

@@ -7,6 +7,6 @@ int main() {
         std::cerr << error.what() << '\n';
         return 1;
     }
-    std::cout << "Release-candidate adversarial audit passed.\n";
+    std::cout << "Adversarial audit passed.\n";
     return 0;
 }

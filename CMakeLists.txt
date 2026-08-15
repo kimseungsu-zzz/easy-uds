@@ -22,7 +22,7 @@ option(EASY_UDS_BUILD_FUZZERS "Build libFuzzer protocol targets (Clang only)" OF
 option(EASY_UDS_BUILD_BENCHMARKS "Build RPC, allocation, and streaming benchmarks" OFF)
 option(EASY_UDS_BUILD_EXPERIMENTS "Build standalone UDS/io_uring experiment probes" OFF)
 option(EASY_UDS_BUILD_SIMPLE_EXPERIMENTS
-    "Build the non-installed Simple API syntax prototype" OFF)
+    "Build Simple API experiment and diagnostic targets" OFF)
 option(EASY_UDS_TRACE_SPIN_MISS "Count client session spin-window misses (diagnostic)" OFF)
 option(EASY_UDS_TRACE_SESSION_CONTENTION
     "Measure client shared-session lock contention (diagnostic)" OFF)

@@ -1,6 +1,6 @@
 # 0.7 public API freeze audit
 
-This is the final source-level checklist for the 0.7 release candidate. The
+This is the final source-level checklist for the 0.7.0 release. The
 audit is deliberately about contract clarity, not adding another abstraction
 layer. Protocol v2, the wire header, and the 0.6.4 hot path remain unchanged.
 
@@ -43,11 +43,10 @@ layer. Protocol v2, the wire header, and the 0.6.4 hot path remain unchanged.
 ## Mechanical checks
 
 The installed package consumer compiles every public header independently in
-`tests/package_consumer/CMakeLists.txt`; the RC gate runs that consumer for
+`tests/package_consumer/CMakeLists.txt`; the release gate runs that consumer for
 both static and shared builds. The same gate builds all examples with
 `-Wall -Wextra -Wpedantic -Werror`, runs the unit/stress/RC-labelled tests, and
 compiles the intentional invalid-usage probes with the selected compiler.
 
-No source-breaking public API change is accepted after this audit without a
-new migration note and a fresh performance gate. Creating `v0.7.0` remains a
-separate user approval step.
+No source-breaking public API change is accepted on the 0.7.x maintenance line
+without a new migration note and a fresh performance gate.

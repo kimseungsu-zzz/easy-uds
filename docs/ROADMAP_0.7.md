@@ -146,13 +146,13 @@ static/shared package consumer는 모든 phase의 필수 gate다.
 - [x] documentation link/example build check
 - [x] protocol v2 유지와 0.6 → 0.7 migration 동결
 
-The release-candidate rationale and approval boundary are recorded in
+The 0.7.0 release rationale and frozen scope are recorded in
 [`RELEASE_0.7.md`](RELEASE_0.7.md). Passing the checklist does not create a
 tag or release.
 
-The stabilization checklist was verified by the full workflow-dispatch gate on
-the current `main` commit. A release tag remains a separate explicit approval
-step; no tag or release is implied by these checks.
+The stabilization checklist was verified by the full release gate and native
+confirmation. The 0.7.0 tag and release identify this frozen API baseline;
+future 0.7.x work is limited to maintenance corrections.
 
 ## 목표 directory 형태
 
@@ -186,7 +186,7 @@ docs/                   getting-started, api, guides, internals, migration, hist
 
 > **0.6이 실제로 빠른 것만 남겼다면, 0.7은 그 성능을 누구나 쉽게 쓰게 만든다.**
 
-## Final RC gate (English command reference)
+## Final release gate (English command reference)
 
 The final audit is executable with:
 
@@ -198,5 +198,5 @@ It covers both static/shared package variants, the complete CTest suite,
 `ctest -L rc`, invalid-usage diagnostics, independent public-header
 compilation, and the real installed beginner `/echo` consumer. Sanitizer,
 fuzz, native Linux, and ARM64 jobs remain hosted workflow gates because they
-need their respective compiler/runner environments. No tag or release is
-created by the gate.
+need their respective compiler/runner environments. The gate itself does not
+create tags or releases; the resulting v0.7.0 release is tracked separately.

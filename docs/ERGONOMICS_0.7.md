@@ -57,7 +57,7 @@ readability convention.
 
 ## RouteOptions candidates
 
-The three release-candidate prototypes were compared on reading order,
+The three pre-release prototypes were compared on reading order,
 handler/metadata separation, overload count, C++17 diagnostics, callable
 copy/move behavior, ABI impact, and future extension:
 

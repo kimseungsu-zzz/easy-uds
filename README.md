@@ -460,7 +460,7 @@ EASY_UDS_SOAK_BENCHMARKS=1 ./scripts/long_soak.sh build-bench 20
 The `workflow_dispatch` CI path runs the same matrix on native Ubuntu x86_64
 and hosted ARM64, then uploads both complete logs.
 
-Before requesting a 0.7.0 release, run the one-command RC gate. It builds
+For a 0.7.0 source checkout, run the one-command release gate. It builds
 static and shared variants, executes the labelled adversarial suite, checks
 invalid-usage diagnostics, and validates both installed-package consumers:
 
@@ -468,11 +468,11 @@ invalid-usage diagnostics, and validates both installed-package consumers:
 bash scripts/release_gate.sh
 ```
 
-The gate never creates a tag or GitHub release; those remain an explicit
-maintainer approval step.
+The gate never creates a tag or GitHub release; release automation remains a
+separate maintainer step.
 
-The assignment-style beginner facade is now available as the narrow v1
-`<easy_uds/simple.hpp>` API. The original prototype and its diagnostic probes
+The assignment-style beginner facade is the narrow v1
+`<easy_uds/simple.hpp>` API. Its historical prototype and diagnostic probes
 remain reproducible under `experiments/simple_api/`:
 
 ```bash
@@ -667,7 +667,7 @@ docs/                   Protocol documentation
 docs/ROADMAP_0.6.md     0.6.x technical experiment and release boundaries
 docs/ROADMAP_0.7.md     0.7 usability, API, and compatibility plan
 docs/ERGONOMICS_0.7.md  Beginner-first syntax and progressive disclosure audit
-docs/RELEASE_0.7.md     Release-candidate scope and approval boundary
+docs/RELEASE_0.7.md     0.7.0 final scope and verification record
 docs/PERF_0.7.md        0.7 regression measurements against v0.6.4
 docs/history/experiments/0.6.md  Standalone UDS capability probes (history)
 docs/history/README.md    Historical measurements and experiment index

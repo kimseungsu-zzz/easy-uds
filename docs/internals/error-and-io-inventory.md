@@ -1,9 +1,9 @@
 # Error and low-level I/O inventory
 
-This inventory records the 0.7.1 Phase 4H boundary. It is intentionally a
-concrete map, not a virtual backend design. Linux capabilities report raw
-results, `errno`, or a small semantic result; the system/runtime layer decides
-when that becomes `easy_uds::Error`.
+This inventory records the concrete low-level boundary carried into the 0.8
+candidate. It is intentionally a map, not a virtual backend design. Selected
+platform capabilities report raw results, native errors, or a small semantic
+result; the system/runtime layer decides when that becomes `easy_uds::Error`.
 
 ## Error and errno usage
 
@@ -81,8 +81,8 @@ fails. `reactor/parser.cpp` is the first layer that converts those results into
 the existing runtime exception/error behavior.
 
 `src/system/platform/descriptor_passing.hpp` currently exposes POSIX
-`ssize_t`, `iovec`, and integer descriptors. This is a 0.7.1 Linux seam, not a
-final cross-platform contract. The 0.8 portability decision is recorded in
+`ssize_t`, `iovec`, and integer descriptors. This remains a temporary
+Linux/POSIX seam, not a final cross-platform contract. The 0.8 portability decision is recorded in
 [`ROADMAP_0.8.md`](../ROADMAP_0.8.md): retain its shape, move it under Linux,
 or replace it with a system-owned buffer description only after the Windows
 transport model is known.

@@ -94,14 +94,14 @@ backend, or shared-pointer backend is introduced to hide these facts early.
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     # src/system/platform/linux/*.cpp
 elseif(CMAKE_SYSTEM_NAME STREQUAL "Windows")
-    # 0.8 entry point; not implemented by 0.7.1
+    # concrete 0.8 AF_UNIX/Winsock capability source set
 endif()
 ```
 
-The Linux list is the complete capability set above. The Windows branch fails
-explicitly with a 0.8 design message rather than accidentally compiling Linux
-sources. This is build-time selection only; the runtime remains concrete and
-the public API/protocol are unchanged.
+Each list is an explicit complete capability set for its platform. The Windows
+branch selects only the AF_UNIX/Winsock files and never compiles Linux sources.
+This is build-time selection only; the runtime remains concrete and the public
+API/protocol are unchanged.
 
 ## `server_path` native-result decision
 

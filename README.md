@@ -443,6 +443,21 @@ bash scripts/release_gate.sh
 The gate never creates a tag or GitHub release; those remain an explicit
 maintainer approval step.
 
+The proposed assignment-style beginner facade is intentionally experimental
+and is not part of 0.7. To try it without changing the installed API, build
+`experiments/simple_api/` explicitly:
+
+```bash
+cmake -S . -B build-simple -DCMAKE_BUILD_TYPE=Release \
+  -DEASY_UDS_BUILD_SIMPLE_EXPERIMENTS=ON \
+  -DEASY_UDS_BUILD_EXAMPLES=OFF
+cmake --build build-simple --parallel
+ctest --test-dir build-simple -L simple --output-on-failure
+```
+
+Promotion requires a separate design/performance/error audit; the Core API
+and protocol remain the supported 0.7 surface.
+
 The session spin window is a build-time tuning knob for latency experiments; the default is `100` microseconds. Build benchmark variants with `-DEASY_UDS_SESSION_SPIN_US=0`, `10`, `25`, `50`, or `100` and compare p50/p95/p99, throughput, CPU, and context switches. The session benchmark reports user/system CPU time and voluntary/involuntary context switches through `getrusage()`. It is intentionally not a public runtime option until measurements show a stable policy. On hosts with `perf` or `strace`, wrap the same benchmark to collect syscall/request, cache-miss, and branch-miss counters.
 
 Reference numbers (WSL2 on an i7-1260P, g++ 15, `-O3`):

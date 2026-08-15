@@ -23,3 +23,6 @@ reproducing a historical result.
 When a proposed runtime feature changes protocol framing, lifetime semantics,
 or the default hot path, record the design and a baseline comparison here
 before adding it to the beginner documentation.
+
+- [Simple API design experiment](../design/simple-api.md) — assignment-style
+  beginner syntax prototype and promotion gate; not a 0.7 public API.

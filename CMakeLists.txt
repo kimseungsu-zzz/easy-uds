@@ -21,6 +21,8 @@ option(EASY_UDS_WARNINGS_AS_ERRORS "Treat easy-uds compiler warnings as errors" 
 option(EASY_UDS_BUILD_FUZZERS "Build libFuzzer protocol targets (Clang only)" OFF)
 option(EASY_UDS_BUILD_BENCHMARKS "Build RPC, allocation, and streaming benchmarks" OFF)
 option(EASY_UDS_BUILD_EXPERIMENTS "Build standalone UDS/io_uring experiment probes" OFF)
+option(EASY_UDS_BUILD_SIMPLE_EXPERIMENTS
+    "Build the non-installed Simple API syntax prototype" OFF)
 option(EASY_UDS_TRACE_SPIN_MISS "Count client session spin-window misses (diagnostic)" OFF)
 option(EASY_UDS_TRACE_SESSION_CONTENTION
     "Measure client shared-session lock contention (diagnostic)" OFF)
@@ -330,6 +332,71 @@ if(EASY_UDS_BUILD_EXPERIMENTS)
             )
         endif()
     endforeach()
+endif()
+
+if(EASY_UDS_BUILD_SIMPLE_EXPERIMENTS)
+    add_executable(easy_uds_simple_server_experiment
+        experiments/simple_api/simple_server.cpp)
+    target_include_directories(easy_uds_simple_server_experiment PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/experiments/simple_api)
+    target_link_libraries(easy_uds_simple_server_experiment PRIVATE
+        easy_uds::easy_uds)
+
+    add_executable(easy_uds_simple_client_experiment
+        experiments/simple_api/simple_client.cpp)
+    target_include_directories(easy_uds_simple_client_experiment PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/experiments/simple_api)
+    target_link_libraries(easy_uds_simple_client_experiment PRIVATE
+        easy_uds::easy_uds)
+
+    foreach(simple_target IN ITEMS
+            easy_uds_simple_server_experiment
+            easy_uds_simple_client_experiment)
+        target_compile_features(${simple_target} PRIVATE cxx_std_17)
+        target_compile_options(${simple_target} PRIVATE
+            $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Wall;-Wextra;-Wpedantic>
+        )
+        if(EASY_UDS_WARNINGS_AS_ERRORS)
+            target_compile_options(${simple_target} PRIVATE
+                $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Werror>
+            )
+        endif()
+    endforeach()
+
+    if(EASY_UDS_BUILD_TESTS AND BUILD_TESTING)
+        add_executable(easy_uds_simple_api_experiment_test
+            experiments/simple_api/simple_api_test.cpp)
+        target_include_directories(easy_uds_simple_api_experiment_test PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/experiments/simple_api)
+        target_link_libraries(easy_uds_simple_api_experiment_test PRIVATE
+            easy_uds::easy_uds)
+        target_compile_features(easy_uds_simple_api_experiment_test PRIVATE cxx_std_17)
+        target_compile_options(easy_uds_simple_api_experiment_test PRIVATE
+            $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Wall;-Wextra;-Wpedantic>
+        )
+        if(EASY_UDS_WARNINGS_AS_ERRORS)
+            target_compile_options(easy_uds_simple_api_experiment_test PRIVATE
+                $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Werror>
+            )
+        endif()
+        add_test(NAME easy_uds.simple_api_experiment
+            COMMAND easy_uds_simple_api_experiment_test)
+        set_tests_properties(easy_uds.simple_api_experiment PROPERTIES
+            TIMEOUT 20
+            LABELS "experimental;simple;api")
+
+        find_program(EASY_UDS_SIMPLE_BASH_EXECUTABLE bash)
+        if(EASY_UDS_SIMPLE_BASH_EXECUTABLE)
+            add_test(NAME easy_uds.simple_compile_error
+                COMMAND ${CMAKE_COMMAND} -E env
+                    "CXX=${CMAKE_CXX_COMPILER}"
+                    "${EASY_UDS_SIMPLE_BASH_EXECUTABLE}"
+                    "${CMAKE_CURRENT_SOURCE_DIR}/experiments/simple_api/compile_error_smoke.sh")
+            set_tests_properties(easy_uds.simple_compile_error PROPERTIES
+                TIMEOUT 30
+                LABELS "experimental;simple;compile-error")
+        endif()
+    endif()
 endif()
 
 if(EASY_UDS_BUILD_FUZZERS)

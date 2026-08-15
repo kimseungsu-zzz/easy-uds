@@ -161,9 +161,9 @@ struct ReactorConnection {
     bool read_paused = false;                 // guarded by connections_mutex
     std::string pending;              // bytes read ahead of the parser
     std::size_t pending_offset = 0;   // consumed prefix of pending
-    // Descriptors received via SCM_RIGHTS, in the order their frames arrived
-    // (reactor-thread only). A frame carrying carries_fd_flag pops one, and
-    // the popped descriptor is delivered to the request handler.
+    // Descriptors received via ancillary data, in the order their frames
+    // arrived (reactor-thread only). A frame carrying carries_fd_flag pops
+    // one, and the popped descriptor is delivered to the request handler.
     std::deque<int> received_fds;
     int request_fd = -1;               // fd attached to the frame being parsed
 };

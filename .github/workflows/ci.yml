@@ -395,4 +395,4 @@ jobs:
         run: ctest --test-dir build-simple -L simple --output-on-failure
 
       - name: Run Simple/Core A-B and allocation probes
-        run: bash scripts/simple_core_benchmark_median.sh build-simple 5000 5
+        run: bash scripts/simple_core_benchmark_median.sh build-simple 5000 10

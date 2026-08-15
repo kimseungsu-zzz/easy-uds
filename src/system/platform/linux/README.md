@@ -9,8 +9,11 @@ signal/consume pair. Reactor code sees only readiness masks, tokens, and
 control operations.
 `peer_identity.cpp` contains the connected-peer identity capability and is the
 only owner of the Linux `SO_PEERCRED`/`getsockopt` capture.
+`descriptor_passing.cpp` contains the descriptor-bearing `sendmsg`/`recvmsg`
+operations and ancillary validation. It preserves first-successful-send-only
+attachment, close-on-exec reception, fatal malformed/truncated control data,
+and the existing one-descriptor/frame ordering rules.
 Higher layers keep their existing value/timeout semantics and call these
 functions directly; there is no virtual transport or type-erased backend.
 
-Descriptor-passing and error-translation capabilities remain intentionally
-deferred to later small phases.
+Error-translation remains intentionally deferred to a later small phase.

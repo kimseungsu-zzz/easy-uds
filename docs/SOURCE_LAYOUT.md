@@ -12,7 +12,7 @@ src/
 │   ├── runtime/              concrete engine functions and server lifecycle
 │   ├── reactor/              readiness dispatch, parsing, workers, and streams
 │   ├── transport/            exact I/O and client framing helpers
-│   └── platform/linux/       endpoint, readiness, and peer-identity capabilities
+│   └── platform/linux/       endpoint, readiness, identity, and FD capabilities
 └── user/
     ├── cpp/
     │   ├── core/             installed Core C++ headers and public method glue
@@ -40,7 +40,9 @@ contract and its concrete Linux `epoll`/`eventfd` implementation; this seam is
 not frozen as the final cross-platform backend contract. Phase 4C adds the
 concrete peer-identity capability, keeping `SO_PEERCRED`/`getsockopt` in Linux
 code and leaving the public `PeerCredentials` value unchanged. Descriptor
-passing and error translation remain later capability units. `src/system`
+passing is now isolated as the concrete Linux ancillary-data capability while
+preserving first-successful-send-only attachment and fatal malformed/truncated
+receive semantics. Error translation remains a later capability unit. `src/system`
 owns the engine and must not depend on C or Python binding layers;
 `src/system/platform/linux` must not include `src/user/*`; and `src/user` must
 not depend on a platform implementation. Build-time backend selection is

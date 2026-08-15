@@ -42,6 +42,10 @@ if ((${#system_sources[@]} > 0)); then
         "system policy/state code must not own SO_PEERCRED" \
         'SO_PEERCRED|struct[[:space:]]+ucred' \
         "${system_sources[@]}"
+    check_no_match \
+        "system policy/state code must not own Linux descriptor ancillary operations" \
+        'SCM_RIGHTS|MSG_CTRUNC|MSG_CMSG_CLOEXEC|CMSG_[A-Z_]+|cmsghdr' \
+        "${system_sources[@]}"
 fi
 
 user_sources=()

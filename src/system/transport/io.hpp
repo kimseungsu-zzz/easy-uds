@@ -7,6 +7,7 @@
 #include "easy_uds/options.hpp"
 #include "easy_uds/request.hpp"
 #include "../protocol/codec.hpp"
+#include "../platform/descriptor_passing.hpp"
 #include "../platform/linux/endpoint.hpp"
 
 #include <algorithm>
@@ -436,9 +437,9 @@ inline void write_iovecs_exact(int fd, iovec* parts, std::size_t part_count,
     }
 }
 
-// Variant of write_iovecs_exact that attaches `passed_fd` as SCM_RIGHTS on the
+// Variant of write_iovecs_exact that attaches descriptor ancillary data on the
 // FIRST sendmsg only, so partial-send retries never duplicate the descriptor
-// (the kernel delivers the fd with the bytes of that first successful write).
+// (the kernel delivers it with the bytes of that first successful write).
 inline void write_iovecs_exact_with_fd(int fd, iovec* parts, std::size_t part_count, int passed_fd,
                                        std::chrono::milliseconds inactivity_timeout,
                                        Deadline absolute_deadline) {
@@ -453,24 +454,8 @@ inline void write_iovecs_exact_with_fd(int fd, iovec* parts, std::size_t part_co
         }
 
         check_absolute_deadline(absolute_deadline, "send timed out");
-        msghdr message{};
-        message.msg_iov = parts + first;
-        message.msg_iovlen = part_count - first;
-        char control[CMSG_SPACE(sizeof(int))]{};
-        if (!fd_attached) {
-            message.msg_control = control;
-            message.msg_controllen = sizeof(control);
-            cmsghdr* cmsg = CMSG_FIRSTHDR(&message);
-            cmsg->cmsg_level = SOL_SOCKET;
-            cmsg->cmsg_type = SCM_RIGHTS;
-            cmsg->cmsg_len = CMSG_LEN(sizeof(int));
-            std::memcpy(CMSG_DATA(cmsg), &passed_fd, sizeof(passed_fd));
-        }
-#ifdef MSG_NOSIGNAL
-        const ssize_t result = ::sendmsg(fd, &message, MSG_NOSIGNAL);
-#else
-        const ssize_t result = ::sendmsg(fd, &message, 0);
-#endif
+        const ssize_t result = descriptor_passing::send_iovecs(
+            fd, parts + first, part_count - first, passed_fd, !fd_attached);
         if (result > 0) {
             fd_attached = true;
             std::size_t consumed = static_cast<std::size_t>(result);

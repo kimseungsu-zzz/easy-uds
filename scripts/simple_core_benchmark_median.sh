@@ -4,10 +4,14 @@ set -euo pipefail
 
 build_dir=${1:?usage: simple_core_benchmark_median.sh <build-dir> [iterations] [repeats]}
 iterations=${2:-10000}
-repeats=${3:-5}
+repeats=${3:-10}
 
 if ! [[ "${iterations}" =~ ^[1-9][0-9]*$ && "${repeats}" =~ ^[1-9][0-9]*$ ]]; then
     echo "iterations and repeats must be positive integers" >&2
+    exit 2
+fi
+if (( repeats < 10 )); then
+    echo "performance decisions require at least 10 alternating repeats" >&2
     exit 2
 fi
 
@@ -76,7 +80,8 @@ median_field() {
         '$1 == c && $2 == a { print $f }' "${rows}" | sort -n | median
 }
 
-echo "repeated alternating median: iterations=${iterations}, repeats=${repeats}"
+echo "fixed-policy alternating median: iterations=${iterations}, repeats=${repeats}"
+echo "all repeats are included; no threshold-triggered batch is selected post-hoc"
 printf '%-5s %-7s %14s %12s %12s %14s %12s\n' \
     load api throughput_req_s p50_us p99_us cpu_s_1M rss_KiB
 for concurrency in 1 8 32; do

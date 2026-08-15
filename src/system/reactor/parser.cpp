@@ -1,6 +1,7 @@
 #include "parser.hpp"
 
 #include "common.hpp"
+#include "../platform/descriptor_passing.hpp"
 
 #include <algorithm>
 #include <array>
@@ -8,61 +9,16 @@
 #include <cstring>
 #include <stdexcept>
 
-#include <sys/socket.h>
-#include <unistd.h>
-
 namespace easy_uds::detail {
 namespace {
 
 using protocol::WireType;
 
-// recvmsg with a one-descriptor control buffer. A request frame carries at
-// most one descriptor; truncation or malformed ancillary data is fatal rather
-// than silently dropping a descriptor and desynchronising later frames.
 ssize_t recv_with_fds(int fd, char* data, std::size_t size, std::deque<int>& fds) {
-    iovec vector{data, size};
-    msghdr message{};
-    message.msg_iov = &vector;
-    message.msg_iovlen = 1;
-    char control[CMSG_SPACE(sizeof(int))]{};
-    message.msg_control = control;
-    message.msg_controllen = sizeof(control);
-    int receive_flags = 0;
-#ifdef MSG_CMSG_CLOEXEC
-    receive_flags |= MSG_CMSG_CLOEXEC;
-#endif
-    const ssize_t result = ::recvmsg(fd, &message, receive_flags);
-    if (result > 0) {
-        int captured_fd = -1;
-        bool malformed = false;
-        for (cmsghdr* header = CMSG_FIRSTHDR(&message); header != nullptr;
-             header = CMSG_NXTHDR(&message, header)) {
-            if (header->cmsg_level != SOL_SOCKET || header->cmsg_type != SCM_RIGHTS) {
-                continue;
-            }
-            if (header->cmsg_len != CMSG_LEN(sizeof(int)) || captured_fd >= 0) {
-                malformed = true;
-                continue;
-            }
-            std::memcpy(&captured_fd, CMSG_DATA(header), sizeof(captured_fd));
-        }
-        if ((message.msg_flags & MSG_CTRUNC) != 0 || malformed) {
-            if (captured_fd >= 0) {
-                (void)::close(captured_fd);
-            }
-            throw std::runtime_error("invalid or truncated ancillary descriptor");
-        }
-        if (captured_fd >= 0) {
-#ifndef MSG_CMSG_CLOEXEC
-            try {
-                set_close_on_exec(captured_fd);
-            } catch (...) {
-                (void)::close(captured_fd);
-                throw;
-            }
-#endif
-            fds.push_back(captured_fd);
-        }
+    int captured_fd = -1;
+    const ssize_t result = descriptor_passing::receive(fd, data, size, captured_fd);
+    if (result > 0 && captured_fd >= 0) {
+        fds.push_back(captured_fd);
     }
     return result;
 }

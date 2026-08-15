@@ -121,8 +121,8 @@ void close_connection(const std::shared_ptr<ServerState>& state, int fd) {
     const auto connection = it->second->conn;
     const std::size_t parser_request_bytes = it->second->reserved_request_bytes;
     it->second->reserved_request_bytes = 0;
-    // Descriptors that were received via SCM_RIGHTS but never delivered to a
-    // handler (the frame errored or the connection died mid-parse) must not
+    // Descriptors that were received via ancillary data but never delivered to
+    // a handler (the frame errored or the connection died mid-parse) must not
     // outlive the connection.
     for (const int leftover : it->second->received_fds) {
         (void)::close(leftover);

@@ -50,7 +50,7 @@ enum class WireType : std::uint8_t {
 };
 
 // Reserved-flags bits (header bytes 6-7, big-endian). Bit 0 marks a frame that
-// carries one descriptor as SCM_RIGHTS ancillary data, delivered with the
+// carries one descriptor as platform ancillary data, delivered with the
 // frame's bytes. Only this bit is understood; any other bit is rejected.
 inline constexpr std::uint16_t carries_fd_flag = 0x0001U;
 

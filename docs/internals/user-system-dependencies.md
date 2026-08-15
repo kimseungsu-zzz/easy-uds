@@ -117,6 +117,7 @@ this inventory.
 | `system/platform/linux/endpoint.*` | No public C++ API | Pathname endpoint and socket lifecycle capability | Linux `AF_UNIX`/socket syscalls |
 | `system/platform/linux/readiness.cpp` | No public C++ API | Readiness registration/wait and wakeup signal/consume | Linux `epoll`/`eventfd` syscalls |
 | `system/platform/linux/peer_identity.cpp` | No public C++ API | Connected-peer identity capture | Linux `SO_PEERCRED`/`getsockopt` |
+| `system/platform/linux/descriptor_passing.cpp` | No public C++ API | Descriptor-bearing send/receive and ancillary validation | Linux `SCM_RIGHTS`/`recvmsg`/`sendmsg` |
 | `user/cpp` | Owns public C++ headers | Public call/handler syntax | Must not include backend headers |
 | `user/c`, `user/py` | No implementation yet | Future binding surfaces | Must depend downward only |
 
@@ -134,8 +135,8 @@ exercise malformed headers.
 
 This phase does not add Windows code, C/Python APIs, change protocol v2,
 optimize the hot path, or introduce a virtual transport. The concrete
-user/system seam, endpoint/socket capability, readiness/wakeup capability, and
-peer-identity capability are now in place. The next implementation step is an
-inventory-driven move of descriptor passing and error translation. These
-capabilities should continue to land as small concrete units where that reduces
-coupling without adding a call or allocation to the hot path.
+user/system seam, endpoint/socket capability, readiness/wakeup capability,
+peer-identity capability, and descriptor-passing capability are now in place.
+The next implementation step is an inventory-driven move of error translation.
+These capabilities should continue to land as small concrete units where that
+reduces coupling without adding a call or allocation to the hot path.

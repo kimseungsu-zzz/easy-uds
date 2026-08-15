@@ -57,6 +57,8 @@ int bind_socket(NativeSocket socket, const UnixEndpoint& endpoint) noexcept {
                               endpoint.length);
     if (result != 0) {
         last_wsa_error();
+    } else {
+        remember_bound_path(endpoint.address.sun_path);
     }
     return result;
 }

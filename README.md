@@ -38,7 +38,13 @@
 
 ## Platform
 
-The current implementation requires Linux (`epoll` and `SO_PEERCRED`). Windows, macOS, and BSD are not currently supported. The source uses pathname sockets rather than Linux-only abstract sockets.
+Linux is the production-validated backend. A Windows AF_UNIX backend is now
+included in the 0.8 RC work and keeps the Core/Session/Simple wire contract,
+but Windows runtime, package, and lifecycle validation is CI-gated and is not
+claimed as passed until the Windows job runs. Windows resource passing and
+POSIX peer credentials are intentionally unavailable. macOS and BSD remain
+unsupported. The source uses pathname sockets rather than Linux-only abstract
+sockets.
 
 ## Quick start
 

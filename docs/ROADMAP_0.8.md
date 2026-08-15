@@ -38,16 +38,19 @@ behavior remain an open design item rather than a `PortableInode` or universal
 file-lock API.
 
 Phase 5 completes the Linux dependency audit and makes backend assembly visible
-in CMake: `EASY_UDS_COMMON_SOURCES` is combined with a Linux capability source
-set at build time. The Windows branch is the documented 0.8 implementation
-entry point, but intentionally has no sources in 0.7.1. See
+in CMake: `EASY_UDS_COMMON_SOURCES` is combined with one concrete platform
+capability source set at build time. The 0.8 Windows branch now contains an
+AF_UNIX/Winsock implementation for endpoint, I/O, readiness, wakeup, and
+pathname lifecycle. See
 [`internals/linux-dependency-audit.md`](internals/linux-dependency-audit.md) for
 the per-dependency classification and the list of POSIX-shaped seams that must
 not be mistaken for final Windows contracts.
 
 ## 0.8 handoff priority
 
-The 0.7.1 architecture is frozen with these blockers, in order:
+The 0.7.1 architecture is frozen with these handoff items, in order. The
+Windows backend implementation has started, but the external Windows compiler
+and runtime gate is still a release blocker until it runs.
 
 ### P0 — public-header blockers
 
@@ -78,12 +81,12 @@ backend or a generic handle type before its semantics are known.
 
 ## Capability decisions still open
 
-- Windows readiness may use a completion model rather than the current Linux
-  reactor readiness seam.
+- Windows readiness currently uses a concrete `WSAPoll`/UDP-wakeup capability;
+  it is not frozen as the final IOCP architecture.
 - Windows resource passing and HANDLE ownership require a separate API design;
   `SCM_RIGHTS` is not a cross-platform contract.
 - C and Python bindings must consume a stable user-facing boundary and must not
   reimplement transport, reactor, or protocol behavior.
 
-The Linux capability extractions in `src/system/platform/linux/` are evidence
-for these decisions, not a frozen 0.8 virtual-backend hierarchy.
+The Linux and Windows capability implementations are evidence for these
+decisions, not a frozen virtual-backend hierarchy.

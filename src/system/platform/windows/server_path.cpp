@@ -1,4 +1,5 @@
 #include "../server_path.hpp"
+#include "socket_common.hpp"
 
 #if defined(_WIN32)
 #include <cerrno>
@@ -41,6 +42,12 @@ LookupResult inspect(const char* path) noexcept {
     const DWORD attributes = ::GetFileAttributesA(path);
     if (attributes == INVALID_FILE_ATTRIBUTES) {
         const DWORD error = ::GetLastError();
+        if ((error == ERROR_FILE_NOT_FOUND || error == ERROR_PATH_NOT_FOUND) &&
+            platform_windows::is_bound_path(path)) {
+            const auto path_hash = static_cast<std::uint64_t>(
+                std::hash<std::string_view>{}(path));
+            return {true, {EntryKind::socket, 0, 0, path_hash, 1}, 0};
+        }
         set_errno_from_win32(error);
         return {false, {}, static_cast<int>(error)};
     }
@@ -68,6 +75,11 @@ bool is_owned_regular_single_link(const Identity& identity,
 
 int unlink_socket_path(const char* path) noexcept {
     if (::DeleteFileA(path) != 0) {
+        platform_windows::forget_bound_path(path);
+        return 0;
+    }
+    if (platform_windows::is_bound_path(path)) {
+        platform_windows::forget_bound_path(path);
         return 0;
     }
     set_errno_from_win32(::GetLastError());

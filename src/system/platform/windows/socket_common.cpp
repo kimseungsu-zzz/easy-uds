@@ -3,12 +3,16 @@
 #if defined(_WIN32)
 #include <cerrno>
 #include <mutex>
+#include <string>
+#include <unordered_set>
 
 namespace easy_uds::detail::platform_windows {
 namespace {
 
 std::once_flag winsock_once;
 bool winsock_ready = false;
+std::mutex bound_paths_mutex;
+std::unordered_set<std::string> bound_paths;
 
 } // namespace
 
@@ -68,6 +72,21 @@ int last_wsa_error() noexcept {
     const int error = WSAGetLastError();
     set_errno_from_wsa(error);
     return error;
+}
+
+void remember_bound_path(std::string_view path) {
+    std::lock_guard<std::mutex> lock(bound_paths_mutex);
+    bound_paths.emplace(path);
+}
+
+void forget_bound_path(std::string_view path) noexcept {
+    std::lock_guard<std::mutex> lock(bound_paths_mutex);
+    bound_paths.erase(std::string(path));
+}
+
+bool is_bound_path(std::string_view path) noexcept {
+    std::lock_guard<std::mutex> lock(bound_paths_mutex);
+    return bound_paths.find(std::string(path)) != bound_paths.end();
 }
 
 } // namespace easy_uds::detail::platform_windows

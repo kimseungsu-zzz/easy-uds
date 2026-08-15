@@ -76,9 +76,11 @@ error policy.
 
 Phase 5 records the complete Linux/POSIX dependency inventory in
 [`internals/linux-dependency-audit.md`](internals/linux-dependency-audit.md).
-`CMakeLists.txt` now assembles common engine sources separately from the
-selected `src/system/platform/linux/` source set. The Windows branch is an
-explicit 0.8 entry point and still fails as unsupported in 0.7.1. The current
-`endpoint.hpp`, `descriptor_passing.hpp`, `socket_io.hpp`, `server_path.hpp`,
-and readiness/wait seams remain concrete POSIX/Linux contracts, not frozen
-cross-platform interfaces.
+`CMakeLists.txt` assembles common engine sources separately from the selected
+Linux or Windows source set. The 0.8 Windows entry point is a concrete
+Winsock AF_UNIX backend; it does not add a runtime virtual transport. The
+endpoint, socket I/O, readiness/wait, descriptor, and pathname seams remain
+build-time concrete capabilities rather than a frozen universal Windows
+interface. See [`platform-support.md`](platform-support.md) and
+[`internals/windows-backend.md`](internals/windows-backend.md) for the current
+support boundary and validation status.

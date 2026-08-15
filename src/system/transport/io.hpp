@@ -123,7 +123,7 @@ inline void validate_client_options(const easy_uds::ClientOptions& options) {
     }
 }
 
-inline void set_close_on_exec(int fd) {
+inline void set_close_on_exec(NativeSocket fd) {
     const auto result = socket_lifecycle::set_close_on_exec(fd);
     if (!result.ok()) {
         const char* operation = result.failure == socket_lifecycle::SetupFailure::close_on_exec_getfd
@@ -133,7 +133,7 @@ inline void set_close_on_exec(int fd) {
     }
 }
 
-inline void set_nonblocking(int fd) {
+inline void set_nonblocking(NativeSocket fd) {
     const auto result = socket_lifecycle::set_nonblocking(fd);
     if (!result.ok()) {
         const char* operation = result.failure == socket_lifecycle::SetupFailure::nonblocking_getfl
@@ -143,7 +143,7 @@ inline void set_nonblocking(int fd) {
     }
 }
 
-inline void configure_no_sigpipe(int fd) {
+inline void configure_no_sigpipe(NativeSocket fd) {
     const auto result = socket_lifecycle::configure_no_sigpipe(fd);
     if (!result.ok()) {
         throw_system_error("setsockopt(SO_NOSIGPIPE) failed", result.native_error);
@@ -151,7 +151,7 @@ inline void configure_no_sigpipe(int fd) {
 }
 
 inline FileDescriptor make_socket() {
-    FileDescriptor fd(platform_linux::create_stream_socket());
+    FileDescriptor fd(platform::create_stream_socket());
     if (fd.get() < 0) {
         throw_system_error("socket failed");
     }
@@ -159,8 +159,8 @@ inline FileDescriptor make_socket() {
     return fd;
 }
 
-inline platform_linux::UnixEndpoint make_address(const std::string& socket_path) {
-    return platform_linux::make_endpoint(socket_path);
+inline platform::UnixEndpoint make_address(const std::string& socket_path) {
+    return platform::make_endpoint(socket_path);
 }
 
 inline Deadline deadline_from_now(std::chrono::milliseconds timeout) {
@@ -213,7 +213,7 @@ inline void check_absolute_deadline(Deadline deadline, const char* timeout_opera
     }
 }
 
-inline void wait_for_io(int fd, socket_wait::Interest interest,
+inline void wait_for_io(NativeSocket fd, socket_wait::Interest interest,
                         std::chrono::milliseconds inactivity_timeout,
                         Deadline absolute_deadline,
                         const char* timeout_operation) {
@@ -254,7 +254,7 @@ inline constexpr std::size_t read_ahead_capacity = 4096;
 
 class BufferedReader {
   public:
-    explicit BufferedReader(int fd) noexcept : fd_(fd) {}
+    explicit BufferedReader(NativeSocket fd) noexcept : fd_(fd) {}
 
     // Reads exactly `size` bytes into `data`.
     void read(void* data, std::size_t size, std::chrono::milliseconds inactivity_timeout, Deadline absolute_deadline) {
@@ -316,13 +316,13 @@ class BufferedReader {
         }
     }
 
-    int fd_;
+    NativeSocket fd_;
     std::array<char, read_ahead_capacity> buffer_{};
     std::size_t start_ = 0;
     std::size_t size_ = 0;
 };
 
-inline void write_exact(int fd, const void* data, std::size_t size, std::chrono::milliseconds inactivity_timeout,
+inline void write_exact(NativeSocket fd, const void* data, std::size_t size, std::chrono::milliseconds inactivity_timeout,
                         Deadline absolute_deadline) {
     const auto* bytes = static_cast<const unsigned char*>(data);
     std::size_t sent = 0;
@@ -349,7 +349,7 @@ inline void write_exact(int fd, const void* data, std::size_t size, std::chrono:
     }
 }
 
-inline void write_iovecs_exact(int fd, iovec* parts, std::size_t part_count,
+inline void write_iovecs_exact(NativeSocket fd, iovec* parts, std::size_t part_count,
                                std::chrono::milliseconds inactivity_timeout, Deadline absolute_deadline) {
     std::size_t first = 0;
     while (first < part_count) {
@@ -394,7 +394,7 @@ inline void write_iovecs_exact(int fd, iovec* parts, std::size_t part_count,
 // Variant of write_iovecs_exact that attaches descriptor ancillary data on the
 // FIRST sendmsg only, so partial-send retries never duplicate the descriptor
 // (the kernel delivers it with the bytes of that first successful write).
-inline void write_iovecs_exact_with_fd(int fd, iovec* parts, std::size_t part_count, int passed_fd,
+inline void write_iovecs_exact_with_fd(NativeSocket fd, iovec* parts, std::size_t part_count, NativeSocket passed_fd,
                                        std::chrono::milliseconds inactivity_timeout,
                                        Deadline absolute_deadline) {
     std::size_t first = 0;
@@ -439,7 +439,7 @@ inline void write_iovecs_exact_with_fd(int fd, iovec* parts, std::size_t part_co
     }
 }
 
-inline void write_frame_with_payload(int fd, WireType type, std::uint32_t request_id, std::uint32_t arg1,
+inline void write_frame_with_payload(NativeSocket fd, WireType type, std::uint32_t request_id, std::uint32_t arg1,
                                      std::uint32_t arg2, const void* payload, std::size_t payload_size,
                                      std::chrono::milliseconds inactivity_timeout, Deadline absolute_deadline) {
     HeaderBytes header = protocol::encode_header(type, request_id, arg1, arg2);
@@ -450,17 +450,17 @@ inline void write_frame_with_payload(int fd, WireType type, std::uint32_t reques
     write_iovecs_exact(fd, parts.data(), parts.size(), inactivity_timeout, absolute_deadline);
 }
 
-inline void write_header_frame(int fd, WireType type, std::uint32_t request_id, std::uint32_t arg1,
+inline void write_header_frame(NativeSocket fd, WireType type, std::uint32_t request_id, std::uint32_t arg1,
                                std::uint32_t arg2, std::chrono::milliseconds inactivity_timeout,
                                Deadline absolute_deadline) {
     const HeaderBytes header = protocol::encode_header(type, request_id, arg1, arg2);
     write_exact(fd, header.data(), header.size(), inactivity_timeout, absolute_deadline);
 }
 
-inline void connect_nonblocking(int fd, const platform_linux::UnixEndpoint& address,
+inline void connect_nonblocking(NativeSocket fd, const platform::UnixEndpoint& address,
                                 std::chrono::milliseconds connect_timeout,
                                 Deadline request_deadline) {
-    if (platform_linux::connect_socket(fd, address) == 0) {
+    if (platform::connect_socket(fd, address) == 0) {
         return;
     }
 

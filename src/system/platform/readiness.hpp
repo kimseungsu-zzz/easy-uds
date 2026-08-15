@@ -8,6 +8,8 @@
 #include <cstddef>
 #include <cstdint>
 
+#include "native_socket.hpp"
+
 namespace easy_uds::detail::readiness {
 
 inline constexpr std::uint32_t readable = 1U << 0;
@@ -31,15 +33,16 @@ struct Event {
 
 // All functions are concrete build-time backend calls.  A negative return
 // preserves errno for the caller's existing Error translation.
-int create_poller() noexcept;
-int create_wakeup() noexcept;
-int control(int poller_fd, Control operation, int fd, std::uint32_t mask,
+platform_types::NativeSocket create_poller() noexcept;
+platform_types::NativeSocket create_wakeup() noexcept;
+int control(platform_types::NativeSocket poller_fd, Control operation,
+            platform_types::NativeSocket fd, std::uint32_t mask,
             std::uint64_t token) noexcept;
-int wait(int poller_fd, Event* events, std::size_t capacity,
+int wait(platform_types::NativeSocket poller_fd, Event* events, std::size_t capacity,
          int timeout_ms) noexcept;
 
-void signal(int wake_fd) noexcept;
-void consume(int wake_fd) noexcept;
-void close(int fd) noexcept;
+void signal(platform_types::NativeSocket wake_fd) noexcept;
+void consume(platform_types::NativeSocket wake_fd) noexcept;
+void close(platform_types::NativeSocket fd) noexcept;
 
 } // namespace easy_uds::detail::readiness

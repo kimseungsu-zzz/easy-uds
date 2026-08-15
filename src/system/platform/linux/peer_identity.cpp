@@ -5,7 +5,7 @@
 
 namespace easy_uds::detail::peer_identity {
 
-Identity capture(int fd) noexcept {
+Identity capture(platform_types::NativeSocket fd) noexcept {
     Identity identity;
 #if defined(SO_PEERCRED)
     struct ucred credentials {};

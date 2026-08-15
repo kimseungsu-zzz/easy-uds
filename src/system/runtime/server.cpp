@@ -250,7 +250,7 @@ Server::Server(std::string socket_path, ServerOptions options) : state_(std::mak
 
     FileDescriptor listener = make_socket();
     const auto address = make_address(state_->socket_path);
-    if (platform_linux::bind_socket(listener.get(), address) != 0) {
+    if (platform::bind_socket(listener.get(), address) != 0) {
         throw_system_error("bind failed");
     }
 
@@ -281,13 +281,13 @@ Server::Server(std::string socket_path, ServerOptions options) : state_(std::mak
         throw std::runtime_error("socket path changed while applying permissions");
     }
 
-    if (platform_linux::listen_socket(listener.get(), options.listen_backlog) != 0) {
+    if (platform::listen_socket(listener.get(), options.listen_backlog) != 0) {
         const int error = errno;
         unlink_owned_socket(state_);
         throw_system_error("listen failed", error);
     }
 
-    const int wakeup_fd = readiness::create_wakeup();
+    const NativeSocket wakeup_fd = readiness::create_wakeup();
     if (wakeup_fd < 0) {
         unlink_owned_socket(state_);
         throw_system_error("wakeup event creation failed");
@@ -340,7 +340,7 @@ void Server::run() {
     RunActiveGuard active_guard(state);
 
     // Create the readiness set and register the listener + wakeup source.
-    const int readiness_fd = readiness::create_poller();
+    const NativeSocket readiness_fd = readiness::create_poller();
     if (readiness_fd < 0) {
         throw_system_error("readiness set creation failed");
     }

@@ -13,7 +13,7 @@ using protocol::WireType;
 
 namespace {
 
-void write_stream_request(int fd, std::uint32_t request_id, std::string_view route,
+void write_stream_request(NativeSocket fd, std::uint32_t request_id, std::string_view route,
                           const StreamReader& body, std::size_t chunk_size,
                           std::size_t max_stream_size,
                           std::chrono::milliseconds io_timeout, Deadline deadline) {

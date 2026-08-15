@@ -21,7 +21,7 @@ check_cmake_platform_source_set() {
     local list_name=$1
     awk -v name="${list_name}" '
         $0 ~ "^[[:space:]]*set\\(" name "[[:space:]]*$" { inside = 1; next }
-        inside && /^[[:space:]]*\)[[:space:]]*$/ { exit }
+        inside && /^[[:space:]]*\)[[:space:]]*$/ { inside = 0; next }
         inside { print $1 }
     ' "${root_dir}/CMakeLists.txt"
 }
@@ -33,7 +33,8 @@ check_no_match \
 
 linux_implementation_files=$(find "${root_dir}/src/system/platform/linux" \
     -type f -name '*.cpp' -printf 'src/system/platform/linux/%f\n' | sort)
-cmake_platform_sources=$(check_cmake_platform_source_set EASY_UDS_PLATFORM_SOURCES | sort)
+cmake_platform_sources=$(check_cmake_platform_source_set EASY_UDS_PLATFORM_SOURCES |
+    grep '^src/system/platform/linux/' | sort)
 cmake_common_linux_sources=$(check_cmake_platform_source_set EASY_UDS_COMMON_SOURCES |
     grep '^src/system/platform/linux/' || true)
 
@@ -42,6 +43,26 @@ if [[ "${linux_implementation_files}" != "${cmake_platform_sources}" ]]; then
     diff -u \
         <(printf '%s\n' "${linux_implementation_files}") \
         <(printf '%s\n' "${cmake_platform_sources}") >&2 || true
+    exit 1
+fi
+
+windows_implementation_files=$(find "${root_dir}/src/system/platform/windows" \
+    -type f -name '*.cpp' -printf 'src/system/platform/windows/%f\n' 2>/dev/null | sort)
+cmake_windows_sources=$(check_cmake_platform_source_set EASY_UDS_PLATFORM_SOURCES |
+    grep '^src/system/platform/windows/' | sort || true)
+if [[ -n "${windows_implementation_files}" &&
+      "${windows_implementation_files}" != "${cmake_windows_sources}" ]]; then
+    echo "architecture guard: Windows implementation/source-set mismatch" >&2
+    diff -u \
+        <(printf '%s\n' "${windows_implementation_files}") \
+        <(printf '%s\n' "${cmake_windows_sources}") >&2 || true
+    exit 1
+fi
+cmake_common_windows_sources=$(check_cmake_platform_source_set EASY_UDS_COMMON_SOURCES |
+    grep '^src/system/platform/windows/' || true)
+if [[ -n "${cmake_common_windows_sources}" ]]; then
+    echo "architecture guard: Windows implementation leaked into common CMake sources" >&2
+    printf '%s\n' "${cmake_common_windows_sources}" >&2
     exit 1
 fi
 if [[ -n "${cmake_common_linux_sources}" ]]; then
@@ -127,6 +148,18 @@ if ((${#user_sources[@]} > 0)); then
         "user implementation must not include platform/linux" \
         '^[[:space:]]*#[[:space:]]*include[[:space:]]*[<"][^>"]*(platform/linux|sys/epoll|sys/eventfd|sys/socket\.h|sys/un\.h|unistd\.h)[^>"]*[>"]' \
         "${user_sources[@]}"
+fi
+
+public_common_headers=()
+while IFS= read -r -d '' path; do
+    public_common_headers+=("${path}")
+done < <(find "${root_dir}/src/user/cpp/core/easy_uds" -type f -name '*.hpp' \
+    ! -name 'fd.hpp' ! -name 'peer_credentials.hpp' ! -name 'posix.hpp' -print0)
+if ((${#public_common_headers[@]} > 0)); then
+    check_no_match \
+        "common public headers must not include POSIX-only headers" \
+        '^[[:space:]]*#[[:space:]]*include[[:space:]]*[<"](sys/|unistd\.h|fcntl\.h|poll\.h)[>" ]' \
+        "${public_common_headers[@]}"
 fi
 
 echo "architecture_guard: user -> system -> platform direction passed"

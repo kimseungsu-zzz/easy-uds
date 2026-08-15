@@ -8,7 +8,7 @@
 
 #include <utility>
 
-namespace easy_uds::detail::platform {
+namespace easy_uds::detail {
 
 class DescriptorOwner {
   public:
@@ -29,30 +29,30 @@ class DescriptorOwner {
         return *this;
     }
 
-    [[nodiscard]] static DescriptorOwner adopt(int fd) noexcept {
+    [[nodiscard]] static DescriptorOwner adopt(platform_types::NativeSocket fd) noexcept {
         DescriptorOwner owner;
-        owner.fd_ = fd >= 0 ? fd : -1;
+        owner.fd_ = platform_types::valid(fd) ? fd : platform_types::invalid_socket;
         return owner;
     }
 
-    [[nodiscard]] bool valid() const noexcept { return fd_ >= 0; }
-    [[nodiscard]] int native_fd() const noexcept { return fd_; }
+    [[nodiscard]] bool valid() const noexcept { return platform_types::valid(fd_); }
+    [[nodiscard]] platform_types::NativeSocket native_fd() const noexcept { return fd_; }
 
-    [[nodiscard]] int release() noexcept {
-        return std::exchange(fd_, -1);
+    [[nodiscard]] platform_types::NativeSocket release() noexcept {
+        return std::exchange(fd_, platform_types::invalid_socket);
     }
 
     void reset() noexcept {
-        if (fd_ >= 0) {
+        if (platform_types::valid(fd_)) {
             socket_lifecycle::close(fd_);
-            fd_ = -1;
+            fd_ = platform_types::invalid_socket;
         }
     }
 
   private:
-    int fd_ = -1;
+    platform_types::NativeSocket fd_ = platform_types::invalid_socket;
 };
 
 using descriptor_owner = DescriptorOwner;
 
-} // namespace easy_uds::detail::platform
+} // namespace easy_uds::detail

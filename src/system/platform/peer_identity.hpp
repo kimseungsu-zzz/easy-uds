@@ -8,6 +8,8 @@
 #include <cstdint>
 #include <limits>
 
+#include "native_socket.hpp"
+
 namespace easy_uds::detail::peer_identity {
 
 struct Identity {
@@ -17,6 +19,6 @@ struct Identity {
     bool present = false;
 };
 
-Identity capture(int fd) noexcept;
+Identity capture(platform_types::NativeSocket fd) noexcept;
 
 } // namespace easy_uds::detail::peer_identity

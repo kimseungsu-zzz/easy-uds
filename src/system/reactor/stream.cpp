@@ -121,7 +121,7 @@ class ActiveStreamGuard {
 
 void run_stream_exchange(const std::shared_ptr<ServerState>& state, PendingJob&& job) {
     auto connection = job.connection;
-    const int fd = connection->fd;
+    const NativeSocket fd = connection->fd;
     ActiveStreamGuard stream_guard(state);
     struct RequestBytesGuard {
         std::shared_ptr<ServerState> state;

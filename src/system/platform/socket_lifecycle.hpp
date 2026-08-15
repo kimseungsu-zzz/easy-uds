@@ -6,12 +6,15 @@
 // retain the existing easy_uds::Error mapping at the system boundary.
 
 #include <utility>
+#include "native_socket.hpp"
 
 namespace easy_uds::detail {
 
+using NativeSocket = platform_types::NativeSocket;
+
 namespace socket_lifecycle {
 
-using NativeSocket = int;
+using NativeSocket = platform_types::NativeSocket;
 
 enum class SetupFailure {
     none,
@@ -42,7 +45,7 @@ SetupResult configure_no_sigpipe(NativeSocket fd) noexcept;
 
 class FileDescriptor {
   public:
-    explicit FileDescriptor(int fd = -1) noexcept : fd_(fd) {}
+    explicit FileDescriptor(NativeSocket fd = platform_types::invalid_socket) noexcept : fd_(fd) {}
     ~FileDescriptor() { reset(); }
 
     FileDescriptor(const FileDescriptor&) = delete;
@@ -57,18 +60,20 @@ class FileDescriptor {
         return *this;
     }
 
-    [[nodiscard]] int get() const noexcept { return fd_; }
-    [[nodiscard]] int release() noexcept { return std::exchange(fd_, -1); }
+    [[nodiscard]] NativeSocket get() const noexcept { return fd_; }
+    [[nodiscard]] NativeSocket release() noexcept {
+        return std::exchange(fd_, platform_types::invalid_socket);
+    }
 
-    void reset(int fd = -1) noexcept {
-        if (fd_ >= 0) {
+    void reset(NativeSocket fd = platform_types::invalid_socket) noexcept {
+        if (platform_types::valid(fd_)) {
             socket_lifecycle::close(fd_);
         }
         fd_ = fd;
     }
 
   private:
-    int fd_;
+    NativeSocket fd_;
 };
 
 } // namespace easy_uds::detail

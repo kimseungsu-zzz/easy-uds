@@ -5,6 +5,7 @@
 
 #include "easy_uds/server.hpp"
 #include "../platform/readiness.hpp"
+#include "../platform/server_path.hpp"
 #include "request_capabilities.hpp"
 #include "../transport/io.hpp"
 
@@ -97,7 +98,7 @@ struct OutgoingFrame {
 // either the reactor parses frames on it (connection in the readiness set) or a
 // stream worker owns it as an exclusive lease.
 struct Connection {
-    Connection(int fd, peer_identity::Identity identity)
+    Connection(NativeSocket fd, peer_identity::Identity identity)
         : fd(fd), peer(identity),
           last_io_progress(Clock::now().time_since_epoch().count()),
           last_output_progress(last_io_progress.load(std::memory_order_relaxed)) {}
@@ -110,7 +111,7 @@ struct Connection {
     Connection(const Connection&) = delete;
     Connection& operator=(const Connection&) = delete;
 
-    int fd = -1;
+    NativeSocket fd = platform_types::invalid_socket;
     peer_identity::Identity peer;
     std::atomic<bool> stream_active{false};  // a stream worker owns the fd (exclusive lease)
     std::atomic<bool> worker_owned{false};   // a fixed-request worker is leasing the fd
@@ -162,7 +163,7 @@ struct ReactorConnection {
     // Descriptors received via ancillary data, in the order their frames
     // arrived (reactor-thread only). A frame carrying carries_fd_flag pops
     // one, and the popped owner is moved into the request/job capability.
-    std::deque<platform::descriptor_owner> received_fds;
+    std::deque<descriptor_owner> received_fds;
     RequestCapabilityStorage capabilities;
 };
 
@@ -252,13 +253,13 @@ struct ServerState {
 
     std::mutex lifecycle_mutex;
     std::condition_variable lifecycle_cv;
-    int listener_fd = -1;
-    int wakeup_fd = -1;
+    NativeSocket listener_fd = platform_types::invalid_socket;
+    NativeSocket wakeup_fd = platform_types::invalid_socket;
     std::atomic<bool> wake_pending{false};
-    int instance_lock_fd = -1;
-    int readiness_fd = -1;
-    dev_t socket_device = 0;
-    ino_t socket_inode = 0;
+    NativeSocket instance_lock_fd = platform_types::invalid_socket;
+    NativeSocket readiness_fd = platform_types::invalid_socket;
+    easy_uds_server_path_device_t socket_device = 0;
+    easy_uds_server_path_inode_t socket_inode = 0;
     bool socket_identity_valid = false;
     bool stopped = false;
     bool run_started = false;
@@ -301,7 +302,7 @@ struct ServerState {
     // connections_mutex; the reactor parses, while stream exchanges and the
     // short fixed-request continuation path take exclusive read leases.
     std::mutex connections_mutex;
-    std::unordered_map<int, std::shared_ptr<ReactorConnection>> connections;
+    std::unordered_map<NativeSocket, std::shared_ptr<ReactorConnection>> connections;
     std::deque<std::shared_ptr<ReactorConnection>> resumed_connections;
 
     // Kept at the end so the disabled option does not shift existing hot
@@ -472,7 +473,7 @@ bool enqueue_worker_job(const std::shared_ptr<ServerState>& state, std::shared_p
 
 // Removes and shuts down a connection; the fd closes when the last worker/
 // reactor reference releases Connection, preventing fd-number reuse races.
-void close_connection(const std::shared_ptr<ServerState>& state, int fd);
+void close_connection(const std::shared_ptr<ServerState>& state, NativeSocket fd);
 
 // Returns a worker-leased connection to the reactor with a fresh parse state.
 void rearm_connection(const std::shared_ptr<ServerState>& state, const std::shared_ptr<Connection>& conn,

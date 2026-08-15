@@ -25,7 +25,7 @@ inline void validate_request_lengths(std::string_view route, std::string_view bo
     protocol::validate_request_lengths(route.size(), body.size(), max_message_size);
 }
 
-inline void write_request_frame(int fd, std::uint32_t request_id, std::string_view route,
+inline void write_request_frame(NativeSocket fd, std::uint32_t request_id, std::string_view route,
                                 std::string_view body,
                                 std::chrono::milliseconds io_timeout, Deadline deadline) {
     const protocol::HeaderBytes header = protocol::encode_header(

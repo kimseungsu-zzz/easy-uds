@@ -57,7 +57,7 @@ void process_resumed_connections(const std::shared_ptr<ServerState>& state) {
 Deadline expire_reactor_connections(const std::shared_ptr<ServerState>& state) {
     const Deadline now = Clock::now();
     Deadline next = Deadline::max();
-    std::vector<int> expired;
+    std::vector<NativeSocket> expired;
     {
         std::lock_guard<std::mutex> lock(state->connections_mutex);
         expired.reserve(state->connections.size());
@@ -94,7 +94,7 @@ Deadline expire_reactor_connections(const std::shared_ptr<ServerState>& state) {
             }
         }
     }
-    for (const int fd : expired) {
+    for (const NativeSocket fd : expired) {
         close_connection(state, fd);
     }
     return next;
@@ -103,9 +103,9 @@ Deadline expire_reactor_connections(const std::shared_ptr<ServerState>& state) {
 } // namespace
 
 void run_reactor(const std::shared_ptr<ServerState>& state) {
-    const int listener = state->listener_fd;
-    const int wakeup_fd = state->wakeup_fd;
-    const int readiness_fd = state->readiness_fd;
+    const NativeSocket listener = state->listener_fd;
+    const NativeSocket wakeup_fd = state->wakeup_fd;
+    const NativeSocket readiness_fd = state->readiness_fd;
 
     std::array<readiness::Event, readiness::max_events> events{};
     while (state->running.load()) {
@@ -136,7 +136,7 @@ void run_reactor(const std::shared_ptr<ServerState>& state) {
                 }
                 std::size_t accepted = 0;
                 while (accepted < max_accept_batch) {
-                    const int client_fd = platform_linux::accept_socket(listener);
+                    const NativeSocket client_fd = platform::accept_socket(listener);
                     if (client_fd < 0) {
                         if (errno == EINTR || errno == ECONNABORTED) {
                             continue;
@@ -188,7 +188,8 @@ void run_reactor(const std::shared_ptr<ServerState>& state) {
                 break;
             }
 
-            const int fd = static_cast<int>(static_cast<std::uint32_t>(token));
+            const NativeSocket fd =
+                static_cast<NativeSocket>(static_cast<std::uint32_t>(token));
             const std::uint32_t generation =
                 static_cast<std::uint32_t>(token >> 32);
             std::shared_ptr<ReactorConnection> connection;

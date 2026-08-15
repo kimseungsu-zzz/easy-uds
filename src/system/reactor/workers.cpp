@@ -199,7 +199,7 @@ bool complete_regular_request(const std::shared_ptr<ServerState>& state,
 void continue_connection(const std::shared_ptr<ServerState>& state,
                          std::shared_ptr<Connection> connection,
                          std::string buffered, std::size_t buffered_offset) {
-    const int fd = connection->fd;
+    const NativeSocket fd = connection->fd;
     const std::chrono::milliseconds grace = state->options.session_idle_grace;
     while (state->running.load() &&
            !connection->closing.load(std::memory_order_acquire)) {
@@ -295,7 +295,7 @@ void continue_connection(const std::shared_ptr<ServerState>& state,
 void rearm_connection(const std::shared_ptr<ServerState>& state,
                       const std::shared_ptr<Connection>& connection,
                       std::string buffered, std::size_t buffered_offset) {
-    const int fd = connection->fd;
+    const NativeSocket fd = connection->fd;
     if (connection->closing.load(std::memory_order_acquire)) {
         close_connection(state, fd);
         return;

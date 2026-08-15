@@ -9,7 +9,19 @@
 #include <string>
 #include <string_view>
 
+#if defined(_WIN32)
+#include <cstdint>
+using easy_uds_server_path_user_t = std::uint64_t;
+using easy_uds_server_path_device_t = std::uint64_t;
+using easy_uds_server_path_inode_t = std::uint64_t;
+using easy_uds_server_path_links_t = std::uint64_t;
+#else
 #include <sys/types.h>
+using easy_uds_server_path_user_t = uid_t;
+using easy_uds_server_path_device_t = dev_t;
+using easy_uds_server_path_inode_t = ino_t;
+using easy_uds_server_path_links_t = nlink_t;
+#endif
 
 namespace easy_uds::detail::server_path {
 
@@ -22,10 +34,10 @@ enum class EntryKind {
 
 struct Identity {
     EntryKind kind = EntryKind::missing;
-    uid_t owner = 0;
-    dev_t device = 0;
-    ino_t inode = 0;
-    nlink_t links = 0;
+    easy_uds_server_path_user_t owner = 0;
+    easy_uds_server_path_device_t device = 0;
+    easy_uds_server_path_inode_t inode = 0;
+    easy_uds_server_path_links_t links = 0;
 };
 
 struct LookupResult {
@@ -34,11 +46,13 @@ struct LookupResult {
     int native_error = 0;
 };
 
-uid_t effective_user() noexcept;
+easy_uds_server_path_user_t effective_user() noexcept;
 LookupResult inspect(const char* path) noexcept;
 bool same_identity(const Identity& left, const Identity& right) noexcept;
-bool is_owned_socket(const Identity& identity, uid_t user) noexcept;
-bool is_owned_regular_single_link(const Identity& identity, uid_t user) noexcept;
+bool is_owned_socket(const Identity& identity,
+                     easy_uds_server_path_user_t user) noexcept;
+bool is_owned_regular_single_link(const Identity& identity,
+                                  easy_uds_server_path_user_t user) noexcept;
 
 int unlink_socket_path(const char* path) noexcept;
 int chmod_socket_path(const char* path, unsigned int permissions) noexcept;
@@ -64,7 +78,7 @@ struct LockResult {
     LockFailure failure = LockFailure::none;
     socket_lifecycle::SetupFailure setup_failure =
         socket_lifecycle::SetupFailure::none;
-    int fd = -1;
+    platform_types::NativeSocket fd = platform_types::invalid_socket;
     int native_error = 0;
 };
 

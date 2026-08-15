@@ -1,6 +1,7 @@
 #pragma once
 
 #include "easy_uds/client.hpp"
+#include "../platform/socket_lifecycle.hpp"
 
 namespace easy_uds::detail::client_engine {
 

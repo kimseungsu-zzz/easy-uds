@@ -15,7 +15,8 @@ using protocol::HeaderBytes;
 using protocol::WireType;
 
 #if !defined(_WIN32)
-void write_request_frame_with_fd(int fd, std::uint32_t request_id, int passed_fd,
+void write_request_frame_with_fd(NativeSocket fd, std::uint32_t request_id,
+                                 NativeSocket passed_fd,
                                  std::string_view route, std::string_view body,
                                  std::chrono::milliseconds io_timeout, Deadline deadline) {
     const HeaderBytes header = protocol::encode_header(

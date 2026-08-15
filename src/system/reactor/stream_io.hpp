@@ -13,7 +13,7 @@ namespace easy_uds::detail {
 // blocking reads from the socket under the configured deadlines.
 class StreamByteSource {
   public:
-    StreamByteSource(std::string& buffered, std::size_t& offset, int fd)
+    StreamByteSource(std::string& buffered, std::size_t& offset, NativeSocket fd)
         : buffered_(buffered), offset_(offset), fd_(fd) {}
 
     void read(void* data, std::size_t size, std::chrono::milliseconds io_timeout, Deadline deadline) {
@@ -52,7 +52,7 @@ class StreamByteSource {
   private:
     std::string& buffered_;
     std::size_t& offset_;
-    int fd_;
+    NativeSocket fd_;
 };
 
 } // namespace easy_uds::detail

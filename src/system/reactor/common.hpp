@@ -57,8 +57,10 @@ inline std::uint32_t allocate_connection_generation(const std::shared_ptr<Server
     return generation;
 }
 
-inline std::uint64_t connection_token(int fd, std::uint32_t generation) noexcept {
-    return (static_cast<std::uint64_t>(generation) << 32) | static_cast<std::uint32_t>(fd);
+inline std::uint64_t connection_token(NativeSocket fd,
+                                      std::uint32_t generation) noexcept {
+    return (static_cast<std::uint64_t>(generation) << 32) |
+           (static_cast<std::uint64_t>(fd) & 0xffffffffULL);
 }
 
 } // namespace easy_uds::detail

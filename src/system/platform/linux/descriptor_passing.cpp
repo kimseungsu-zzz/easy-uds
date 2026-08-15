@@ -33,7 +33,8 @@ int set_close_on_exec(int fd, ReceiveError& error) noexcept {
 
 } // namespace
 
-ssize_t send_iovecs(int fd, iovec* parts, std::size_t part_count, int passed_fd,
+ssize_t send_iovecs(platform_types::NativeSocket fd, iovec* parts, std::size_t part_count,
+                    platform_types::NativeSocket passed_fd,
                     bool attach_fd) noexcept {
     msghdr message{};
     message.msg_iov = parts;
@@ -55,7 +56,7 @@ ssize_t send_iovecs(int fd, iovec* parts, std::size_t part_count, int passed_fd,
 #endif
 }
 
-ReceiveResult receive(int fd, void* data, std::size_t size) {
+ReceiveResult receive(platform_types::NativeSocket fd, void* data, std::size_t size) {
     ReceiveResult output;
     iovec vector{data, size};
     msghdr message{};

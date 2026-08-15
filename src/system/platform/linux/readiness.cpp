@@ -34,15 +34,16 @@ std::uint32_t to_native_mask(std::uint32_t mask) noexcept {
 
 } // namespace
 
-int create_poller() noexcept {
+platform_types::NativeSocket create_poller() noexcept {
     return ::epoll_create1(EPOLL_CLOEXEC);
 }
 
-int create_wakeup() noexcept {
+platform_types::NativeSocket create_wakeup() noexcept {
     return ::eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK);
 }
 
-int control(int poller_fd, Control operation, int fd, std::uint32_t mask,
+int control(platform_types::NativeSocket poller_fd, Control operation,
+            platform_types::NativeSocket fd, std::uint32_t mask,
             std::uint64_t token) noexcept {
     if (operation == Control::remove) {
         return ::epoll_ctl(poller_fd, EPOLL_CTL_DEL, fd, nullptr);
@@ -55,7 +56,8 @@ int control(int poller_fd, Control operation, int fd, std::uint32_t mask,
     return ::epoll_ctl(poller_fd, native_operation, fd, &event);
 }
 
-int wait(int poller_fd, Event* events, std::size_t capacity, int timeout_ms) noexcept {
+int wait(platform_types::NativeSocket poller_fd, Event* events, std::size_t capacity,
+         int timeout_ms) noexcept {
     if (events == nullptr || capacity == 0) {
         errno = EINVAL;
         return -1;
@@ -90,7 +92,7 @@ int wait(int poller_fd, Event* events, std::size_t capacity, int timeout_ms) noe
     return count;
 }
 
-void signal(int wake_fd) noexcept {
+void signal(platform_types::NativeSocket wake_fd) noexcept {
     if (wake_fd < 0) {
         return;
     }
@@ -99,7 +101,7 @@ void signal(int wake_fd) noexcept {
     }
 }
 
-void consume(int wake_fd) noexcept {
+void consume(platform_types::NativeSocket wake_fd) noexcept {
     if (wake_fd < 0) {
         return;
     }
@@ -116,7 +118,7 @@ void consume(int wake_fd) noexcept {
     }
 }
 
-void close(int fd) noexcept {
+void close(platform_types::NativeSocket fd) noexcept {
     if (fd >= 0) {
         (void)::close(fd);
     }

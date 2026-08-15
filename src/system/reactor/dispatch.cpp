@@ -112,7 +112,7 @@ bool enqueue_worker_job(const std::shared_ptr<ServerState>& state, std::shared_p
     return true;
 }
 
-void close_connection(const std::shared_ptr<ServerState>& state, int fd) {
+void close_connection(const std::shared_ptr<ServerState>& state, NativeSocket fd) {
     std::unique_lock<std::mutex> lock(state->connections_mutex);
     const auto it = state->connections.find(fd);
     if (it == state->connections.end()) {

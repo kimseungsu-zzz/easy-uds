@@ -15,8 +15,8 @@ namespace {
 
 using protocol::WireType;
 
-ssize_t recv_with_fds(int fd, char* data, std::size_t size,
-                      std::deque<platform::descriptor_owner>& fds) {
+ssize_t recv_with_fds(NativeSocket fd, char* data, std::size_t size,
+                      std::deque<descriptor_owner>& fds) {
     const auto result = descriptor_passing::receive(fd, data, size);
     if (result.error == descriptor_passing::ReceiveError::invalid_ancillary) {
         throw std::runtime_error("invalid or truncated ancillary descriptor");
@@ -28,7 +28,7 @@ ssize_t recv_with_fds(int fd, char* data, std::size_t size,
         throw_system_error("fcntl(F_SETFD) failed", result.native_error);
     }
     if (result.bytes > 0 && result.received_fd >= 0) {
-        auto owner = platform::descriptor_owner::adopt(result.received_fd);
+        auto owner = descriptor_owner::adopt(result.received_fd);
         fds.push_back(std::move(owner));
     }
     return result.bytes;
@@ -80,7 +80,7 @@ void release_consumed_pending(const std::shared_ptr<ReactorConnection>& rc,
 
 void consume(const std::shared_ptr<ServerState>& state,
              const std::shared_ptr<ReactorConnection>& rc) {
-    const int fd = rc->conn->fd;
+    const NativeSocket fd = rc->conn->fd;
     std::array<char, reactor_read_scratch_size> scratch{};
     const bool strict_budget = state->options.max_total_inflight_bytes != 0;
 

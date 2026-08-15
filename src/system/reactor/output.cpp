@@ -12,8 +12,9 @@ namespace {
 
 constexpr std::size_t kMaxFlushBytes = 256U * 1024U;
 
-std::uint64_t connection_token(int fd, std::uint32_t generation) noexcept {
-    return (static_cast<std::uint64_t>(generation) << 32) | static_cast<std::uint32_t>(fd);
+std::uint64_t connection_token(NativeSocket fd, std::uint32_t generation) noexcept {
+    return (static_cast<std::uint64_t>(generation) << 32) |
+           (static_cast<std::uint64_t>(fd) & 0xffffffffULL);
 }
 
 void mark_output_progress(const std::shared_ptr<Connection>& connection) noexcept {
@@ -71,7 +72,7 @@ std::array<iovec, 2> remaining_parts(OutgoingFrame& frame, std::size_t& part_cou
     return parts;
 }
 
-ssize_t send_frame_once(int fd, OutgoingFrame& frame) {
+ssize_t send_frame_once(NativeSocket fd, OutgoingFrame& frame) {
     std::size_t part_count = 0;
     auto parts = remaining_parts(frame, part_count);
     while (true) {

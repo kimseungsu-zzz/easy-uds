@@ -71,8 +71,6 @@ set(EASY_UDS_COMMON_SOURCES
 
 # Backend ownership is selected at build time.  Keep this list concrete: the
 # engine has no runtime IPlatform/ITransport object or type-erased dispatch.
-# 0.7.1 ships only the Linux set; the Windows branch is an explicit 0.8 entry
-# point, not an advertised implementation.
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     message(STATUS "easy-uds platform backend: Linux")
     set(EASY_UDS_PLATFORM_SOURCES
@@ -86,6 +84,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         src/system/platform/linux/server_path.cpp
     )
     set(EASY_UDS_PLATFORM_HEADERS
+        src/system/platform/native_socket.hpp
         src/system/platform/descriptor_owner.hpp
         src/system/platform/endpoint.hpp
         src/system/platform/readiness.hpp
@@ -97,8 +96,31 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         src/system/platform/server_path.hpp
     )
 elseif(CMAKE_SYSTEM_NAME STREQUAL "Windows")
-    message(FATAL_ERROR
-        "easy-uds Windows backend is a 0.8 design entry point and is not implemented in 0.7.1")
+    message(STATUS "easy-uds platform backend: Windows AF_UNIX")
+    set(EASY_UDS_PLATFORM_SOURCES
+        src/system/platform/windows/socket_common.cpp
+        src/system/platform/windows/endpoint.cpp
+        src/system/platform/windows/readiness.cpp
+        src/system/platform/windows/peer_identity.cpp
+        src/system/platform/windows/descriptor_passing.cpp
+        src/system/platform/windows/socket_lifecycle.cpp
+        src/system/platform/windows/socket_io.cpp
+        src/system/platform/windows/socket_wait.cpp
+        src/system/platform/windows/server_path.cpp
+    )
+    set(EASY_UDS_PLATFORM_HEADERS
+        src/system/platform/native_socket.hpp
+        src/system/platform/descriptor_owner.hpp
+        src/system/platform/endpoint.hpp
+        src/system/platform/readiness.hpp
+        src/system/platform/peer_identity.hpp
+        src/system/platform/descriptor_passing.hpp
+        src/system/platform/socket_lifecycle.hpp
+        src/system/platform/socket_io.hpp
+        src/system/platform/socket_wait.hpp
+        src/system/platform/server_path.hpp
+        src/system/platform/windows/socket_common.hpp
+    )
 else()
     message(FATAL_ERROR
         "easy-uds currently supports only the Linux platform backend")
@@ -134,6 +156,9 @@ target_include_directories(easy_uds
         $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
 )
 target_link_libraries(easy_uds PUBLIC Threads::Threads)
+if(WIN32)
+    target_link_libraries(easy_uds PUBLIC ws2_32)
+endif()
 target_compile_definitions(easy_uds PRIVATE
     EASY_UDS_SESSION_SPIN_US=${EASY_UDS_SESSION_SPIN_US}
     EASY_UDS_SESSION_INFLIGHT_SHARDS=${EASY_UDS_SESSION_INFLIGHT_SHARDS}
@@ -199,6 +224,14 @@ endif()
 if(EASY_UDS_BUILD_TESTS)
     include(CTest)
     if(BUILD_TESTING)
+        if(WIN32)
+            add_executable(easy_uds_test tests/windows_smoke.cpp)
+            target_link_libraries(easy_uds_test PRIVATE easy_uds::easy_uds)
+            target_compile_features(easy_uds_test PRIVATE cxx_std_17)
+            add_test(NAME easy_uds.unit COMMAND easy_uds_test)
+            set_tests_properties(easy_uds.unit PROPERTIES
+                TIMEOUT 30 LABELS "rc;windows;unit;integration;session;simple")
+        else()
         add_executable(easy_uds_test
             tests/easy_uds_test/main.cpp
             tests/easy_uds_test/common.cpp
@@ -359,6 +392,7 @@ if(EASY_UDS_BUILD_TESTS)
             set_tests_properties(easy_uds.compile_error_ux PROPERTIES
                 TIMEOUT 30
                 LABELS "rc;compile-error;api")
+        endif()
         endif()
     endif()
 endif()

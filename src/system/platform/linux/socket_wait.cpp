@@ -6,7 +6,7 @@
 
 namespace easy_uds::detail::socket_wait {
 
-Result wait_once(int fd, Interest interest, int timeout_ms) noexcept {
+Result wait_once(platform_types::NativeSocket fd, Interest interest, int timeout_ms) noexcept {
     pollfd item{};
     item.fd = fd;
     item.events = interest == Interest::read ? POLLIN : POLLOUT;

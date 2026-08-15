@@ -4,11 +4,11 @@
 
 namespace easy_uds::detail::socket_io {
 
-ssize_t receive(int fd, void* data, std::size_t size) noexcept {
+ssize_t receive(platform_types::NativeSocket fd, void* data, std::size_t size) noexcept {
     return ::recv(fd, data, size, 0);
 }
 
-ssize_t send(int fd, const void* data, std::size_t size) noexcept {
+ssize_t send(platform_types::NativeSocket fd, const void* data, std::size_t size) noexcept {
 #ifdef MSG_NOSIGNAL
     return ::send(fd, data, size, MSG_NOSIGNAL);
 #else
@@ -16,7 +16,7 @@ ssize_t send(int fd, const void* data, std::size_t size) noexcept {
 #endif
 }
 
-ssize_t send_iovecs(int fd, iovec* parts, std::size_t part_count) noexcept {
+ssize_t send_iovecs(platform_types::NativeSocket fd, iovec* parts, std::size_t part_count) noexcept {
     msghdr message{};
     message.msg_iov = parts;
     message.msg_iovlen = part_count;
@@ -27,7 +27,7 @@ ssize_t send_iovecs(int fd, iovec* parts, std::size_t part_count) noexcept {
 #endif
 }
 
-ssize_t send_iovecs_nonblocking(int fd, iovec* parts,
+ssize_t send_iovecs_nonblocking(platform_types::NativeSocket fd, iovec* parts,
                                 std::size_t part_count) noexcept {
     msghdr message{};
     message.msg_iov = parts;
@@ -39,7 +39,7 @@ ssize_t send_iovecs_nonblocking(int fd, iovec* parts,
 #endif
 }
 
-int query_socket_error(int fd, int& socket_error) noexcept {
+int query_socket_error(platform_types::NativeSocket fd, int& socket_error) noexcept {
     socklen_t length = sizeof(socket_error);
     return ::getsockopt(fd, SOL_SOCKET, SO_ERROR, &socket_error, &length);
 }

@@ -5,9 +5,17 @@
 // resource-passing or final cross-platform handle contract.
 
 #include <cstddef>
+#include <cstdint>
 
+#if defined(_WIN32)
+using ssize_t = std::ptrdiff_t;
+struct iovec;
+#else
 #include <sys/types.h>
 #include <sys/uio.h>
+#endif
+
+#include "native_socket.hpp"
 
 namespace easy_uds::detail::descriptor_passing {
 
@@ -29,7 +37,8 @@ struct ReceiveResult {
 // this attempt as descriptor ancillary data.  The caller owns retry policy and
 // must pass false after the first successful sendmsg so partial sends never
 // duplicate the descriptor.
-ssize_t send_iovecs(int fd, iovec* parts, std::size_t part_count, int passed_fd,
+ssize_t send_iovecs(platform_types::NativeSocket fd, iovec* parts, std::size_t part_count,
+                    platform_types::NativeSocket passed_fd,
                     bool attach_fd) noexcept;
 
 // Receives bytes and at most one descriptor. Malformed or truncated ancillary
@@ -38,6 +47,6 @@ ssize_t send_iovecs(int fd, iovec* parts, std::size_t part_count, int passed_fd,
 // identifies its fcntl stage and returns native errno; the caller maps that
 // result to the public error model. A negative bytes result preserves errno
 // from recvmsg itself.
-ReceiveResult receive(int fd, void* data, std::size_t size);
+ReceiveResult receive(platform_types::NativeSocket fd, void* data, std::size_t size);
 
 } // namespace easy_uds::detail::descriptor_passing

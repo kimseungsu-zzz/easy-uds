@@ -38,7 +38,7 @@ ssize_t send_iovecs(int fd, iovec* parts, std::size_t part_count, int passed_fd,
     msghdr message{};
     message.msg_iov = parts;
     message.msg_iovlen = part_count;
-    char control[CMSG_SPACE(sizeof(int))]{};
+    alignas(cmsghdr) char control[CMSG_SPACE(sizeof(int))]{};
     if (attach_fd) {
         message.msg_control = control;
         message.msg_controllen = sizeof(control);
@@ -64,7 +64,8 @@ ReceiveResult receive(int fd, void* data, std::size_t size) {
     // Reuse the large defensive control area per reactor thread. Descriptor
     // receive is also used for ordinary frames, so this must not add a heap
     // allocation or repeatedly zero a kilobyte-sized stack buffer.
-    thread_local std::array<char, CMSG_SPACE(sizeof(int) * max_received_descriptors)> control{};
+    alignas(cmsghdr) thread_local
+        std::array<char, CMSG_SPACE(sizeof(int) * max_received_descriptors)> control{};
     message.msg_control = control.data();
     message.msg_controllen = control.size();
     int receive_flags = 0;

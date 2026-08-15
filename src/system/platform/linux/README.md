@@ -3,7 +3,7 @@
 This directory owns concrete Linux capability functions. `endpoint.cpp`
 implements the contract in `../endpoint.hpp`, containing pathname `AF_UNIX`
 endpoint validation and socket lifecycle calls
-(`socket`, `connect`, `bind`, `listen`, `accept4`, `unlink`, and `chmod`).
+(`socket`, `connect`, `bind`, `listen`, and `accept4`).
 `readiness.cpp` translates the platform-neutral readiness contract to
 `epoll_create1`, `epoll_ctl`, `epoll_wait`, and the `eventfd` wakeup
 signal/consume pair. Reactor code sees only readiness masks, tokens, and
@@ -21,6 +21,10 @@ results; transport code retains retry, deadline, and public error semantics.
 `socket_wait.cpp` owns one synchronous `poll` attempt and translates
 `POLLIN`/`POLLOUT`/`POLLERR`/`POLLHUP`/`POLLNVAL` into a small result. It is
 separate from the reactor's multi-connection readiness/eventfd contract.
+`server_path.cpp` owns the Linux filesystem side of server pathname lifecycle:
+`lstat`/effective-UID identity, secure lock-file open/stat/lock/permission
+operations, and pathname unlink/chmod. Runtime code retains stale/busy policy
+and the before/current/after TOCTOU checks.
 Higher layers keep their existing value/timeout semantics and call these
 functions directly; there is no virtual transport or type-erased backend.
 

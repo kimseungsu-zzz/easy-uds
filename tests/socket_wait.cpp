@@ -33,6 +33,15 @@ int main() {
         return 1;
     }
 
+    const auto writable = easy_uds::detail::socket_wait::wait_once(
+        sockets[0], Interest::write, 1000);
+    if (!require(writable.status == Status::ready,
+                 "writable socket was not reported ready")) {
+        ::close(sockets[0]);
+        ::close(sockets[1]);
+        return 1;
+    }
+
     const char byte = 'x';
     if (!require(::write(sockets[1], &byte, sizeof(byte)) == 1,
                  "socket write failed")) {
@@ -56,10 +65,26 @@ int main() {
     ::close(sockets[0]);
     const auto invalid = easy_uds::detail::socket_wait::wait_once(
         sockets[0], Interest::write, 0);
+    if (!require(invalid.status == Status::invalid_descriptor &&
+                     invalid.native_error == EBADF,
+                 "invalid descriptor was not reported")) {
+        ::close(sockets[1]);
+        return 1;
+    }
+
+    int hangup_sockets[2] = {-1, -1};
+    if (!require(::socketpair(AF_UNIX, SOCK_STREAM, 0, hangup_sockets) == 0,
+                 "hangup socketpair failed")) {
+        ::close(sockets[1]);
+        return 1;
+    }
+    ::close(hangup_sockets[1]);
+    const auto hangup = easy_uds::detail::socket_wait::wait_once(
+        hangup_sockets[0], Interest::read, 1000);
+    ::close(hangup_sockets[0]);
     ::close(sockets[1]);
-    return require(invalid.status == Status::invalid_descriptor &&
-                       invalid.native_error == EBADF,
-                   "invalid descriptor was not reported")
+    return require(hangup.status == Status::ready,
+                   "peer close did not wake readable wait")
                ? 0
                : 1;
 }

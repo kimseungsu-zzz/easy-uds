@@ -5,10 +5,6 @@
 #include <cstring>
 #include <stdexcept>
 
-#include <fcntl.h>
-#include <sys/stat.h>
-#include <unistd.h>
-
 namespace easy_uds::detail::platform_linux {
 
 UnixEndpoint make_endpoint(std::string_view socket_path) {
@@ -53,14 +49,6 @@ int listen_socket(NativeSocket socket, int backlog) noexcept {
 
 NativeSocket accept_socket(NativeSocket listener) noexcept {
     return ::accept4(listener, nullptr, nullptr, SOCK_CLOEXEC | SOCK_NONBLOCK);
-}
-
-int unlink_socket(const char* socket_path) noexcept {
-    return ::unlink(socket_path);
-}
-
-int chmod_socket(const char* socket_path, unsigned int permissions) noexcept {
-    return ::chmod(socket_path, static_cast<mode_t>(permissions));
 }
 
 } // namespace easy_uds::detail::platform_linux

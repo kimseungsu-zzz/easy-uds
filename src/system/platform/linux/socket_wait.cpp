@@ -14,17 +14,17 @@ Result wait_once(int fd, Interest interest, int timeout_ms) noexcept {
     const int result = ::poll(&item, 1, timeout_ms);
     if (result < 0) {
         if (errno == EINTR) {
-            return {Status::interrupted, EINTR, 0};
+            return {Status::interrupted, EINTR};
         }
-        return {Status::error, errno, 0};
+        return {Status::error, errno};
     }
     if (result == 0) {
-        return {Status::timed_out, 0, 0};
+        return {Status::timed_out, 0};
     }
     if ((item.revents & POLLNVAL) != 0) {
-        return {Status::invalid_descriptor, EBADF, item.revents};
+        return {Status::invalid_descriptor, EBADF};
     }
-    return {Status::ready, 0, item.revents};
+    return {Status::ready, 0};
 }
 
 } // namespace easy_uds::detail::socket_wait

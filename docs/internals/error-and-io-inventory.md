@@ -1,6 +1,6 @@
 # Error and low-level I/O inventory
 
-This inventory records the 0.7.1 Phase 4G boundary. It is intentionally a
+This inventory records the 0.7.1 Phase 4H boundary. It is intentionally a
 concrete map, not a virtual backend design. Linux capabilities report raw
 results, `errno`, or a small semantic result; the system/runtime layer decides
 when that becomes `easy_uds::Error`.
@@ -16,6 +16,7 @@ when that becomes `easy_uds::Error`.
 | `system/transport/io.hpp` | `ETIMEDOUT`, `EBADF`, `EPIPE`, `ECONNRESET` | Deadline, invalid descriptor, closed peer | `throw_system_error` maps to public `Error` and preserves native code |
 | `system/transport/io.hpp` | `EINPROGRESS`, `EAGAIN`, `EWOULDBLOCK`, `EINTR`, `SO_ERROR` | Nonblocking connect completion | Transport; only final failure becomes `Error` |
 | `system/platform/linux/socket_wait.cpp` | `poll`, `POLLIN`, `POLLOUT`, `POLLERR`, `POLLHUP`, `POLLNVAL` | One synchronous wait attempt | Returns a small native/semantic result; transport owns retry/deadline mapping |
+| `system/platform/linux/server_path.cpp` | `open`, `fstat`, `flock`, `fchmod`, `lstat`, `geteuid`, pathname `unlink`/`chmod` | Server lock and pathname identity/security capability | Returns identity, lock status, and native errors; runtime owns stale/busy policy |
 | `system/runtime/server.cpp` | `ENOENT`, `EWOULDBLOCK`, `EAGAIN`, `EADDRINUSE` | Stale socket/instance lock lifecycle | Server lifecycle via `throw_system_error` or explicit busy `Error` |
 | `system/platform/linux/readiness.cpp` | `EINTR`, `EINVAL`, raw syscall result | Linux readiness/wakeup capability | Reactor decides retry/translation |
 | `system/platform/linux/descriptor_passing.cpp` | `MSG_CTRUNC`, malformed ancillary, native `fcntl` result | Descriptor capability semantic/native result | Parser maps semantic rejection; `throw_system_error` maps native setup failure |
@@ -54,6 +55,22 @@ Linux implementation owns `poll` and `POLL*` translation. All three seams
 return native results only. `io.hpp` retains retry, deadline, peer-closed, and
 public `Error` semantics above those calls; synchronous wait is intentionally
 not merged with the multi-connection reactor readiness contract.
+
+## Server pathname lifecycle
+
+`src/system/platform/server_path.hpp` is a concrete Linux-oriented seam for
+filesystem state associated with a server socket pathname. It owns the raw
+`lstat`, effective-UID, lock-file (`O_NOFOLLOW`/`fstat`/`flock`/`fchmod`),
+pathname `unlink`, and socket-path `chmod` operations. Its identity value keeps
+the device/inode pair, entry kind, owner, and link count needed by the security
+checks.
+
+`system/runtime/server.cpp` still owns the logical policy: whether a path is
+stale or busy, when the grace period expires, which identity comparisons must
+precede removal, and how native failures become `Error` or a diagnostic
+exception. The before/current/after identity checks and lock-file ownership,
+regular-file, single-link, `O_NOFOLLOW`, and exclusive-lock invariants are not
+weakened by the extraction.
 
 ## Descriptor seam status
 

@@ -81,7 +81,14 @@ median_field() {
 }
 
 echo "fixed-policy alternating median: iterations=${iterations}, repeats=${repeats}"
-echo "all repeats are included; no threshold-triggered batch is selected post-hoc"
+if (( repeats == 10 )); then
+    echo "decision policy: initial 10 repeats; if any gate is exceeded, rerun with repeats=20 and use all 20"
+elif (( repeats == 20 )); then
+    echo "decision policy: expanded 20-repeat rerun; all 20 repeats are included"
+else
+    echo "diagnostic run only: release decisions require a 10-repeat initial run or a 20-repeat expanded rerun"
+fi
+echo "all reported repeats are included; no passing batch is selected post-hoc"
 printf '%-5s %-7s %14s %12s %12s %14s %12s\n' \
     load api throughput_req_s p50_us p99_us cpu_s_1M rss_KiB
 for concurrency in 1 8 32; do

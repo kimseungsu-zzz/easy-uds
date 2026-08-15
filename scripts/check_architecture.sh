@@ -54,6 +54,11 @@ for policy_dir in reactor runtime; do
         "${root_dir}/src/system/${policy_dir}"
 done
 
+check_no_match \
+    "server runtime must use server pathname capability" \
+    'sys/file\.h|sys/stat\.h|unistd\.h|(^|[^[:alnum:]_])::(open|fstat|flock|fchmod|lstat|geteuid|unlink|chmod)[[:space:]]*\(' \
+    "${root_dir}/src/system/runtime/server.cpp"
+
 system_sources=()
 while IFS= read -r -d '' path; do
     system_sources+=("${path}")

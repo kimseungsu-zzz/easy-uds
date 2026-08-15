@@ -22,7 +22,6 @@ enum class Status {
 struct Result {
     Status status = Status::error;
     int native_error = 0;
-    short native_events = 0;
 };
 
 // Perform one synchronous wait. timeout_ms follows poll semantics: -1 waits

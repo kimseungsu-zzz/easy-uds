@@ -111,13 +111,14 @@ this inventory.
 | `system/runtime/client_engine` | Yes: Response/options/FD/stream values | Request deadlines and one-shot lifecycle | Through transport helpers |
 | `system/runtime/session_engine` | Yes: Response/options/stats values | In-flight table, reader/waiter, send serialization | Through transport helpers |
 | `user/cpp/core/client/session` | Owns public member glue | Calls concrete engine functions and state | No platform backend dependency |
-| `system/runtime/server` | Yes, transitively through reactor core | Lifecycle and route registration | Direct Linux includes remain |
+| `system/runtime/server` | Yes, transitively through reactor core | Lifecycle, stale/busy policy, and route registration | Uses concrete server pathname, endpoint, readiness, and socket lifecycle capabilities |
 | `system/reactor` | Yes, transitively through `core.hpp` | Connections, parsing, workers, queues, readiness policy | Uses the platform-neutral readiness contract; no direct epoll/eventfd headers |
 | `system/transport` | Yes: options/request/response/stream/error | Exact I/O, framing, and retry/deadline policy | Uses concrete lifecycle/I/O/wait seams; synchronous wait is distinct from reactor readiness |
-| `system/platform/endpoint.hpp` + `system/platform/linux/endpoint.cpp` | No public C++ API | Pathname endpoint contract and socket lifecycle capability | Linux `AF_UNIX`/socket syscalls |
+| `system/platform/endpoint.hpp` + `system/platform/linux/endpoint.cpp` | No public C++ API | `AF_UNIX` endpoint value and socket create/connect/bind/listen/accept | Linux `AF_UNIX`/socket syscalls |
 | `system/platform/socket_lifecycle.hpp` + `system/platform/linux/socket_lifecycle.cpp` | No public C++ API | Internal fd ownership, shutdown, and nonblocking setup | Linux `close`/`shutdown`/`fcntl`/`setsockopt` |
 | `system/platform/socket_io.hpp` + `system/platform/linux/socket_io.cpp` | No public C++ API | Raw byte/gathered I/O and connect completion query | Linux `send`/`recv`/`sendmsg`/`getsockopt` |
 | `system/platform/socket_wait.hpp` + `system/platform/linux/socket_wait.cpp` | No public C++ API | One synchronous wait attempt | Linux `poll`/`POLL*`; not the reactor readiness contract |
+| `system/platform/server_path.hpp` + `system/platform/linux/server_path.cpp` | No public C++ API | Path identity, lock ownership, stale-cleanup primitives | Linux `lstat`/`geteuid`/`open`/`fstat`/`flock`/`fchmod`/pathname operations |
 | `system/platform/linux/readiness.cpp` | No public C++ API | Readiness registration/wait and wakeup signal/consume | Linux `epoll`/`eventfd` syscalls |
 | `system/platform/linux/peer_identity.cpp` | No public C++ API | Connected-peer identity capture | Linux `SO_PEERCRED`/`getsockopt` |
 | `system/platform/linux/descriptor_passing.cpp` | No public C++ API | Descriptor-bearing send/receive and ancillary validation | Linux `SCM_RIGHTS`/`recvmsg`/`sendmsg`; raw result only |
@@ -142,9 +143,11 @@ user/system seam, endpoint/socket capability, readiness/wakeup capability,
 peer-identity capability, and descriptor-passing capability are now in place.
 Phase 4E moved descriptor native/error results across an internal boundary
 before public mapping. Phase 4F moved socket lifecycle and raw I/O syscalls
-behind concrete platform seams. Phase 4G now isolates one synchronous poll
-attempt without merging it into reactor readiness; deadline/retry/error meaning
-remains above all of these seams. The remaining generic low-level error
-translation is an inventory-driven follow-up.
+behind concrete platform seams. Phase 4G isolated one synchronous poll attempt
+without merging it into reactor readiness. Phase 4H now isolates the Linux
+pathname/instance lifecycle primitives while leaving stale/busy/security policy
+in `runtime/server.cpp`; deadline/retry/error meaning remains above all of
+these seams. The remaining generic low-level error translation is an
+inventory-driven follow-up.
 These capabilities should continue to land as small concrete units where that
 reduces coupling without adding a call or allocation to the hot path.

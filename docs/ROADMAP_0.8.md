@@ -31,6 +31,12 @@ attempt. Its current `Interest`/result shape is useful for the Linux transport
 seam, but it is not a promise that Windows will use `poll`-style waiting; an
 IOCP or another completion model may require a different setup-time contract.
 
+Phase 4H keeps server pathname identity and instance locking Linux-specific.
+The current security model depends on POSIX device/inode, effective UID,
+`O_NOFOLLOW`, and `flock` semantics. Windows endpoint ownership and stale-name
+behavior remain an open design item rather than a `PortableInode` or universal
+file-lock API.
+
 ## Capability decisions still open
 
 - Windows readiness may use a completion model rather than the current Linux

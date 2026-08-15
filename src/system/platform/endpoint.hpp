@@ -28,7 +28,4 @@ int bind_socket(NativeSocket socket, const UnixEndpoint& endpoint) noexcept;
 int listen_socket(NativeSocket socket, int backlog) noexcept;
 NativeSocket accept_socket(NativeSocket listener) noexcept;
 
-int unlink_socket(const char* socket_path) noexcept;
-int chmod_socket(const char* socket_path, unsigned int permissions) noexcept;
-
 } // namespace easy_uds::detail::platform_linux

@@ -67,6 +67,8 @@ add_library(easy_uds
     src/system/platform/socket_io.hpp
     src/system/platform/linux/socket_wait.cpp
     src/system/platform/socket_wait.hpp
+    src/system/platform/linux/server_path.cpp
+    src/system/platform/server_path.hpp
     src/system/transport/transport.cpp
     src/system/transport/transport.hpp
     src/system/reactor/dispatch.cpp

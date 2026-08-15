@@ -1,4 +1,5 @@
 #include "../reactor/core.hpp"
+#include "../platform/server_path.hpp"
 
 #include <algorithm>
 #include <array>
@@ -12,10 +13,6 @@
 #include <utility>
 #include <vector>
 
-#include <sys/file.h>
-#include <sys/stat.h>
-#include <unistd.h>
-
 namespace easy_uds {
 namespace {
 
@@ -23,69 +20,60 @@ using namespace detail;
 
 // ---- stale-socket and instance-lock helpers (ported from 0.5) --------------
 
-bool same_file_identity(const struct stat& left, const struct stat& right) noexcept {
-    return left.st_dev == right.st_dev && left.st_ino == right.st_ino;
-}
-
-void verify_owned_socket_candidate(const struct stat& info, const std::string& socket_path) {
-    if (!S_ISSOCK(info.st_mode)) {
+void verify_owned_socket_candidate(const server_path::Identity& info,
+                                   const std::string& socket_path) {
+    if (info.kind != server_path::EntryKind::socket) {
         throw std::runtime_error("socket path exists and is not a Unix-domain socket: " + socket_path);
     }
-    if (info.st_uid != ::geteuid()) {
+    if (info.owner != server_path::effective_user()) {
         throw std::runtime_error("refusing to remove a Unix-domain socket owned by another user: " + socket_path);
     }
 }
 
-std::string instance_lock_path(const std::string& socket_path) {
-    return socket_path + ".lock";
-}
-
 FileDescriptor acquire_instance_lock(const std::string& socket_path) {
-    const std::string lock_path = instance_lock_path(socket_path);
-    int flags = O_RDWR | O_CREAT;
-#ifdef O_CLOEXEC
-    flags |= O_CLOEXEC;
-#endif
-#ifdef O_NOFOLLOW
-    flags |= O_NOFOLLOW;
-#endif
-
-    FileDescriptor fd(::open(lock_path.c_str(), flags, 0600));
-    if (fd.get() < 0) {
-        throw_system_error("open server lock file failed");
+    const auto result = server_path::acquire_lock(socket_path);
+    const std::string lock_path = server_path::lock_path(socket_path);
+    if (result.status == server_path::LockStatus::busy) {
+        throw_system_error("socket path is already owned by another easy-uds server",
+                           EADDRINUSE);
     }
-    set_close_on_exec(fd.get());
-
-    struct stat info {};
-    if (::fstat(fd.get(), &info) != 0) {
-        throw_system_error("fstat server lock file failed");
-    }
-    if (!S_ISREG(info.st_mode) || info.st_uid != ::geteuid() || info.st_nlink != 1) {
+    if (result.status == server_path::LockStatus::invalid_entry) {
         throw std::runtime_error(
-            "server lock path must be a singly-linked regular file owned by the current user: " + lock_path);
+            "server lock path must be a singly-linked regular file owned by the current user: " +
+            lock_path);
     }
-    if (::flock(fd.get(), LOCK_EX | LOCK_NB) != 0) {
-        const int error = errno;
-        if (error == EWOULDBLOCK || error == EAGAIN) {
-            throw_system_error("socket path is already owned by another easy-uds server", EADDRINUSE);
+    if (result.status != server_path::LockStatus::acquired) {
+        switch (result.failure) {
+        case server_path::LockFailure::open:
+            throw_system_error("open server lock file failed", result.native_error);
+        case server_path::LockFailure::close_on_exec:
+            if (result.setup_failure == socket_lifecycle::SetupFailure::close_on_exec_getfd) {
+                throw_system_error("fcntl(F_GETFD) failed", result.native_error);
+            }
+            throw_system_error("fcntl(F_SETFD) failed", result.native_error);
+        case server_path::LockFailure::stat:
+            throw_system_error("fstat server lock file failed", result.native_error);
+        case server_path::LockFailure::flock:
+            throw_system_error("flock server lock file failed", result.native_error);
+        case server_path::LockFailure::chmod:
+            throw_system_error("chmod server lock file failed", result.native_error);
+        case server_path::LockFailure::none:
+            break;
         }
-        throw_system_error("flock server lock file failed", error);
+        throw_system_error("server lock setup failed", result.native_error);
     }
-    if (::fchmod(fd.get(), 0600) != 0) {
-        throw_system_error("chmod server lock file failed");
-    }
-    return fd;
+    return FileDescriptor(result.fd);
 }
 
 void remove_stale_socket(const std::string& socket_path, std::chrono::milliseconds grace_period) {
-    struct stat before {};
-    if (::lstat(socket_path.c_str(), &before) != 0) {
-        if (errno == ENOENT) {
+    const auto before = server_path::inspect(socket_path.c_str());
+    if (!before.present) {
+        if (before.native_error == ENOENT) {
             return;
         }
-        throw_system_error("lstat socket path failed");
+        throw_system_error("lstat socket path failed", before.native_error);
     }
-    verify_owned_socket_candidate(before, socket_path);
+    verify_owned_socket_candidate(before.identity, socket_path);
 
     const Deadline grace_deadline = deadline_from_now(grace_period);
     while (true) {
@@ -107,15 +95,15 @@ void remove_stale_socket(const std::string& socket_path, std::chrono::millisecon
             }
         }
 
-        struct stat current {};
-        if (::lstat(socket_path.c_str(), &current) != 0) {
-            if (errno == ENOENT) {
+        const auto current = server_path::inspect(socket_path.c_str());
+        if (!current.present) {
+            if (current.native_error == ENOENT) {
                 return;
             }
-            throw_system_error("lstat socket path failed");
+            throw_system_error("lstat socket path failed", current.native_error);
         }
-        verify_owned_socket_candidate(current, socket_path);
-        if (!same_file_identity(before, current)) {
+        verify_owned_socket_candidate(current.identity, socket_path);
+        if (!server_path::same_identity(before.identity, current.identity)) {
             throw std::runtime_error("socket path changed while checking whether it is stale: " + socket_path);
         }
 
@@ -125,29 +113,33 @@ void remove_stale_socket(const std::string& socket_path, std::chrono::millisecon
         std::this_thread::sleep_for(std::chrono::milliseconds{10});
     }
 
-    struct stat after {};
-    if (::lstat(socket_path.c_str(), &after) != 0) {
-        if (errno == ENOENT) {
+    const auto after = server_path::inspect(socket_path.c_str());
+    if (!after.present) {
+        if (after.native_error == ENOENT) {
             return;
         }
-        throw_system_error("lstat socket path failed");
+        throw_system_error("lstat socket path failed", after.native_error);
     }
-    verify_owned_socket_candidate(after, socket_path);
-    if (!same_file_identity(before, after)) {
+    verify_owned_socket_candidate(after.identity, socket_path);
+    if (!server_path::same_identity(before.identity, after.identity)) {
         throw std::runtime_error("socket path changed before stale-socket removal: " + socket_path);
     }
 
-    if (platform_linux::unlink_socket(socket_path.c_str()) != 0 && errno != ENOENT) {
-        throw_system_error("remove stale socket failed");
+    if (server_path::unlink_socket_path(socket_path.c_str()) != 0 && errno != ENOENT) {
+        throw_system_error("remove stale socket failed", errno);
     }
 }
 
 void unlink_owned_socket(const std::shared_ptr<detail::ServerState>& state) noexcept {
-    struct stat current {};
-    if (state->socket_identity_valid && ::lstat(state->socket_path.c_str(), &current) == 0 &&
-        S_ISSOCK(current.st_mode) && current.st_uid == ::geteuid() &&
-        current.st_dev == state->socket_device && current.st_ino == state->socket_inode) {
-        (void)platform_linux::unlink_socket(state->socket_path.c_str());
+    const auto current = server_path::inspect(state->socket_path.c_str());
+    const server_path::Identity expected{server_path::EntryKind::socket,
+                                         server_path::effective_user(),
+                                         state->socket_device, state->socket_inode,
+                                         0};
+    if (state->socket_identity_valid && current.present &&
+        server_path::is_owned_socket(current.identity, expected.owner) &&
+        server_path::same_identity(current.identity, expected)) {
+        (void)server_path::unlink_socket_path(state->socket_path.c_str());
     }
 }
 
@@ -262,28 +254,29 @@ Server::Server(std::string socket_path, ServerOptions options) : state_(std::mak
         throw_system_error("bind failed");
     }
 
-    struct stat identity {};
-    if (::lstat(state_->socket_path.c_str(), &identity) != 0) {
-        const int error = errno;
-        throw_system_error("lstat bound socket failed", error);
+    const auto identity = server_path::inspect(state_->socket_path.c_str());
+    if (!identity.present) {
+        throw_system_error("lstat bound socket failed", identity.native_error);
     }
-    if (!S_ISSOCK(identity.st_mode) || identity.st_uid != ::geteuid()) {
+    if (!server_path::is_owned_socket(identity.identity,
+                                      server_path::effective_user())) {
         throw std::runtime_error("bound socket path was replaced before initialization completed");
     }
-    state_->socket_device = identity.st_dev;
-    state_->socket_inode = identity.st_ino;
+    state_->socket_device = identity.identity.device;
+    state_->socket_inode = identity.identity.inode;
     state_->socket_identity_valid = true;
 
-    if (platform_linux::chmod_socket(state_->socket_path.c_str(), options.socket_permissions) != 0) {
+    if (server_path::chmod_socket_path(state_->socket_path.c_str(), options.socket_permissions) != 0) {
         const int error = errno;
         unlink_owned_socket(state_);
         throw_system_error("chmod socket path failed", error);
     }
 
-    struct stat after_chmod {};
-    if (::lstat(state_->socket_path.c_str(), &after_chmod) != 0 ||
-        !same_file_identity(identity, after_chmod) || !S_ISSOCK(after_chmod.st_mode) ||
-        after_chmod.st_uid != ::geteuid()) {
+    const auto after_chmod = server_path::inspect(state_->socket_path.c_str());
+    if (!after_chmod.present ||
+        !server_path::same_identity(identity.identity, after_chmod.identity) ||
+        !server_path::is_owned_socket(after_chmod.identity,
+                                      server_path::effective_user())) {
         unlink_owned_socket(state_);
         throw std::runtime_error("socket path changed while applying permissions");
     }

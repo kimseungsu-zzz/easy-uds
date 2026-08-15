@@ -67,3 +67,9 @@ Phase 4G adds `platform/socket_wait.hpp` with a concrete Linux implementation
 for one synchronous `poll` attempt. Transport retains deadline calculation,
 `EINTR` retry, timeout conversion, and public error mapping; this wait seam is
 not the reactor readiness contract.
+
+Phase 4H adds `platform/server_path.hpp` and its Linux implementation for
+server pathname identity and instance-lock primitives. The capability preserves
+`O_NOFOLLOW`, ownership/type/link checks, `flock`, and before/current/after
+device/inode validation; runtime retains the stale/busy decision and public
+error policy.

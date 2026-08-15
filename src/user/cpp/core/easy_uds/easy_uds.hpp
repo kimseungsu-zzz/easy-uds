@@ -4,7 +4,9 @@
 // directly; this header preserves the original one-include experience.
 #include "easy_uds/client.hpp"
 #include "easy_uds/error.hpp"
+#if !defined(_WIN32)
 #include "easy_uds/fd.hpp"
+#endif
 #include "easy_uds/options.hpp"
 #include "easy_uds/request.hpp"
 #include "easy_uds/request_context.hpp"

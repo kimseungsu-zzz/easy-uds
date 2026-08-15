@@ -14,6 +14,7 @@ using namespace detail;
 using protocol::HeaderBytes;
 using protocol::WireType;
 
+#if !defined(_WIN32)
 void write_request_frame_with_fd(int fd, std::uint32_t request_id, int passed_fd,
                                  std::string_view route, std::string_view body,
                                  std::chrono::milliseconds io_timeout, Deadline deadline) {
@@ -28,6 +29,7 @@ void write_request_frame_with_fd(int fd, std::uint32_t request_id, int passed_fd
     write_iovecs_exact_with_fd(fd, parts.data(), parts.size(), passed_fd, io_timeout,
                                deadline);
 }
+#endif
 
 Response read_response(BufferedReader& reader, std::size_t max_message_size,
                        std::chrono::milliseconds io_timeout, Deadline deadline) {
@@ -69,6 +71,7 @@ Response request(const std::string& socket_path, const ClientOptions& options,
     return read_response(reader, options.max_message_size, options.io_timeout, deadline);
 }
 
+#if !defined(_WIN32)
 Response request_fd(const std::string& socket_path, const ClientOptions& options,
                     std::string_view route, BorrowedFd fd, std::string_view body) {
     if (!fd.valid()) {
@@ -84,6 +87,7 @@ Response request_fd(const std::string& socket_path, const ClientOptions& options
     BufferedReader reader(socket_fd.get());
     return read_response(reader, options.max_message_size, options.io_timeout, deadline);
 }
+#endif
 
 Status request_stream(
     const std::string& socket_path, const ClientOptions& options,

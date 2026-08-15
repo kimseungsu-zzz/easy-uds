@@ -12,8 +12,10 @@ void validate(const std::string& socket_path, const ClientOptions& options);
 Response request(const std::string& socket_path, const ClientOptions& options,
                  std::string_view route, std::string_view body);
 
+#if !defined(_WIN32)
 Response request_fd(const std::string& socket_path, const ClientOptions& options,
                     std::string_view route, BorrowedFd fd, std::string_view body);
+#endif
 
 Status request_stream(
     const std::string& socket_path, const ClientOptions& options,

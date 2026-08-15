@@ -1,6 +1,8 @@
 #pragma once
 
+#if !defined(_WIN32)
 #include "easy_uds/fd.hpp"
+#endif
 #include "easy_uds/options.hpp"
 #include "easy_uds/response.hpp"
 #include "easy_uds/session.hpp"
@@ -21,12 +23,14 @@ class Client {
     [[nodiscard]] Response request(std::string_view route,
                                    std::string_view body = {}) const;
 
+#if !defined(_WIN32)
     // One-shot POSIX request that also passes a borrowed descriptor (a
     // duplicate is sent via SCM_RIGHTS; the caller keeps ownership). The
     // server exposes the received descriptor through the POSIX capability view
     // during a contextual handler callback. The response is read normally.
     [[nodiscard]] Response request_fd(std::string_view route, BorrowedFd fd,
                                       std::string_view body = {}) const;
+#endif
 
     // One-shot streamed exchange over a dedicated connection.
     [[nodiscard]] Status request_stream(

@@ -15,10 +15,12 @@ Response Client::request(std::string_view route, std::string_view body) const {
     return detail::client_engine::request(socket_path_, options_, route, body);
 }
 
+#if !defined(_WIN32)
 Response Client::request_fd(std::string_view route, BorrowedFd fd,
                             std::string_view body) const {
     return detail::client_engine::request_fd(socket_path_, options_, route, fd, body);
 }
+#endif
 
 Status Client::request_stream(
     std::string_view route, const StreamReader& request_body,

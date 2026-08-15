@@ -1,3 +1,4 @@
+#if !defined(_WIN32)
 #include "easy_uds/posix.hpp"
 
 namespace easy_uds::detail {
@@ -8,3 +9,4 @@ const RequestCapabilityStorage* request_capability_bridge(
 }
 
 } // namespace easy_uds::detail
+#endif

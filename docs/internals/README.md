@@ -2,6 +2,12 @@
 
 - [Linux dependency and backend audit](linux-dependency-audit.md) — complete
   Phase 5 inventory, temporary POSIX seams, and CMake backend source selection.
+- [Platform support](../platform-support.md) — validated Linux scope, Windows
+  AF_UNIX scope, and intentional unsupported capabilities.
+- [Windows backend notes](windows-backend.md) — concrete backend choices and
+  the external CI validation boundary.
+- [0.8 blocker journal](blocker-journal-0.8.md) — known portability and
+  environment blockers with their non-blocking work split.
 
 These pages explain implementation choices and benchmark evidence. They are
 not required to use the public API and may change without a source-compatible

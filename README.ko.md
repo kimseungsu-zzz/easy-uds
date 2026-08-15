@@ -423,7 +423,7 @@ easy_uds::Client client("/tmp/easy-uds.sock", options);
 
 ## 동시성과 종료
 
-`Server::run()`은 epoll reactor와 고정 worker pool을 시작한 뒤 종료될 때까지 block됩니다. serialized executor는 thread 없이 시작하고 독립 domain의 병렬 실행이 실제로 필요할 때 `max_concurrent_serialized_domains`까지 지연 확장됩니다. 하나의 `Server` 객체에서 `run()`은 한 번만 호출할 수 있습니다.
+`Server::run()`은 readiness 기반 reactor와 고정 worker pool을 시작한 뒤 종료될 때까지 block됩니다. Linux에서는 epoll을 사용하고 Windows backend는 별도 concrete readiness 구현을 사용합니다. serialized executor는 thread 없이 시작하고 독립 domain의 병렬 실행이 실제로 필요할 때 `max_concurrent_serialized_domains`까지 지연 확장됩니다. 하나의 `Server` 객체에서 `run()`은 한 번만 호출할 수 있습니다.
 
 일반 `on()` handler는 여러 worker thread에서 동시에 실행될 수 있습니다. 동일하게 등록된 함수 객체가 여러 worker에서 동시에 호출될 수 있으므로 mutable capture와 공유 state는 애플리케이션이 직접 동기화해야 합니다. Handler table 갱신은 copy-on-write이며 진행 중인 요청을 무효화하지 않고 원자적으로 공개됩니다.
 
@@ -713,7 +713,8 @@ src/system/protocol/    protocol v2 codec 경계
 src/system/runtime/     Client, Session, Server runtime
 src/system/reactor/     reactor parser, dispatch, flow control, output, worker
 src/system/transport/   exact I/O와 client framing utility
-src/system/platform/linux/  Linux dependency 경계 예약 영역
+src/system/platform/linux/  선택된 Linux capability 구현
+src/system/platform/windows/ 선택된 Windows AF_UNIX capability 구현(CI 검증)
 src/user/cpp/core/      설치되는 Core C++ header
 src/user/cpp/simple/   설치되는 Simple C++ header
 src/user/c/             C ABI 경계 예약 영역
@@ -730,6 +731,8 @@ docs/ROADMAP_0.7.md     0.7 사용성·API·호환성 계획
 docs/ERGONOMICS_0.7.md  beginner-first syntax 및 progressive disclosure audit
 docs/RELEASE_0.7.md     0.7.0 최종 범위와 검증 기록
 docs/releases/v0.7.1.md 0.7.1 아키텍처 릴리즈 범위와 인수인계
+docs/platform-support.md   현재 Linux/Windows 지원 범위와 제한
+docs/internals/windows-backend.md Windows backend 결정과 검증 경계
 docs/SOURCE_LAYOUT.md    0.7.1 source ownership와 dependency 경계
 docs/PERF_0.7.md        v0.6.4 대비 0.7 성능 회귀 측정
 docs/history/experiments/0.6.md  독립 UDS 기술 capability probe (history)

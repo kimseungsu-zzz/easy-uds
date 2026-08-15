@@ -20,7 +20,7 @@
 - `Server::enqueue_maintenance()` for safe server-side state cleanup from external threads
 - Natural flow control through Unix-socket backpressure
 - Versioned, binary-safe protocol framing (protocol v2 with request-id multiplexing)
-- epoll reactor server: idle connections never occupy a worker, and stalled fixed-response I/O never blocks the reactor or worker pool
+- readiness-driven reactor server: idle connections never occupy a worker, and stalled fixed-response I/O never blocks the reactor or worker pool (epoll on Linux; the Windows AF_UNIX backend remains CI-gated)
 - Configurable connection limit, inactivity timeout, absolute request deadline (`408` on expiry), connect timeout, backlog, and message size
 - Optimistic non-blocking socket I/O that calls `poll()` only on backpressure
 - Gathered header+payload writes through `sendmsg()` to reduce per-chunk system calls
@@ -321,7 +321,7 @@ Applications should place sockets in a directory whose permissions match their t
 
 ## Concurrency and shutdown
 
-`Server::run()` starts the epoll reactor and fixed worker pool, then blocks until shutdown. The serialized executor starts empty and grows lazily as independent domains need concurrency. `run()` is intended to be called once per `Server` object. `Server::stop()` is idempotent and may be called concurrently from other threads.
+`Server::run()` starts the readiness-driven reactor and fixed worker pool, then blocks until shutdown. Linux uses epoll; the Windows backend uses its concrete readiness implementation. The serialized executor starts empty and grows lazily as independent domains need concurrency. `run()` is intended to be called once per `Server` object. `Server::stop()` is idempotent and may be called concurrently from other threads.
 
 During shutdown:
 
@@ -667,7 +667,8 @@ src/system/protocol/    Protocol-v2 codec boundary
 src/system/runtime/     Client, Session, and Server runtime
 src/system/reactor/     Reactor parser, dispatch, flow control, output, workers
 src/system/transport/   Exact I/O and client framing helpers
-src/system/platform/linux/  Reserved Linux dependency boundary
+src/system/platform/linux/  Selected Linux capability implementation
+src/system/platform/windows/ Selected Windows AF_UNIX capability implementation (CI-gated)
 src/user/cpp/core/      Installed Core C++ headers
 src/user/cpp/simple/   Installed Simple C++ header
 src/user/c/             Reserved C ABI boundary
@@ -684,6 +685,8 @@ docs/ROADMAP_0.7.md     0.7 usability, API, and compatibility plan
 docs/ERGONOMICS_0.7.md  Beginner-first syntax and progressive disclosure audit
 docs/RELEASE_0.7.md     0.7.0 final scope and verification record
 docs/releases/v0.7.1.md 0.7.1 architecture release scope and handoff
+docs/platform-support.md   Current Linux/Windows support and intentional limits
+docs/internals/windows-backend.md Windows backend decisions and validation boundary
 docs/SOURCE_LAYOUT.md    0.7.1 source ownership and dependency boundary
 docs/PERF_0.7.md        0.7 regression measurements against v0.6.4
 docs/history/experiments/0.6.md  Standalone UDS capability probes (history)

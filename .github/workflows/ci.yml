@@ -400,6 +400,10 @@ jobs:
   windows-core:
     runs-on: windows-latest
     timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        shared: [OFF, ON]
     steps:
       - name: Check out repository
         uses: actions/checkout@v7
@@ -410,6 +414,7 @@ jobs:
         run: >-
           cmake -S . -B build-windows -A x64
           -DCMAKE_BUILD_TYPE=Release
+          -DBUILD_SHARED_LIBS=${{ matrix.shared }}
           -DEASY_UDS_BUILD_TESTS=ON
           -DEASY_UDS_BUILD_EXAMPLES=ON
           -DEASY_UDS_BUILD_SIMPLE_API=ON
@@ -432,3 +437,34 @@ jobs:
 
       - name: Build installed Simple consumer
         run: cmake --build windows-consumer-build --config Release --parallel
+
+      - name: Configure installed Core consumer
+        run: >-
+          cmake -S tests/windows_package_consumer -B windows-core-consumer-build
+          -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_PREFIX_PATH="$env:RUNNER_TEMP\easy-uds-prefix"
+
+      - name: Build installed Core consumer
+        run: cmake --build windows-core-consumer-build --config Release --parallel
+
+      - name: Run installed Simple package consumer
+        shell: pwsh
+        run: |
+          $env:PATH = "$env:RUNNER_TEMP\easy-uds-prefix\bin;$env:PATH"
+          $socket = Join-Path $env:RUNNER_TEMP "easy-uds-installed-simple.sock"
+          $server = Start-Process `
+            -FilePath (Join-Path $PWD "simple-consumer-build\Release\easy_uds_simple_server.exe") `
+            -ArgumentList $socket -PassThru -WindowStyle Hidden
+          try {
+            Start-Sleep -Milliseconds 500
+            & (Join-Path $PWD "simple-consumer-build\Release\easy_uds_simple_client.exe") $socket
+            if ($LASTEXITCODE -ne 0) {
+              throw "installed Simple consumer failed with exit code $LASTEXITCODE"
+            }
+          } finally {
+            if (!$server.HasExited) {
+              Stop-Process -Id $server.Id -Force
+            }
+            Remove-Item -Force -ErrorAction SilentlyContinue $socket
+            Remove-Item -Force -ErrorAction SilentlyContinue "$socket.lock"
+          }

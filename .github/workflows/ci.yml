@@ -396,3 +396,39 @@ jobs:
 
       - name: Run Simple/Core A-B and allocation probes
         run: bash scripts/simple_core_benchmark_median.sh build-simple 5000 10
+
+  windows-core:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Configure Windows Core and Simple validation
+        run: >-
+          cmake -S . -B build-windows -A x64
+          -DCMAKE_BUILD_TYPE=Release
+          -DEASY_UDS_BUILD_TESTS=ON
+          -DEASY_UDS_BUILD_EXAMPLES=ON
+          -DEASY_UDS_BUILD_SIMPLE_API=ON
+          -DEASY_UDS_WARNINGS_AS_ERRORS=ON
+
+      - name: Build Windows library and consumers
+        run: cmake --build build-windows --config Release --parallel
+
+      - name: Run Windows Core smoke tests
+        run: ctest --test-dir build-windows -C Release --output-on-failure
+
+      - name: Install Windows package
+        run: cmake --install build-windows --config Release --prefix "$env:RUNNER_TEMP\easy-uds-prefix"
+
+      - name: Configure installed Simple consumer
+        run: >-
+          cmake -S tests/simple_consumer -B windows-consumer-build
+          -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_PREFIX_PATH="$env:RUNNER_TEMP\easy-uds-prefix"
+
+      - name: Build installed Simple consumer
+        run: cmake --build windows-consumer-build --config Release --parallel

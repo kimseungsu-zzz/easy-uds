@@ -169,10 +169,10 @@ int wait(platform_types::NativeSocket poller_fd, Event* events,
             continue;
         }
         std::uint32_t mask = 0;
-        if ((revents & (POLLRDNORM | POLLIN)) != 0) {
+        if ((revents & POLLRDNORM) != 0) {
             mask |= readable;
         }
-        if ((revents & (POLLWRNORM | POLLOUT)) != 0) {
+        if ((revents & POLLWRNORM) != 0) {
             mask |= writable;
         }
         if ((revents & POLLERR) != 0 || (revents & POLLNVAL) != 0) {

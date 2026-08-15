@@ -46,9 +46,6 @@ void set_errno_from_wsa(int error) noexcept {
     case WSAECONNABORTED:
         errno = ECONNRESET;
         break;
-    case WSAEPIPE:
-        errno = EPIPE;
-        break;
     case WSAEADDRINUSE:
         errno = EADDRINUSE;
         break;

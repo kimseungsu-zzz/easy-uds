@@ -3,6 +3,7 @@
 
 #if defined(_WIN32)
 #include <array>
+#include <climits>
 #include <cerrno>
 #include <limits>
 

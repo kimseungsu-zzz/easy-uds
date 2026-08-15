@@ -1,7 +1,7 @@
 #include "easy_uds/client.hpp"
 
-#include "../detail/io.hpp"
-#include "transport.hpp"
+#include "../transport/io.hpp"
+#include "../transport/transport.hpp"
 
 #include <array>
 #include <cstdint>

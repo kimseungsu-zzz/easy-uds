@@ -1,8 +1,8 @@
 #include "easy_uds/session.hpp"
 
-#include "../detail/io.hpp"
+#include "../transport/io.hpp"
 #include "trace.hpp"
-#include "transport.hpp"
+#include "../transport/transport.hpp"
 
 #include <array>
 #include <atomic>

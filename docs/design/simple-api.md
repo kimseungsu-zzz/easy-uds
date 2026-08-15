@@ -2,7 +2,8 @@
 
 This document records the promotion audit for the beginner facade. The
 implementation was first measured under `experiments/simple_api/`; the narrow
-v1 adapter now lives in `include/easy_uds/simple.hpp` without destabilizing the
+v1 adapter now lives in `src/user/cpp/simple/easy_uds/simple.hpp` and is
+installed as `include/easy_uds/simple.hpp` without destabilizing the
 frozen Core API. The experiment directory retains the full decision record.
 
 ## Goal
@@ -35,7 +36,8 @@ execution. Protocol v2 and the reactor are out of scope.
 
 ## Promotion decisions
 
-- Header location: `include/easy_uds/simple.hpp`; the experiment shim remains
+- Header location: `src/user/cpp/simple/easy_uds/simple.hpp` (installed as
+  `include/easy_uds/simple.hpp`); the experiment shim remains
   under `experiments/simple_api/simple.hpp` for reproducible prototype builds.
 - Namespace: `easy_uds::simple`; `simple` makes the boundary visible and leaves
   the existing `easy_uds::Server` names untouched.

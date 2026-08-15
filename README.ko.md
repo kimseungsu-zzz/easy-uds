@@ -642,13 +642,17 @@ instance lock은 같은 pathname을 사용하는 easy-uds server끼리 startup/s
 ## 저장소 구조
 
 ```text
-include/easy_uds/       umbrella와 기능별 공개 header
-src/client/             one-shot Client, persistent Session, 공유 transport
-src/server/             Server lifecycle, routing, startup, shutdown
-src/reactor/            reactor core, parser, dispatch, flow control, output,
-                        streaming, worker executor
-src/protocol/           protocol v2 codec 경계
-src/detail/             descriptor, deadline, socket, exact-I/O utility
+src/system/core/        공용 엔진 상태와 error 구현
+src/system/protocol/    protocol v2 codec 경계
+src/system/runtime/     Client, Session, Server runtime
+src/system/reactor/     reactor parser, dispatch, flow control, output, worker
+src/system/transport/   exact I/O와 client framing utility
+src/system/platform/linux/  Linux dependency 경계 예약 영역
+src/user/cpp/core/      설치되는 Core C++ header
+src/user/cpp/simple/   설치되는 Simple C++ header
+src/user/c/             C ABI 경계 예약 영역
+src/user/py/            Python binding 경계 예약 영역
+include/easy_uds/       src/user에서 생성되는 설치 호환 경로
 examples/               최소 server/client와 robot HAL 조합 예제
 experiments/0.6/        0.6 실험 단계의 독립 probe 보존
 tests/easy_uds_test/     기능별로 나눈 unit 테스트
@@ -665,6 +669,10 @@ docs/history/README.md    history 및 실험 인덱스
 docs/PERF_0.6.md         0.6 benchmark 측정 결과와 해석
 .github/workflows/      GitHub Actions CI
 ```
+
+소유권 규칙과 relocation 정책은
+[`docs/SOURCE_LAYOUT.md`](docs/SOURCE_LAYOUT.md)에 정리했습니다. system은
+사용자 언어를 모르고, user는 platform backend를 모릅니다.
 
 ## 라이선스
 

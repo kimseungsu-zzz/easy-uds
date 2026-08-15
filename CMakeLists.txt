@@ -41,26 +41,26 @@ endif()
 find_package(Threads REQUIRED)
 
 add_library(easy_uds
-    src/error.cpp
-    src/server/server.cpp
-    src/client/client.cpp
-    src/client/session.cpp
-    src/client/transport.cpp
-    src/client/trace.hpp
-    src/client/transport.hpp
-    src/reactor/dispatch.cpp
-    src/reactor/event_loop.cpp
-    src/reactor/flow_control.cpp
-    src/reactor/output.cpp
-    src/reactor/parser.cpp
-    src/reactor/stream.cpp
-    src/reactor/workers.cpp
-    src/reactor/common.hpp
-    src/reactor/core.hpp
-    src/reactor/parser.hpp
-    src/reactor/stream_io.hpp
-    src/protocol/codec.hpp
-    src/detail/io.hpp
+    src/system/core/error.cpp
+    src/system/runtime/server.cpp
+    src/system/runtime/client.cpp
+    src/system/runtime/session.cpp
+    src/system/runtime/trace.hpp
+    src/system/transport/transport.cpp
+    src/system/transport/transport.hpp
+    src/system/reactor/dispatch.cpp
+    src/system/reactor/event_loop.cpp
+    src/system/reactor/flow_control.cpp
+    src/system/reactor/output.cpp
+    src/system/reactor/parser.cpp
+    src/system/reactor/stream.cpp
+    src/system/reactor/workers.cpp
+    src/system/reactor/common.hpp
+    src/system/reactor/core.hpp
+    src/system/reactor/parser.hpp
+    src/system/reactor/stream_io.hpp
+    src/system/protocol/codec.hpp
+    src/system/transport/io.hpp
 )
 add_library(easy_uds::easy_uds ALIAS easy_uds)
 
@@ -82,7 +82,8 @@ set_target_properties(easy_uds PROPERTIES
 target_compile_features(easy_uds PUBLIC cxx_std_17)
 target_include_directories(easy_uds
     PUBLIC
-        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src/user/cpp/core>
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src/user/cpp/simple>
         $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
 )
 target_link_libraries(easy_uds PUBLIC Threads::Threads)
@@ -292,17 +293,21 @@ if(EASY_UDS_BUILD_EXPERIMENTS)
         experiments/0.6/easy_uds_shm_transport_probe.cpp)
     add_executable(easy_uds_shm_framed_probe
         experiments/0.6/easy_uds_shm_framed_probe.cpp
-        src/error.cpp
+        src/system/core/error.cpp
     )
     add_executable(easy_uds_shm_process_probe
         experiments/0.6/easy_uds_shm_process_probe.cpp
-        src/error.cpp
+        src/system/core/error.cpp
     )
     target_include_directories(easy_uds_shm_framed_probe PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/include
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/system
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/user/cpp/core
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/user/cpp/simple
     )
     target_include_directories(easy_uds_shm_process_probe PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/include
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/system
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/user/cpp/core
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/user/cpp/simple
     )
     find_library(EASY_UDS_LIBURING uring)
     find_path(EASY_UDS_LIBURING_INCLUDE_DIR liburing.h)
@@ -438,11 +443,12 @@ if(EASY_UDS_BUILD_FUZZERS)
 
     add_executable(easy_uds_protocol_fuzz
         tests/protocol_fuzz.cpp
-        src/error.cpp
+        src/system/core/error.cpp
     )
     target_include_directories(easy_uds_protocol_fuzz PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/src
-        ${CMAKE_CURRENT_SOURCE_DIR}/include
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/system
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/user/cpp/core
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/user/cpp/simple
     )
     target_compile_features(easy_uds_protocol_fuzz PRIVATE cxx_std_17)
     target_compile_options(easy_uds_protocol_fuzz PRIVATE
@@ -470,7 +476,10 @@ install(TARGETS easy_uds
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
     INCLUDES DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
 )
-install(DIRECTORY include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+install(DIRECTORY src/user/cpp/core/easy_uds/
+    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/easy_uds)
+install(DIRECTORY src/user/cpp/simple/easy_uds/
+    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/easy_uds)
 
 configure_package_config_file(
     cmake/easy_udsConfig.cmake.in

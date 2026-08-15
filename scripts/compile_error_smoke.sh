@@ -12,7 +12,8 @@ for source in "$root_dir"/tests/compile_errors/*.cpp; do
     log="$work_dir/$name.log"
     echo "checking expected compile failure: $name ($compiler)"
     if "$compiler" -std=c++17 -Wall -Wextra -Wpedantic \
-        -I"$root_dir/include" -c "$source" -o "$work_dir/$name.o" \
+        -I"$root_dir/src/user/cpp/core" -I"$root_dir/src/user/cpp/simple" \
+        -c "$source" -o "$work_dir/$name.o" \
         >"$log" 2>&1; then
         cat "$log"
         echo "unexpected successful compilation: $source" >&2

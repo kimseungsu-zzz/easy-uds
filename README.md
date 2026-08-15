@@ -651,13 +651,17 @@ The instance lock coordinates easy-uds servers using the same path. It cannot fo
 ## Repository layout
 
 ```text
-include/easy_uds/       Umbrella plus feature-specific public headers
-src/client/             One-shot Client, persistent Session, shared transport
-src/server/             Server lifecycle, routing, startup, and shutdown
-src/reactor/            Reactor core, parser, dispatch, flow control, output,
-                        streaming, and worker executors
-src/protocol/           Protocol-v2 codec boundary
-src/detail/             Descriptor, deadline, socket, and exact-I/O utilities
+src/system/core/        Shared engine state and error implementation
+src/system/protocol/    Protocol-v2 codec boundary
+src/system/runtime/     Client, Session, and Server runtime
+src/system/reactor/     Reactor parser, dispatch, flow control, output, workers
+src/system/transport/   Exact I/O and client framing helpers
+src/system/platform/linux/  Reserved Linux dependency boundary
+src/user/cpp/core/      Installed Core C++ headers
+src/user/cpp/simple/   Installed Simple C++ header
+src/user/c/             Reserved C ABI boundary
+src/user/py/            Reserved Python binding boundary
+include/easy_uds/       Installed compatibility path (generated from src/user)
 examples/               Minimal server/client plus robot HAL composition example
 experiments/0.6/        Preserved standalone probes from the 0.6 experiment phase
 tests/easy_uds_test/     Unit tests grouped by subsystem
@@ -674,6 +678,10 @@ docs/history/README.md    Historical measurements and experiment index
 docs/PERF_0.6.md         0.6 benchmark measurements and interpretation
 .github/workflows/      GitHub Actions CI
 ```
+
+The ownership rules and relocation policy are recorded in
+[`docs/SOURCE_LAYOUT.md`](docs/SOURCE_LAYOUT.md): system code does not depend
+on a user language, and user-facing code does not depend on a platform backend.
 
 ## License
 

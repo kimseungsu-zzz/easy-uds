@@ -1,7 +1,7 @@
 #include "easy_uds/easy_uds.hpp"
 
 #ifdef EASY_UDS_TRACE_SESSION_CONTENTION
-#include "../src/client/trace.hpp"
+#include "../src/system/runtime/trace.hpp"
 #endif
 
 #include <atomic>

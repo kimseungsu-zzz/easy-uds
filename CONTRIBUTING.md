@@ -21,7 +21,7 @@ The developer preset enables warnings-as-errors.
 - Run the protocol fuzzer when changing header parsing or length validation.
 - Update `docs/PROTOCOL.md` for any wire-format change and bump the protocol version when compatibility breaks.
 - Update `CHANGELOG.md` for user-visible changes.
-- Keep the CMake project version and `include/easy_uds/version.hpp` in sync for releases.
+- Keep the CMake project version and `src/user/cpp/core/easy_uds/version.hpp` in sync for releases.
 - Treat pre-1.0 minor releases as potentially ABI-breaking and keep the configured `SOVERSION` policy intact.
 
 ## Formatting
@@ -29,5 +29,5 @@ The developer preset enables warnings-as-errors.
 The repository includes `.clang-format` and `.editorconfig`.
 
 ```bash
-clang-format -i include/easy_uds/*.hpp src/*.cpp src/*.hpp examples/*.cpp tests/*.cpp
+clang-format -i src/user/cpp/core/easy_uds/*.hpp src/user/cpp/simple/easy_uds/*.hpp src/system/**/*.cpp src/system/**/*.hpp examples/*.cpp tests/*.cpp
 ```

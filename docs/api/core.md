@@ -89,4 +89,4 @@ returns. Stream size and timeout limits come from `ServerOptions`/
 | `io_timeout` | Maximum idle interval between successful I/O progress |
 | `stats` | Opt-in cumulative counters; gauges remain observable by snapshot |
 
-The complete option list and defaults live in [`options.hpp`](../../include/easy_uds/options.hpp).
+The complete option list and defaults live in [`options.hpp`](../../src/user/cpp/core/easy_uds/options.hpp).

@@ -10,17 +10,17 @@ performance cost.
 
 | Area | Header | Reference |
 |---|---|---|
-| Server, routes, streams, options | [`server.hpp`](../../include/easy_uds/server.hpp) / [`options.hpp`](../../include/easy_uds/options.hpp) | [Core API](core.md), [Option contracts](options.md), [RouteOptions and serialization](route-options-design.md) |
-| One-shot client | [`client.hpp`](../../include/easy_uds/client.hpp) | [Core API](core.md), [Getting started](../getting-started/README.md) |
-| Persistent multiplexed client | [`session.hpp`](../../include/easy_uds/session.hpp) | [Session state](session.md) |
-| Request and response values | [`request.hpp`](../../include/easy_uds/request.hpp) / [`response.hpp`](../../include/easy_uds/response.hpp) | [FD passing](fd-passing.md), [Request context](request-context.md) |
-| Streaming | [`stream.hpp`](../../include/easy_uds/stream.hpp) | [Core API](core.md) and [streaming example](../examples/streaming.md) |
-| Error classification | [`error.hpp`](../../include/easy_uds/error.hpp) | [Error model](errors.md) |
-| Descriptor ownership | [`fd.hpp`](../../include/easy_uds/fd.hpp) | [FD passing](fd-passing.md) |
-| Request metadata | [`request_context.hpp`](../../include/easy_uds/request_context.hpp) | [Request context](request-context.md) |
-| Operational snapshots | [`stats.hpp`](../../include/easy_uds/stats.hpp) | [Runtime statistics](stats.md) |
-| Beginner fixed RPC facade | [`simple.hpp`](../../include/easy_uds/simple.hpp) | [Simple API guide](../simple-api/getting-started.md) |
-| Public include/layout | [`easy_uds.hpp`](../../include/easy_uds/easy_uds.hpp) | [Headers and source layout](headers.md) |
+| Server, routes, streams, options | [`server.hpp`](../../src/user/cpp/core/easy_uds/server.hpp) / [`options.hpp`](../../src/user/cpp/core/easy_uds/options.hpp) | [Core API](core.md), [Option contracts](options.md), [RouteOptions and serialization](route-options-design.md) |
+| One-shot client | [`client.hpp`](../../src/user/cpp/core/easy_uds/client.hpp) | [Core API](core.md), [Getting started](../getting-started/README.md) |
+| Persistent multiplexed client | [`session.hpp`](../../src/user/cpp/core/easy_uds/session.hpp) | [Session state](session.md) |
+| Request and response values | [`request.hpp`](../../src/user/cpp/core/easy_uds/request.hpp) / [`response.hpp`](../../src/user/cpp/core/easy_uds/response.hpp) | [FD passing](fd-passing.md), [Request context](request-context.md) |
+| Streaming | [`stream.hpp`](../../src/user/cpp/core/easy_uds/stream.hpp) | [Core API](core.md) and [streaming example](../examples/streaming.md) |
+| Error classification | [`error.hpp`](../../src/user/cpp/core/easy_uds/error.hpp) | [Error model](errors.md) |
+| Descriptor ownership | [`fd.hpp`](../../src/user/cpp/core/easy_uds/fd.hpp) | [FD passing](fd-passing.md) |
+| Request metadata | [`request_context.hpp`](../../src/user/cpp/core/easy_uds/request_context.hpp) | [Request context](request-context.md) |
+| Operational snapshots | [`stats.hpp`](../../src/user/cpp/core/easy_uds/stats.hpp) | [Runtime statistics](stats.md) |
+| Beginner fixed RPC facade | [`simple.hpp`](../../src/user/cpp/simple/easy_uds/simple.hpp) | [Simple API guide](../simple-api/getting-started.md) |
+| Public include/layout | [`easy_uds.hpp`](../../src/user/cpp/core/easy_uds/easy_uds.hpp) | [Headers and source layout](headers.md) |
 
 ## Contract checklist
 

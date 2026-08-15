@@ -3,7 +3,7 @@
 The defaults are conservative boundaries, not workload guesses. Change an
 option only when the application can explain the ownership, memory, and retry
 consequence. The complete declaration and default values are in
-[`options.hpp`](../../include/easy_uds/options.hpp).
+[`options.hpp`](../../src/user/cpp/core/easy_uds/options.hpp).
 
 ## Timeouts
 

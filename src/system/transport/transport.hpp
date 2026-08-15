@@ -4,7 +4,7 @@
 #include "easy_uds/response.hpp"
 #include "easy_uds/stream.hpp"
 
-#include "../detail/io.hpp"
+#include "io.hpp"
 
 #include <array>
 #include <cstdint>

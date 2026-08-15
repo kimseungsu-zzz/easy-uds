@@ -47,16 +47,24 @@ is sufficient.
 Internal files are grouped by runtime responsibility:
 
 ```text
-src/client/       one-shot Client, persistent Session, shared stream transport
-src/server/       Server lifecycle, routing, socket ownership, startup/shutdown
-src/reactor/      epoll parser, dispatch, flow/output, streams, worker executors
-src/protocol/     protocol-v2 codec boundary
-src/detail/       shared descriptor, deadline, socket, and exact-I/O utilities
+src/system/core/              shared engine state and error implementation
+src/system/protocol/          protocol-v2 codec boundary
+src/system/runtime/           Client, Session, and Server runtime
+src/system/reactor/           epoll parser, dispatch, flow/output, workers
+src/system/transport/         shared descriptor, exact I/O, client framing
+src/system/platform/linux/    reserved Linux dependency boundary
+src/user/cpp/core/            installed Core C++ headers
+src/user/cpp/simple/          installed Simple C++ header
+src/user/c/ and src/user/py/  reserved non-C++ language boundaries
 ```
 
 Files below `src/` are implementation details. Applications must not include
-them or rely on their names; only `include/easy_uds/` is installed and covered
-by the public compatibility policy.
+them or rely on their names. The source-owned C++ headers under
+`src/user/cpp/` are installed as `include/easy_uds/` and are covered by the
+public compatibility policy.
+
+See [`docs/SOURCE_LAYOUT.md`](../SOURCE_LAYOUT.md) for the relocation rules and
+the next Linux dependency-inventory phase.
 
 The grouping deliberately avoids one class per tiny file. Client and Session
 are separate because they have different lifetime and concurrency models;

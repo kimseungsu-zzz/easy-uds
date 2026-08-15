@@ -159,18 +159,28 @@ future 0.7.x work is limited to maintenance corrections.
 최종 이름보다 “기능으로 찾을 수 있음”이 우선이다.
 
 ```text
-include/easy_uds/       umbrella + 기능별 public header
-src/client/             one-shot client, Session, Session state
-src/server/             lifecycle, routing, serialized execution, state
-src/reactor/            epoll parsing, dispatch, flow/output, workers, streams
-src/protocol/           version-independent codec boundary + protocol v2
-src/detail/             fd, deadline, socket, exact I/O utilities
+src/system/core/        shared engine state and error implementation
+src/system/protocol/    version-independent codec boundary + protocol v2
+src/system/runtime/     Client, Session, and Server runtime
+src/system/reactor/     epoll parsing, dispatch, flow/output, workers, streams
+src/system/transport/   fd, deadline, socket, exact I/O and framing utilities
+src/system/platform/linux/  reserved Linux dependency boundary
+src/user/cpp/core/      installed Core C++ headers
+src/user/cpp/simple/   installed Simple C++ header
+src/user/c/             reserved C ABI boundary
+src/user/py/            reserved Python binding boundary
+include/easy_uds/       installed compatibility path generated from src/user
 tests/                  unit, integration, stress, fuzz, package
 benchmarks/             rpc, Session, streaming
 experiments/0.6/        채택되지 않은 실험과 재현 코드 보존
 examples/               번호가 있는 학습 순서 + production/robot examples
 docs/                   getting-started, api, guides, internals, migration, history
 ```
+
+The behavior-neutral 0.7.1 relocation and ownership rules are tracked in
+[`SOURCE_LAYOUT.md`](SOURCE_LAYOUT.md). Linux dependency extraction is a
+separate follow-up phase; this commit intentionally does not add a transport
+virtual interface or alter the hot path.
 
 ## 0.7 완료 조건
 

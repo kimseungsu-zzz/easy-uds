@@ -11,7 +11,7 @@
 // A framed SOCK_STREAM socketpair is the process baseline. This is deliberately
 // a standalone experiment, not a public transport API.
 
-#include "../src/protocol/codec.hpp"
+#include "protocol/codec.hpp"
 
 #include <algorithm>
 #include <array>

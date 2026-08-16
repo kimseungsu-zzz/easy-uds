@@ -157,6 +157,10 @@ target_include_directories(easy_uds
 )
 target_link_libraries(easy_uds PUBLIC Threads::Threads)
 if(WIN32)
+    # Winsock/windows headers define min/max macros that collide with the
+    # standard-library names used throughout the portable engine. Propagate
+    # this compile definition to installed consumers as well as the library.
+    target_compile_definitions(easy_uds PUBLIC NOMINMAX)
     target_link_libraries(easy_uds PUBLIC ws2_32)
 endif()
 target_compile_definitions(easy_uds PRIVATE

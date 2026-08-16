@@ -14,7 +14,7 @@ The Windows release smoke covers fixed RPC, concurrent Session requests, streami
 Simple `ResponseError`, repeated bind/run/stop lifecycle, and installed-package
 Core/Simple consumers. Static and shared library variants are built in the
 Windows workflow. The final 1.0 validation passed that full matrix in
-[Actions run 31924168957](https://github.com/kimseungsu-zzz/easy-uds/actions/runs/31924168957).
+[Actions run 31924489686](https://github.com/kimseungsu-zzz/easy-uds/actions/runs/31924489686).
 
 The Windows implementation deliberately uses AF_UNIX rather than introducing a
 Named Pipe-specific protocol or a runtime transport hierarchy. This preserves

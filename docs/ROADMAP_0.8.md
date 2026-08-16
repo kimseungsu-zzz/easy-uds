@@ -49,9 +49,9 @@ not be mistaken for final Windows contracts.
 
 ## 0.8 handoff priority
 
-The following handoff items are the remaining RC validation questions. The
-Windows implementation is present, but the external Windows compiler/runtime
-job is still a release blocker until it runs.
+The following handoff items record the RC validation boundary. The Windows
+implementation is present, and the current candidate's external compiler and
+runtime job has passed; every later candidate must repeat the same gate.
 
 ### P0 — public-header blockers
 

@@ -32,13 +32,26 @@ native-handle wrapper. `SCM_RIGHTS` is rejected on the Windows backend and
 `WSADuplicateSocket`, HANDLE passing, C/Python bindings, and typed RPC remain
 future capability decisions.
 
+## Winsock error boundary
+
+`socket_common.cpp` captures `WSAGetLastError()` immediately and translates
+the error families used by endpoint, readiness, wait, and byte-I/O operations
+to the existing errno-based transport boundary. In particular,
+`WSAEWOULDBLOCK` becomes `EAGAIN`, setup/connect failures preserve address and
+network distinctions (`EADDRINUSE`, `EADDRNOTAVAIL`, `ENETUNREACH`, and
+`EHOSTUNREACH`), and closed-peer cases (`WSAECONNRESET`, `WSAESHUTDOWN`) map to
+the existing reset/pipe semantics. Unknown Winsock values become `EIO` rather
+than leaking a raw 100xx code into `Error::system_code()`.
+
 ## Validation boundary
 
-The current development environment has no MSVC or Windows runner. Linux
-build/tests/ASan/UBSan/TSan/fuzz/stress remain the regression gate. Windows
-source compilation and runtime behavior are claimed only from the dedicated
-GitHub Actions job after it executes; until then this is an explicit external
-validation blocker, not a passing test result.
+The current development environment has no MSVC. Linux
+build/tests/ASan/UBSan/TSan/fuzz/stress remain the local regression gate.
+Windows source compilation and runtime behavior for this candidate passed in
+the dedicated [GitHub Actions run
+31916904359](https://github.com/kimseungsu-zzz/easy-uds/actions/runs/31916904359),
+including static/shared package consumers; every later candidate must repeat
+that hosted validation.
 
 The pathname capability is deliberately conservative when Windows does not
 expose POSIX inode/type information: only paths recorded as bound by this

@@ -161,6 +161,10 @@ if(WIN32)
     # standard-library names used throughout the portable engine. Propagate
     # this compile definition to installed consumers as well as the library.
     target_compile_definitions(easy_uds PUBLIC NOMINMAX)
+    # MSVC does not emit an import library from a DLL unless symbols are
+    # exported. The public C++ surface is intentionally concrete, so let CMake
+    # generate the export table for the shared Windows package.
+    set_target_properties(easy_uds PROPERTIES WINDOWS_EXPORT_ALL_SYMBOLS ON)
     target_link_libraries(easy_uds PUBLIC ws2_32)
 endif()
 target_compile_definitions(easy_uds PRIVATE

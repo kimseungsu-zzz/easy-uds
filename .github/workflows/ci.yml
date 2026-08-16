@@ -465,11 +465,11 @@ jobs:
           $env:PATH = "$env:RUNNER_TEMP\easy-uds-prefix\bin;$env:PATH"
           $socket = Join-Path $env:RUNNER_TEMP "easy-uds-installed-simple.sock"
           $server = Start-Process `
-            -FilePath (Join-Path $PWD "simple-consumer-build\Release\easy_uds_simple_server.exe") `
+            -FilePath (Join-Path $PWD "windows-consumer-build\Release\easy_uds_simple_server.exe") `
             -ArgumentList $socket -PassThru -WindowStyle Hidden
           try {
             Start-Sleep -Milliseconds 500
-            & (Join-Path $PWD "simple-consumer-build\Release\easy_uds_simple_client.exe") $socket
+            & (Join-Path $PWD "windows-consumer-build\Release\easy_uds_simple_client.exe") $socket
             if ($LASTEXITCODE -ne 0) {
               throw "installed Simple consumer failed with exit code $LASTEXITCODE"
             }

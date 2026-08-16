@@ -65,7 +65,7 @@ int main() {
         options.max_connections = 32;
         options.stale_socket_grace_period = std::chrono::milliseconds{0};
         server = std::make_unique<easy_uds::Server>(path.string(), options);
-        server->on("ping", [](const easy_uds::Request&) {
+        server->on("/ping", [](const easy_uds::Request&) {
             return easy_uds::Response::ok("pong");
         });
         server_thread = std::thread([&] {

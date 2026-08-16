@@ -8,13 +8,13 @@ readiness, wakeup, and pathname lifecycle primitives.
 | Platform | Transport | Core fixed RPC | Session | Simple | POSIX capabilities |
 | --- | --- | --- | --- | --- | --- |
 | Linux | AF_UNIX | supported and regression-tested | supported | supported | peer credentials and one-FD `SCM_RIGHTS` |
-| Windows 10+ | Winsock AF_UNIX | implemented; Windows CI is the validation gate | implemented through the common engine | implemented | unavailable in 0.8; no fake FD/SID API |
+| Windows 10+ | Winsock AF_UNIX | implemented and hosted-validated | implemented through the common engine | implemented | unavailable in 0.8; no fake FD/SID API |
 
-The Windows RC smoke covers fixed RPC, concurrent Session requests, streaming,
+The Windows release smoke covers fixed RPC, concurrent Session requests, streaming,
 Simple `ResponseError`, repeated bind/run/stop lifecycle, and installed-package
 Core/Simple consumers. Static and shared library variants are built in the
-Windows workflow. The current candidate passed that full matrix in
-[Actions run 31918708187](https://github.com/kimseungsu-zzz/easy-uds/actions/runs/31918708187).
+Windows workflow. The final 0.8 release passed that full matrix in
+[Actions run 31919103353](https://github.com/kimseungsu-zzz/easy-uds/actions/runs/31919103353).
 
 The Windows implementation deliberately uses AF_UNIX rather than introducing a
 Named Pipe-specific protocol or a runtime transport hierarchy. This preserves
@@ -32,5 +32,5 @@ The repository environment used for this development does not contain MSVC,
 so no local Windows runtime result is claimed. The `windows-core` GitHub
 Actions job builds the static/shared-capable library, runs the Windows smoke
 test, installs the package, and compiles the installed consumer; its passing
-result is recorded above. A future candidate must repeat that gate on its own
+result is recorded above. A future release must repeat that gate on its own
 commit.

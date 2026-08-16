@@ -28,8 +28,10 @@ release promise.
   verification gates.
 - [0.7.1 architecture release](../releases/v0.7.1.md) — source ownership,
   backend assembly, and handoff scope.
-- [0.8.0-rc.1 release candidate](../releases/v0.8.0-rc.1.md) — Windows
-  backend scope, validation boundary, and deferred capabilities.
+- [0.8.0 release](../releases/v0.8.0.md) — Windows backend scope, final
+  validation boundary, and deferred capabilities.
+- [0.8.0-rc.1 historical candidate](../releases/v0.8.0-rc.1.md) — RC-era
+  validation record.
 - [Public headers and source layout](../api/headers.md) — where the stable
   boundary ends and implementation details begin.
 

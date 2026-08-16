@@ -38,10 +38,10 @@
 
 ## Platform
 
-Linux is the production-validated backend. A Windows AF_UNIX backend is now
-included in the 0.8 RC work and keeps the Core/Session/Simple wire contract.
-The current candidate's Windows runtime, package, and lifecycle validation
-passed in [Actions run 31918708187](https://github.com/kimseungsu-zzz/easy-uds/actions/runs/31918708187);
+Linux is the production-validated backend. 0.8 also includes a Windows AF_UNIX
+backend that keeps the Core/Session/Simple wire contract. The final Windows
+runtime, package, and lifecycle validation passed in [Actions run
+31919103353](https://github.com/kimseungsu-zzz/easy-uds/actions/runs/31919103353);
 this development environment still has no local MSVC. Windows resource
 passing and POSIX peer credentials are intentionally unavailable. macOS and
 BSD remain unsupported. The source uses pathname sockets rather than
@@ -686,12 +686,12 @@ docs/ROADMAP_0.7.md     0.7 usability, API, and compatibility plan
 docs/ERGONOMICS_0.7.md  Beginner-first syntax and progressive disclosure audit
 docs/RELEASE_0.7.md     0.7.0 final scope and verification record
 docs/releases/v0.7.1.md 0.7.1 architecture release scope and handoff
-docs/releases/v0.8.0-rc.1.md 0.8 RC scope and validation boundary
+docs/releases/v0.8.0.md     0.8 final scope and validation boundary
 docs/platform-support.md   Current Linux/Windows support and intentional limits
 docs/internals/windows-backend.md Windows backend decisions and validation boundary
 docs/SOURCE_LAYOUT.md    0.7.1 source ownership and dependency boundary
 docs/PERF_0.7.md        0.7 regression measurements against v0.6.4
-docs/PERF_0.8_RC.md     0.8 RC Linux reference measurements
+docs/PERF_0.8_RC.md     0.8 Linux reference measurements
 docs/history/experiments/0.6.md  Standalone UDS capability probes (history)
 docs/history/README.md    Historical measurements and experiment index
 docs/PERF_0.6.md         0.6 benchmark measurements and interpretation

@@ -19,7 +19,7 @@
 #include <string_view>
 #include <type_traits>
 
-static_assert(easy_uds::version == std::string_view{"0.8.0-rc.1"});
+static_assert(easy_uds::version == std::string_view{"0.8.0"});
 static_assert(easy_uds::protocol_version == 2U);
 static_assert(!std::is_copy_constructible_v<easy_uds::Request>);
 static_assert(std::is_move_constructible_v<easy_uds::Request>);

@@ -36,10 +36,10 @@
 
 ## 플랫폼
 
-Linux가 현재 production 검증된 backend입니다. 0.8 RC 작업에는 Windows
-AF_UNIX backend도 포함되어 Core/Session/Simple의 공통 protocol 계약을
-유지합니다. 현재 후보의 Windows runtime·package·lifecycle 검증은
-[Actions run 31918708187](https://github.com/kimseungsu-zzz/easy-uds/actions/runs/31918708187)에서
+Linux가 현재 production 검증된 backend입니다. 0.8에는 Core/Session/Simple의
+공통 protocol 계약을 유지하는 Windows AF_UNIX backend도 포함되어 있습니다.
+최종 Windows runtime·package·lifecycle 검증은 [Actions run
+31919103353](https://github.com/kimseungsu-zzz/easy-uds/actions/runs/31919103353)에서
 통과했으며, 이 개발 환경에는 여전히 로컬 MSVC가 없습니다. Windows에서는
 POSIX peer credentials와 FD passing을 제공하지 않으며, macOS와 BSD는
 아직 지원하지 않습니다. Linux 전용 abstract socket이 아니라 pathname
@@ -732,12 +732,12 @@ docs/ROADMAP_0.7.md     0.7 사용성·API·호환성 계획
 docs/ERGONOMICS_0.7.md  beginner-first syntax 및 progressive disclosure audit
 docs/RELEASE_0.7.md     0.7.0 최종 범위와 검증 기록
 docs/releases/v0.7.1.md 0.7.1 아키텍처 릴리즈 범위와 인수인계
-docs/releases/v0.8.0-rc.1.md 0.8 RC 범위와 검증 경계
+docs/releases/v0.8.0.md     0.8 최종 범위와 검증 경계
 docs/platform-support.md   현재 Linux/Windows 지원 범위와 제한
 docs/internals/windows-backend.md Windows backend 결정과 검증 경계
 docs/SOURCE_LAYOUT.md    0.7.1 source ownership와 dependency 경계
 docs/PERF_0.7.md        v0.6.4 대비 0.7 성능 회귀 측정
-docs/PERF_0.8_RC.md     0.8 RC Linux 기준 측정
+docs/PERF_0.8_RC.md     0.8 Linux 기준 측정
 docs/history/experiments/0.6.md  독립 UDS 기술 capability probe (history)
 docs/history/README.md    history 및 실험 인덱스
 docs/PERF_0.6.md         0.6 benchmark 측정 결과와 해석

@@ -2,13 +2,12 @@
 
 All notable changes to this project are documented here.
 
-## easy-uds 0.8.0-rc.1 — Cross-platform Core (candidate)
+## easy-uds 0.8.0 — Everywhere
 
-This candidate keeps the Linux engine and protocol-v2 behavior while adding a
-concrete Windows AF_UNIX backend selected at build time. The candidate's
-Windows gate passed on GitHub Actions run
-[`31918708187`](https://github.com/kimseungsu-zzz/easy-uds/actions/runs/31918708187);
-tagging and the final release remain intentionally deferred.
+This release keeps the Linux engine and protocol-v2 behavior while adding a
+concrete Windows AF_UNIX backend selected at build time. The final full
+validation passed on GitHub Actions run
+[`31919103353`](https://github.com/kimseungsu-zzz/easy-uds/actions/runs/31919103353).
 
 ### Added
 
@@ -32,7 +31,7 @@ tagging and the final release remain intentionally deferred.
   Linux performance gates are unchanged.
 - Windows resource/HANDLE passing, SID/token identity, generic native handles,
   C/Python bindings, typed RPC, protocol v3, and IOCP optimization are not in
-  this candidate.
+  this release.
 
 ### Verification
 
@@ -41,9 +40,9 @@ tagging and the final release remain intentionally deferred.
 - Windows Core/Session/Simple/streaming/lifecycle/package validation passed in
   the dedicated Windows Actions job; this environment still has no local MSVC
   result.
-- See [`docs/releases/v0.8.0-rc.1.md`](docs/releases/v0.8.0-rc.1.md) and
-  [`docs/platform-support.md`](docs/platform-support.md) for the exact RC
-  boundary.
+- See [`docs/releases/v0.8.0.md`](docs/releases/v0.8.0.md) and
+  [`docs/platform-support.md`](docs/platform-support.md) for the exact release
+  boundary and supported capability scope.
 
 ## easy-uds 0.7.1 — Architecture Release
 

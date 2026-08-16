@@ -14,10 +14,10 @@
 - **Attempted mitigation:** Added a dedicated `windows-core` GitHub Actions
   job, a Windows-only public-header smoke target, explicit Windows source
   lists, and concrete Winsock AF_UNIX capability files.
-- **Resolution for this candidate:** The full static/shared Windows Core,
+- **Resolution for 0.8.0:** The full static/shared Windows Core,
   Session, streaming, Simple, lifecycle, and installed-package matrix passed
-  in [Actions run 31918708187](https://github.com/kimseungsu-zzz/easy-uds/actions/runs/31918708187).
-  Local MSVC remains unavailable, so every later candidate must repeat the
+  in [Actions run 31919103353](https://github.com/kimseungsu-zzz/easy-uds/actions/runs/31919103353).
+  Local MSVC remains unavailable, so every later release must repeat the
   hosted gate.
 
 ## B-WIN-002 — Windows resource/identity capabilities intentionally excluded

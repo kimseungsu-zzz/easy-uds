@@ -47,10 +47,10 @@ than leaking a raw 100xx code into `Error::system_code()`.
 
 The current development environment has no MSVC. Linux
 build/tests/ASan/UBSan/TSan/fuzz/stress remain the local regression gate.
-Windows source compilation and runtime behavior for this candidate passed in
+Windows source compilation and runtime behavior for the 0.8 release passed in
 the dedicated [GitHub Actions run
-31918708187](https://github.com/kimseungsu-zzz/easy-uds/actions/runs/31918708187),
-including static/shared package consumers; every later candidate must repeat
+31919103353](https://github.com/kimseungsu-zzz/easy-uds/actions/runs/31919103353),
+including static/shared package consumers; every later release must repeat
 that hosted validation.
 
 The pathname capability is deliberately conservative when Windows does not

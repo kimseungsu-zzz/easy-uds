@@ -1,6 +1,6 @@
-# 0.8 portability decisions and RC handoff
+# 0.8 portability decisions and release handoff
 
-0.7.1 froze the User/System/platform ownership map. The 0.8 RC work now uses
+0.7.1 froze the User/System/platform ownership map. The 0.8 release work uses
 that map to provide a concrete Windows AF_UNIX backend without pretending that
 POSIX capabilities are portable. This document records the decisions made for
 the initial RC and the blockers intentionally deferred beyond it.
@@ -49,9 +49,9 @@ not be mistaken for final Windows contracts.
 
 ## 0.8 handoff priority
 
-The following handoff items record the RC validation boundary. The Windows
-implementation is present, and the current candidate's external compiler and
-runtime job has passed; every later candidate must repeat the same gate.
+The following handoff items record the 0.8 validation boundary. The Windows
+implementation is present, and the final release's external compiler and
+runtime job passed; every later release must repeat the same gate.
 
 ### P0 — public-header blockers
 

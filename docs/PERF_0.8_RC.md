@@ -1,6 +1,6 @@
-# easy-uds 0.8 RC performance record
+# easy-uds 0.8 performance record
 
-This is a repeatable Linux reference run for the 0.8 candidate. It is not a
+This is a repeatable Linux reference run for the 0.8 release. It is not a
 cross-platform parity claim: Windows and ARM64 numbers must come from their
 respective hosted jobs.
 
@@ -33,7 +33,7 @@ optimization decision is based on that skipped probe. ARM64 and native Linux
 reruns remain workflow-controlled measurements. The Windows workflow also runs
 `easy_uds_windows_benchmark` for a small c1/c8 latency-throughput baseline;
 those values are runner-specific and are not a cross-platform performance
-claim. The final candidate's hosted Windows values were:
+claim. The final release's hosted Windows values were:
 
 | Build | One-shot c1 (throughput / p50 / p99) | Shared Session c8 (throughput / p50 / p99) |
 |---|---:|---:|
@@ -42,7 +42,7 @@ claim. The final candidate's hosted Windows values were:
 
 These are 100 one-shot and 400 shared-session requests on the hosted Windows
 runner, intended as a smoke baseline rather than a Linux comparison. The
-The same candidate passed the hosted native x86_64 20-pass unit/stress soak
+final release passed the hosted native x86_64 20-pass unit/stress soak
 and the ARM64 5-pass release/benchmark smoke in [Actions run
-31918708187](https://github.com/kimseungsu-zzz/easy-uds/actions/runs/31918708187).
+31919103353](https://github.com/kimseungsu-zzz/easy-uds/actions/runs/31919103353).
 The development environment has no local Windows compiler.

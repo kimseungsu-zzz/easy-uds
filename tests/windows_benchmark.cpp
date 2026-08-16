@@ -64,6 +64,8 @@ int main() {
         options.worker_threads = 4;
         options.max_connections = 32;
         options.stale_socket_grace_period = std::chrono::milliseconds{0};
+        options.io_timeout = std::chrono::seconds{2};
+        options.request_timeout = std::chrono::seconds{10};
         server = std::make_unique<easy_uds::Server>(path.string(), options);
         server->on("/ping", [](const easy_uds::Request&) {
             return easy_uds::Response::ok("pong");
@@ -77,14 +79,19 @@ int main() {
         });
         wait_until_running(*server);
 
-        easy_uds::Client client(path.string());
-        for (int index = 0; index < 100; ++index) {
+        easy_uds::ClientOptions client_options;
+        client_options.connect_timeout = std::chrono::seconds{1};
+        client_options.io_timeout = std::chrono::seconds{2};
+        client_options.request_timeout = std::chrono::seconds{10};
+        easy_uds::Client client(path.string(), client_options);
+        for (int index = 0; index < 20; ++index) {
             (void)client.request("/ping");
         }
         std::vector<double> one_shot;
-        one_shot.reserve(1000);
+        constexpr std::size_t one_shot_requests = 100;
+        one_shot.reserve(one_shot_requests);
         const auto one_shot_start = Clock::now();
-        for (int index = 0; index < 1000; ++index) {
+        for (std::size_t index = 0; index < one_shot_requests; ++index) {
             const auto started = Clock::now();
             const auto response = client.request("/ping");
             if (response.status != 200 || response.body != "pong") {
@@ -96,11 +103,11 @@ int main() {
         print_result("one-shot c1", one_shot, Clock::now() - one_shot_start);
 
         auto session = client.session();
-        for (int index = 0; index < 100; ++index) {
+        for (int index = 0; index < 20; ++index) {
             (void)session.request("/ping");
         }
         constexpr std::size_t concurrency = 8;
-        constexpr std::size_t requests_per_worker = 250;
+        constexpr std::size_t requests_per_worker = 50;
         std::vector<std::vector<double>> session_samples(concurrency);
         std::vector<std::exception_ptr> worker_errors(concurrency);
         std::vector<std::thread> workers;

@@ -31,8 +31,8 @@ protocol rather than adding a new transport or major feature.
 
 ### Verification
 
-- Push CI [31924423276](https://github.com/kimseungsu-zzz/easy-uds/actions/runs/31924423276)
-  and full validation [31924489686](https://github.com/kimseungsu-zzz/easy-uds/actions/runs/31924489686)
+- Push CI [31924746363](https://github.com/kimseungsu-zzz/easy-uds/actions/runs/31924746363)
+  and full validation [31924819563](https://github.com/kimseungsu-zzz/easy-uds/actions/runs/31924819563)
   passed Linux/Windows builds, package and Simple consumers, public headers,
   architecture guards, sanitizers, TSan, fuzz, ARM64, native benchmarks,
   soak, and the release gate.

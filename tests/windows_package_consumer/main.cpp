@@ -1,5 +1,19 @@
+// Include every installed common header explicitly.  The umbrella include is
+// convenient, but this consumer also acts as the Windows public-header
+// portability smoke: no common header may accidentally pull in a POSIX-only
+// capability.
+#include <easy_uds/client.hpp>
 #include <easy_uds/easy_uds.hpp>
+#include <easy_uds/error.hpp>
+#include <easy_uds/options.hpp>
+#include <easy_uds/request.hpp>
+#include <easy_uds/request_context.hpp>
+#include <easy_uds/response.hpp>
+#include <easy_uds/server.hpp>
+#include <easy_uds/session.hpp>
 #include <easy_uds/simple.hpp>
+#include <easy_uds/stats.hpp>
+#include <easy_uds/stream.hpp>
 #include <easy_uds/version.hpp>
 
 #include <string_view>

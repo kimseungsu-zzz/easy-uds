@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.20)
 
-project(easy_uds VERSION 0.8.0 LANGUAGES CXX)
+project(easy_uds VERSION 0.9.0 LANGUAGES CXX)
 
 include(CMakePackageConfigHelpers)
 include(GNUInstallDirs)
@@ -408,7 +408,10 @@ if(EASY_UDS_BUILD_TESTS)
                     "${EASY_UDS_BASH_EXECUTABLE}"
                     "${CMAKE_CURRENT_SOURCE_DIR}/scripts/compile_error_smoke.sh")
             set_tests_properties(easy_uds.compile_error_ux PROPERTIES
-                TIMEOUT 30
+                # Compiling five intentionally-invalid probes can exceed the
+                # default on WSL or heavily loaded hosted runners; this is a
+                # harness bound, not a library operation deadline.
+                TIMEOUT 60
                 LABELS "rc;compile-error;api")
         endif()
         endif()
@@ -619,7 +622,7 @@ if(EASY_UDS_BUILD_TESTS AND BUILD_TESTING AND NOT WIN32)
                 "${EASY_UDS_SIMPLE_BASH_EXECUTABLE}"
                 "${CMAKE_CURRENT_SOURCE_DIR}/experiments/simple_api/compile_error_smoke.sh")
         set_tests_properties(easy_uds.simple_api_compile_error PROPERTIES
-            TIMEOUT 30
+            TIMEOUT 60
             LABELS "simple;compile-error")
     endif()
 endif()

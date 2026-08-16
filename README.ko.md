@@ -6,7 +6,7 @@
 
 특히 한 프로세스에서만 소유할 수 있는 로봇 드라이버나 하드웨어 드라이버를 여러 프로세스가 함께 사용해야 할 때 유용합니다. `on_serialized()`를 사용하면 여러 클라이언트 프로세스가 동시에 명령을 보내더라도 실제 하드웨어 명령은 한 번에 하나씩 FIFO 순서로 실행됩니다.
 
-> **프로토콜 참고:** v0.6.0은 20바이트 헤더와 request-id 멀티플렉싱을 사용하는 protocol version 2입니다. v0.5.x 이하의 protocol v1과 wire 호환되지 않습니다.
+> **프로토콜 참고:** 현재 릴리즈는 20바이트 헤더와 request-id 멀티플렉싱을 사용하는 protocol version 2입니다. v0.5.x 이하의 protocol v1과 wire 호환되지 않습니다.
 
 ## 주요 기능
 
@@ -36,7 +36,7 @@
 
 ## 플랫폼
 
-Linux가 현재 production 검증된 backend입니다. 0.8에는 Core/Session/Simple의
+Linux가 현재 production 검증된 backend입니다. 0.9는 Core/Session/Simple의
 공통 protocol 계약을 유지하는 Windows AF_UNIX backend도 포함되어 있습니다.
 최종 Windows runtime·package·lifecycle 검증은 [Actions run
 31919103353](https://github.com/kimseungsu-zzz/easy-uds/actions/runs/31919103353)에서
@@ -732,7 +732,8 @@ docs/ROADMAP_0.7.md     0.7 사용성·API·호환성 계획
 docs/ERGONOMICS_0.7.md  beginner-first syntax 및 progressive disclosure audit
 docs/RELEASE_0.7.md     0.7.0 최종 범위와 검증 기록
 docs/releases/v0.7.1.md 0.7.1 아키텍처 릴리즈 범위와 인수인계
-docs/releases/v0.8.0.md     0.8 최종 범위와 검증 경계
+docs/releases/v0.9.0.md     0.9 안정화와 1.0 freeze 준비
+docs/releases/v0.8.0.md     0.8 cross-platform 범위 기록
 docs/platform-support.md   현재 Linux/Windows 지원 범위와 제한
 docs/internals/windows-backend.md Windows backend 결정과 검증 경계
 docs/SOURCE_LAYOUT.md    0.7.1 source ownership와 dependency 경계

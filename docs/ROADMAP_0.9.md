@@ -86,7 +86,6 @@ fresh compatibility/performance review.
 
 ## Release policy
 
-Do not create a 0.9 tag or GitHub Release from this roadmap. First finish the
-stabilization checks, record any remaining limitations, and obtain explicit
-release approval. A future release note should link this document together
-with the final Actions run and the relevant performance/soak evidence.
+The stabilization closure is recorded in
+[`docs/releases/v0.9.0.md`](releases/v0.9.0.md). The `v0.9.0` tag and release
+are immutable; subsequent fixes belong to a later maintenance line or 1.0.

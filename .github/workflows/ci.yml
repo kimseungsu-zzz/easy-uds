@@ -365,7 +365,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Run one-command 0.8 release gate
+      - name: Run one-command 0.9 release gate
         run: bash scripts/release_gate.sh "$RUNNER_TEMP/easy-uds-release-gate"
 
   simple-api:

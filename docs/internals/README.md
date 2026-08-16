@@ -30,6 +30,8 @@ release promise.
   backend assembly, and handoff scope.
 - [0.8.0 release](../releases/v0.8.0.md) — Windows backend scope, final
   validation boundary, and deferred capabilities.
+- [0.9.0 stabilization release](../releases/v0.9.0.md) — final regression
+  evidence and 1.0 freeze preparation.
 - [0.8.0-rc.1 historical candidate](../releases/v0.8.0-rc.1.md) — RC-era
   validation record.
 - [0.9 stabilization roadmap](../ROADMAP_0.9.md) — bug-fix scope, 1.0

@@ -12,8 +12,9 @@ for readability and tooling rather than a wire-level requirement.
 
 ## 1. Configure and build
 
-easy-uds currently targets Linux and requires C++17, CMake 3.20 or newer, and
-`pthread` support:
+easy-uds targets Linux and Windows 10+ and requires C++17 and CMake 3.20 or
+newer. The selected platform backend supplies the native socket/runtime
+primitives:
 
 ```bash
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release \

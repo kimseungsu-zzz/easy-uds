@@ -2,6 +2,35 @@
 
 All notable changes to this project are documented here.
 
+## easy-uds 0.9.0 — Stabilization
+
+This is a stabilization and 1.0 freeze-preparation release, not a new
+feature or protocol release.
+
+### Changed
+
+- Corrected the hosted Windows smoke timeout after a scheduler-sensitive test
+  harness timeout with no product assertion.
+- Aligned the Request/POSIX capability documentation with the implemented
+  move-only Request and callback-scoped descriptor/peer views.
+- Completed the public API, ownership/lifetime, error/deadline, Session,
+  lifecycle, queue, streaming, architecture, and package freeze audit.
+
+### Compatibility and scope
+
+- Protocol v2 and all wire semantics remain unchanged.
+- No new major feature, automatic retry/replay, Windows resource passing/SID
+  identity, typed RPC, protocol v3, or C/Python binding was added.
+
+### Verification
+
+- Push CI [31921497499](https://github.com/kimseungsu-zzz/easy-uds/actions/runs/31921497499)
+  and full validation [31921572981](https://github.com/kimseungsu-zzz/easy-uds/actions/runs/31921572981)
+  passed, including Linux GCC/Clang, Windows Core/package/Simple, ARM64,
+  native Linux, sanitizers, TSan, fuzz, stress, and release-gate checks.
+- See [`docs/releases/v0.9.0.md`](docs/releases/v0.9.0.md) and
+  [`docs/ROADMAP_0.9.md`](docs/ROADMAP_0.9.md) for the closure record.
+
 ## easy-uds 0.8.0 — Everywhere
 
 This release keeps the Linux engine and protocol-v2 behavior while adding a

@@ -4,7 +4,7 @@
 
 `easy-uds` is a small C++17 request/response and chunk-streaming library for local IPC over Unix Domain Sockets (`AF_UNIX`). It keeps the public API intentionally small while providing bounded concurrency, deadlines, binary-safe framing, deterministic shutdown, and CMake package support.
 
-> **Protocol note:** v0.6.0 uses protocol version 2 with a 20-byte header and request-id multiplexing. It is not wire-compatible with protocol v1 used by v0.5.x and earlier.
+> **Protocol note:** Current releases use protocol version 2 with a 20-byte header and request-id multiplexing. It is not wire-compatible with protocol v1 used by v0.5.x and earlier.
 
 ## Features
 
@@ -38,7 +38,7 @@
 
 ## Platform
 
-Linux is the production-validated backend. 0.8 also includes a Windows AF_UNIX
+Linux is the production-validated backend. 0.9 retains the Windows AF_UNIX
 backend that keeps the Core/Session/Simple wire contract. The final Windows
 runtime, package, and lifecycle validation passed in [Actions run
 31919103353](https://github.com/kimseungsu-zzz/easy-uds/actions/runs/31919103353);
@@ -686,7 +686,8 @@ docs/ROADMAP_0.7.md     0.7 usability, API, and compatibility plan
 docs/ERGONOMICS_0.7.md  Beginner-first syntax and progressive disclosure audit
 docs/RELEASE_0.7.md     0.7.0 final scope and verification record
 docs/releases/v0.7.1.md 0.7.1 architecture release scope and handoff
-docs/releases/v0.8.0.md     0.8 final scope and validation boundary
+docs/releases/v0.9.0.md     0.9 stabilization and 1.0 freeze preparation
+docs/releases/v0.8.0.md     0.8 historical cross-platform scope
 docs/platform-support.md   Current Linux/Windows support and intentional limits
 docs/internals/windows-backend.md Windows backend decisions and validation boundary
 docs/SOURCE_LAYOUT.md    0.7.1 source ownership and dependency boundary

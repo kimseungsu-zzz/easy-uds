@@ -32,6 +32,8 @@ release promise.
   validation boundary, and deferred capabilities.
 - [0.8.0-rc.1 historical candidate](../releases/v0.8.0-rc.1.md) — RC-era
   validation record.
+- [0.9 stabilization roadmap](../ROADMAP_0.9.md) — bug-fix scope, 1.0
+  freeze candidates, and deferred portability work.
 - [Public headers and source layout](../api/headers.md) — where the stable
   boundary ends and implementation details begin.
 

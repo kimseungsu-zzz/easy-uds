@@ -30,5 +30,8 @@ not change the dedicated steady-state no-allocation contract.
 
 The optional io_uring A/B was unavailable in this WSL environment. No
 optimization decision is based on that skipped probe. ARM64 and native Linux
-reruns remain workflow-controlled measurements, and Windows has no local
-compiler in this development environment.
+reruns remain workflow-controlled measurements. The Windows workflow also runs
+`easy_uds_windows_benchmark` for a small c1/c8 latency-throughput baseline;
+those values are runner-specific and are kept in the Actions log rather than
+being presented as a cross-platform performance claim. This development
+environment has no local Windows compiler.

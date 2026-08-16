@@ -438,6 +438,9 @@ jobs:
       - name: Run Windows Core smoke tests
         run: ctest --test-dir build-windows -C Release --output-on-failure
 
+      - name: Record Windows performance baseline
+        run: .\build-windows\Release\easy_uds_windows_benchmark.exe
+
       - name: Install Windows package
         run: cmake --install build-windows --config Release --prefix "$env:RUNNER_TEMP\easy-uds-prefix"
 

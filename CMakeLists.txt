@@ -241,6 +241,13 @@ if(EASY_UDS_BUILD_TESTS)
             add_test(NAME easy_uds.unit COMMAND easy_uds_test)
             set_tests_properties(easy_uds.unit PROPERTIES
                 TIMEOUT 30 LABELS "rc;windows;unit;integration;session;simple")
+
+            add_executable(easy_uds_windows_benchmark tests/windows_benchmark.cpp)
+            target_link_libraries(easy_uds_windows_benchmark PRIVATE easy_uds::easy_uds)
+            target_compile_features(easy_uds_windows_benchmark PRIVATE cxx_std_17)
+            add_test(NAME easy_uds.windows_benchmark COMMAND easy_uds_windows_benchmark)
+            set_tests_properties(easy_uds.windows_benchmark PROPERTIES
+                TIMEOUT 60 LABELS "rc;windows;benchmark;performance")
         else()
         add_executable(easy_uds_test
             tests/easy_uds_test/main.cpp

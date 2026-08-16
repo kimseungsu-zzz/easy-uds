@@ -669,7 +669,7 @@ src/system/runtime/     Client, Session, and Server runtime
 src/system/reactor/     Reactor parser, dispatch, flow control, output, workers
 src/system/transport/   Exact I/O and client framing helpers
 src/system/platform/linux/  Selected Linux capability implementation
-src/system/platform/windows/ Selected Windows AF_UNIX capability implementation (CI-gated)
+src/system/platform/windows/ Selected Windows AF_UNIX capability implementation (Windows Actions validated)
 src/user/cpp/core/      Installed Core C++ headers
 src/user/cpp/simple/   Installed Simple C++ header
 src/user/c/             Reserved C ABI boundary

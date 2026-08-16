@@ -39,6 +39,12 @@ platform_types::NativeSocket from_socket(SOCKET socket) noexcept {
 int errno_from_wsa(int error) noexcept {
     int mapped = EIO;
     switch (error) {
+    // Keep this table explicit rather than relying on Winsock and CRT
+    // numeric values happening to match.  The transport uses these errno
+    // values for retry/control flow and for the public Error::system_code().
+    case WSAEFAULT:
+        mapped = EFAULT;
+        break;
     case WSAEINTR:
         mapped = EINTR;
         break;
@@ -50,6 +56,21 @@ int errno_from_wsa(int error) noexcept {
         break;
     case WSAEALREADY:
         mapped = EALREADY;
+        break;
+    case WSAEDESTADDRREQ:
+        mapped = EDESTADDRREQ;
+        break;
+    case WSAEMSGSIZE:
+        mapped = EMSGSIZE;
+        break;
+    case WSAEPROTOTYPE:
+        mapped = EPROTOTYPE;
+        break;
+    case WSAENOPROTOOPT:
+        mapped = ENOPROTOOPT;
+        break;
+    case WSAEPROTONOSUPPORT:
+        mapped = EPROTONOSUPPORT;
         break;
     case WSAETIMEDOUT:
         mapped = ETIMEDOUT;
@@ -63,14 +84,26 @@ int errno_from_wsa(int error) noexcept {
     case WSAECONNREFUSED:
         mapped = ECONNREFUSED;
         break;
+    case WSAEISCONN:
+        mapped = EISCONN;
+        break;
     case WSAENOTCONN:
         mapped = ENOTCONN;
+        break;
+    case WSAESHUTDOWN:
+        mapped = ESHUTDOWN;
         break;
     case WSAENOTSOCK:
         mapped = EBADF;
         break;
+    case WSAEAFNOSUPPORT:
+        mapped = EAFNOSUPPORT;
+        break;
     case WSAEADDRINUSE:
         mapped = EADDRINUSE;
+        break;
+    case WSAEADDRNOTAVAIL:
+        mapped = EADDRNOTAVAIL;
         break;
     case WSAEACCES:
         mapped = EACCES;
@@ -84,8 +117,26 @@ int errno_from_wsa(int error) noexcept {
     case WSAEOPNOTSUPP:
         mapped = EOPNOTSUPP;
         break;
+    case WSAEMFILE:
+        mapped = EMFILE;
+        break;
     case WSAENOBUFS:
         mapped = ENOBUFS;
+        break;
+    case WSAENETDOWN:
+        mapped = ENETDOWN;
+        break;
+    case WSAENETRESET:
+        mapped = ENETRESET;
+        break;
+    case WSAENETUNREACH:
+        mapped = ENETUNREACH;
+        break;
+    case WSAEHOSTDOWN:
+        mapped = EHOSTDOWN;
+        break;
+    case WSAEHOSTUNREACH:
+        mapped = EHOSTUNREACH;
         break;
     default:
         break;

@@ -715,7 +715,7 @@ src/system/runtime/     Client, Session, Server runtime
 src/system/reactor/     reactor parser, dispatch, flow control, output, worker
 src/system/transport/   exact I/O와 client framing utility
 src/system/platform/linux/  선택된 Linux capability 구현
-src/system/platform/windows/ 선택된 Windows AF_UNIX capability 구현(CI 검증)
+src/system/platform/windows/ 선택된 Windows AF_UNIX capability 구현(Windows Actions 검증)
 src/user/cpp/core/      설치되는 Core C++ header
 src/user/cpp/simple/   설치되는 Simple C++ header
 src/user/c/             C ABI 경계 예약 영역

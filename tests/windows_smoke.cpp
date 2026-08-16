@@ -1,9 +1,11 @@
 #include <easy_uds/easy_uds.hpp>
 #include <easy_uds/simple.hpp>
+#include "platform/windows/socket_common.hpp"
 
 #include <algorithm>
 #include <array>
 #include <chrono>
+#include <cerrno>
 #include <cstring>
 #include <exception>
 #include <filesystem>
@@ -45,6 +47,26 @@ bool wait_until_running(Server& server) {
 
 int main() {
     try {
+        // Exercise the errno boundary directly for representative setup,
+        // connection, and data-path failures.  The table is intentionally
+        // tested separately from the RPC smoke so a new Winsock error cannot
+        // silently leak a raw 100xx value into the common transport.
+        require(easy_uds::detail::platform_windows::errno_from_wsa(WSAEFAULT) == EFAULT,
+                "WSAEFAULT mapping failed");
+        require(easy_uds::detail::platform_windows::errno_from_wsa(WSAEADDRNOTAVAIL) ==
+                    EADDRNOTAVAIL,
+                "WSAEADDRNOTAVAIL mapping failed");
+        require(easy_uds::detail::platform_windows::errno_from_wsa(WSAENETUNREACH) ==
+                    ENETUNREACH,
+                "WSAENETUNREACH mapping failed");
+        require(easy_uds::detail::platform_windows::errno_from_wsa(WSAESHUTDOWN) ==
+                    ESHUTDOWN,
+                "WSAESHUTDOWN mapping failed");
+        require(easy_uds::detail::platform_windows::errno_from_wsa(WSAEMSGSIZE) == EMSGSIZE,
+                "WSAEMSGSIZE mapping failed");
+        require(easy_uds::detail::platform_windows::errno_from_wsa(0x7fffffff) == EIO,
+                "unknown Winsock mapping failed");
+
         easy_uds::Request request;
         request.route = "/portable";
         request.body = "header-only";

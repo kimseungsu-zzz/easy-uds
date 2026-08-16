@@ -234,6 +234,8 @@ if(EASY_UDS_BUILD_TESTS)
     if(BUILD_TESTING)
         if(WIN32)
             add_executable(easy_uds_test tests/windows_smoke.cpp)
+            target_include_directories(easy_uds_test PRIVATE
+                ${CMAKE_CURRENT_SOURCE_DIR}/src/system)
             target_link_libraries(easy_uds_test PRIVATE easy_uds::easy_uds)
             target_compile_features(easy_uds_test PRIVATE cxx_std_17)
             add_test(NAME easy_uds.unit COMMAND easy_uds_test)

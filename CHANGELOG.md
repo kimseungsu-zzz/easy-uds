@@ -2,6 +2,33 @@
 
 All notable changes to this project are documented here.
 
+## easy-uds 1.0.0 — Stable
+
+This is the stable public-contract release. It freezes the current engine and
+protocol rather than adding a new transport or major feature.
+
+### Stable contract
+
+- Core and Simple C++ APIs, ownership/lifetime rules, semantic errors, Session
+  state, queue policies, streaming, and package behavior are documented as the
+  1.0 contract.
+- Linux and Windows 10+ Core/Session/streaming/Simple/package paths are covered
+  by the final validation matrix; POSIX peer credentials and FD passing remain
+  POSIX-only capabilities.
+- Protocol v2, including the 20-byte header and request-id framing, remains
+  unchanged.
+- Documentation is reset around current usage, compatibility, platform scope,
+  troubleshooting, and explicit historical records.
+
+### Compatibility and scope
+
+- No automatic retry, replay, reconnect, typed RPC, protocol v3, C/Python
+  binding, generic NativeHandle, Windows HANDLE/SID capability, IOCP rewrite,
+  or new transport is included.
+- Patch releases may fix defects and documentation while preserving the
+  stable source/API, ownership, error, lifecycle, package, and protocol
+  contracts. New features belong to 1.1+.
+
 ## easy-uds 0.9.0 — Stabilization
 
 This is a stabilization and 1.0 freeze-preparation release, not a new

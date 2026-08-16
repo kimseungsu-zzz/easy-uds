@@ -57,7 +57,7 @@ catch (const std::system_error& error) {
 ```
 
 Code that needs `errno` must catch `easy_uds::Error` and read
-`system_code()`. In 0.7, inherited `code()` deliberately represents the stable
+`system_code()`. The inherited `code()` deliberately represents the stable
 easy-uds meaning rather than the platform-specific cause.
 
 ## Standard C++ exceptions remain meaningful

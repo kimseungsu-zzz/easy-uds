@@ -48,7 +48,7 @@ handler execution, and response I/O. A handler is not forcibly interrupted
 when it expires. The application decides where it is safe to poll
 `stop_requested()` and return.
 
-There is no protocol-level per-request cancellation frame in 0.7. A client
+There is no protocol-level per-request cancellation frame in 0.8. A client
 disconnect, Session failure, server shutdown, or elapsed deadline can make the
 cooperative signal true. Blocking application operations must provide their
 own interruption mechanism if they need immediate wake-up.
@@ -57,8 +57,10 @@ own interruption mechanism if they need immediate wake-up.
 
 `RequestContext` is a non-owning view valid only for the duration of its
 handler call. It is deliberately non-copyable and non-movable; do not retain a
-pointer or reference after returning. `request_id()`, `peer()`, arrival, and
-deadline are immutable. Connection and server state are lock-free atomic
+pointer or reference after returning. `request_id()`, arrival, and deadline
+are immutable. POSIX peer credentials are provided separately through the
+capability view; they are not a member or accessor of `RequestContext` itself.
+Connection and server state are lock-free atomic
 observations and may change while the handler runs.
 
 Contextual handlers run under the same worker, serialized-executor, exception,

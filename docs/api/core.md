@@ -59,10 +59,12 @@ explicitly rather than relying on retry or replay.
 
 ## `Request` and `Response`
 
-`Request` contains the route, body, peer credentials, protocol request id, and
-an optional move-only `OwnedFd`. The handler owns the received descriptor for
-the duration of the call; duplicate it when retaining it after return. `Response`
-contains a wire-transparent non-negative `Status` and a string body. The
+`Request` contains the route, body, and protocol request id, and remains an
+explicitly move-only value. On Linux, peer credentials and a received
+descriptor are separate handler-scoped POSIX capabilities obtained from
+`RequestContext`; the descriptor is exposed as a non-owning `BorrowedFd` view,
+and `duplicate()` is required to retain an independent owner after the
+callback returns. `Response` contains a wire-transparent non-negative `Status` and a string body. The
 `Response::ok(body)` helper covers the common success case without changing the
 aggregate `Response{status, body}` form used for explicit statuses. The
 `status_*` constants cover the common `200`, `404`, `408`, `409`, `500`, and

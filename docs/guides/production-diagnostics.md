@@ -54,6 +54,6 @@ disabled when response bodies must not expose internal details.
 ## What is intentionally out of scope
 
 The library does not promise a stable exporter schema, log format, histogram
-implementation, or distributed trace context in 0.7. Low-level tracing remains
+implementation, or distributed trace context in 0.8. Low-level tracing remains
 a build-time diagnostic option. New observability features must first preserve
 the no-overhead default and have a measured use case.

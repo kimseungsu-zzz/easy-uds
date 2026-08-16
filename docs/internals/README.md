@@ -37,6 +37,8 @@ release promise.
   validation boundary, and deferred capabilities.
 - [0.9.0 stabilization release](../releases/v0.9.0.md) — final regression
   evidence and 1.0 freeze preparation.
+- [1.0.0 stable release](../releases/v1.0.0.md) — frozen public contract,
+  supported platforms, and final validation boundary.
 - [0.8.0-rc.1 historical candidate](../releases/v0.8.0-rc.1.md) — RC-era
   validation record.
 - [0.9 stabilization roadmap](../ROADMAP_0.9.md) — bug-fix scope, 1.0

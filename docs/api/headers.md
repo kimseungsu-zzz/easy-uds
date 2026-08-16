@@ -41,7 +41,7 @@ Including the umbrella remains source-compatible with 0.6.
 
 The header split gives declarations stable ownership and prevents unrelated
 public declarations from being parsed when a narrow header is sufficient. The
-0.8 Request capability change intentionally makes `Request` platform-neutral
+The Request capability change intentionally makes `Request` platform-neutral
 and explicitly move-only; this is a source-level migration, not a wire-format
 change. Protocol v2 remains byte-for-byte unchanged.
 

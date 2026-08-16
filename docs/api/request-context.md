@@ -48,7 +48,7 @@ handler execution, and response I/O. A handler is not forcibly interrupted
 when it expires. The application decides where it is safe to poll
 `stop_requested()` and return.
 
-There is no protocol-level per-request cancellation frame in 0.8. A client
+There is no protocol-level per-request cancellation frame in 1.0. A client
 disconnect, Session failure, server shutdown, or elapsed deadline can make the
 cooperative signal true. Blocking application operations must provide their
 own interruption mechanism if they need immediate wake-up.

@@ -12,7 +12,10 @@
 
 #include <unistd.h>
 
-static_assert(easy_uds::version == std::string_view{"0.9.0"});
+static_assert(easy_uds::version_major == 1);
+static_assert(easy_uds::version_minor == 0);
+static_assert(easy_uds::version_patch == 0);
+static_assert(easy_uds::version == std::string_view{"1.0.0"});
 static_assert(easy_uds::protocol_version == 2U);
 static_assert(sizeof(easy_uds::BorrowedFd) == sizeof(int));
 static_assert(sizeof(easy_uds::OwnedFd) == sizeof(int));

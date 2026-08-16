@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.20)
 
-project(easy_uds VERSION 0.9.0 LANGUAGES CXX)
+project(easy_uds VERSION 1.0.0 LANGUAGES CXX)
 
 include(CMakePackageConfigHelpers)
 include(GNUInstallDirs)

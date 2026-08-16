@@ -9,6 +9,8 @@ application.
   application-owned diagnostics.
 - [Production diagnostics](production-diagnostics.md) — the deliberately small
   `stats()` scope, health/readiness guidance, and sampling rules.
+- [Troubleshooting](troubleshooting.md) — common endpoint, Session, deadline,
+  Simple API, and platform-capability failures.
 - [Option boundaries](../api/options.md) — timeout, memory, admission, and
   slow-peer contracts before tuning a production server.
 - [0.6 → 0.7 migration](../migration/0.6-to-0.7.md) — source-breaking API

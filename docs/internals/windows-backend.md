@@ -2,7 +2,7 @@
 
 ## Decision
 
-The 0.8 initial backend uses Winsock AF_UNIX on Windows 10 or newer. AF_UNIX
+The 1.0 backend uses Winsock AF_UNIX on Windows 10 or newer. AF_UNIX
 keeps the existing pathname endpoint and byte-stream framing model, so the
 common protocol v2, fixed RPC, multiplexed Session, serialization policies, and
 Simple API remain unchanged. Named Pipes were not selected because they would
@@ -47,7 +47,7 @@ than leaking a raw 100xx code into `Error::system_code()`.
 
 The current development environment has no MSVC. Linux
 build/tests/ASan/UBSan/TSan/fuzz/stress remain the local regression gate.
-Windows source compilation and runtime behavior for the 0.8 release passed in
+Windows source compilation and runtime behavior for the 0.8 baseline passed in
 the dedicated [GitHub Actions run
 31919103353](https://github.com/kimseungsu-zzz/easy-uds/actions/runs/31919103353),
 including static/shared package consumers; every later release must repeat

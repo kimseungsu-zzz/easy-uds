@@ -2,7 +2,11 @@
 
 [English README](README.md)
 
-`easy-uds`는 Unix Domain Socket(`AF_UNIX`)을 이용해 같은 시스템 안의 프로세스끼리 통신하기 위한 작은 C++17 IPC 라이브러리입니다. 공개 API를 작게 유지하면서도 요청/응답 RPC, 대용량 스트리밍, 제한된 동시성, 타임아웃, 안전한 종료, 바이너리 프레이밍, CMake 패키지 설치를 제공합니다.
+`easy-uds`는 Unix Domain Socket(`AF_UNIX`)을 이용해 같은 시스템 안의
+프로세스끼리 통신하기 위한 작은 C++17 IPC 라이브러리입니다. 1.0 라인은
+간결한 공개 계약을 동결하면서 요청/응답 RPC, 대용량 스트리밍, 제한된
+동시성, 타임아웃, 안전한 종료, 바이너리 프레이밍, CMake 패키지 설치를
+제공합니다.
 
 특히 한 프로세스에서만 소유할 수 있는 로봇 드라이버나 하드웨어 드라이버를 여러 프로세스가 함께 사용해야 할 때 유용합니다. `on_serialized()`를 사용하면 여러 클라이언트 프로세스가 동시에 명령을 보내더라도 실제 하드웨어 명령은 한 번에 하나씩 FIFO 순서로 실행됩니다.
 
@@ -36,15 +40,13 @@
 
 ## 플랫폼
 
-Linux가 현재 production 검증된 backend입니다. 0.9는 Core/Session/Simple의
-공통 protocol 계약을 유지하는 Windows AF_UNIX backend도 포함되어 있습니다.
-최종 Windows runtime·package·lifecycle 검증은 [Actions run
-31919103353](https://github.com/kimseungsu-zzz/easy-uds/actions/runs/31919103353)에서
-통과했으며, 이 개발 환경에는 여전히 로컬 MSVC가 없습니다. Windows에서는
-POSIX peer credentials와 FD passing을 제공하지 않으며, macOS와 BSD는
-아직 지원하지 않습니다. Linux 전용 abstract socket이 아니라 pathname
-socket을 사용합니다. 자세한 지원 범위는
-[`docs/platform-support.md`](docs/platform-support.md)를 참조하세요.
+Linux는 production 지원 backend입니다. Windows 10+에서는 검증된 AF_UNIX
+Core/Session/streaming/Simple/package surface를 제공합니다. POSIX peer
+credentials와 descriptor passing은 Windows에서 명시적으로 지원하지 않으며,
+macOS와 BSD도 지원하지 않습니다. Linux 전용 abstract socket이 아니라
+pathname socket을 사용합니다. 정확한 범위는
+[`docs/platform-support.md`](docs/platform-support.md)와
+[`docs/api/compatibility.md`](docs/api/compatibility.md)를 참고하십시오.
 
 ## 빠른 시작
 
@@ -54,7 +56,8 @@ socket을 사용합니다. 자세한 지원 범위는
 
 문서 지도: [Getting started](docs/getting-started/README.md) ·
 [API reference](docs/api/README.md) · [Guides](docs/guides/README.md) ·
-[Internals와 실험 기록](docs/internals/README.md)
+[Platform support](docs/platform-support.md) ·
+[Internals와 history](docs/internals/README.md)
 
 ### 가장 빠른 시작: Simple API
 
@@ -727,21 +730,13 @@ tests/easy_uds_test/     기능별로 나눈 unit 테스트
 tests/                  stress, fuzz, benchmark, package-consumer 테스트
 cmake/                  설치용 CMake config
 docs/                   protocol 문서
-docs/ROADMAP_0.6.md     0.6.x 기술 실험 및 릴리즈 경계
-docs/ROADMAP_0.7.md     0.7 사용성·API·호환성 계획
-docs/ERGONOMICS_0.7.md  beginner-first syntax 및 progressive disclosure audit
-docs/RELEASE_0.7.md     0.7.0 최종 범위와 검증 기록
-docs/releases/v0.7.1.md 0.7.1 아키텍처 릴리즈 범위와 인수인계
-docs/releases/v0.9.0.md     0.9 안정화와 1.0 freeze 준비
-docs/releases/v0.8.0.md     0.8 cross-platform 범위 기록
+docs/api/compatibility.md 1.0 source/protocol/platform 호환성 계약
 docs/platform-support.md   현재 Linux/Windows 지원 범위와 제한
-docs/internals/windows-backend.md Windows backend 결정과 검증 경계
-docs/SOURCE_LAYOUT.md    0.7.1 source ownership와 dependency 경계
-docs/PERF_0.7.md        v0.6.4 대비 0.7 성능 회귀 측정
-docs/PERF_0.8_RC.md     0.8 Linux 기준 측정
-docs/history/experiments/0.6.md  독립 UDS 기술 capability probe (history)
-docs/history/README.md    history 및 실험 인덱스
-docs/PERF_0.6.md         0.6 benchmark 측정 결과와 해석
+docs/guides/               task guide, diagnostics, troubleshooting
+docs/internals/            architecture 경계와 검증 evidence
+docs/PROTOCOL.md           protocol v2 wire format
+docs/releases/v1.0.0.md    현재 stable release notes
+docs/history/README.md     과거 측정·실험·릴리즈 기록
 .github/workflows/      GitHub Actions CI
 ```
 

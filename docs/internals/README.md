@@ -1,4 +1,9 @@
-# Internals
+# Internals and history
+
+The 1.0 user-facing contract is documented in the
+[compatibility contract](../api/compatibility.md). The pages below explain
+implementation boundaries and retained validation evidence; they are not a
+second public API.
 
 - [Linux dependency and backend audit](linux-dependency-audit.md) — complete
   Phase 5 inventory, temporary POSIX seams, and CMake backend source selection.

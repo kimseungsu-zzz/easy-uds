@@ -5,8 +5,8 @@ For the shortest fixed-RPC path, start with the installed
 string-view handlers while keeping the full Core API available as an explicit
 escape hatch.
 
-This is the shortest path from an empty Linux checkout to a working request
-and response. The examples use URI-shaped route names (for example, `/echo`)
+This is the shortest path from an empty checkout to a working request and
+response. The examples use URI-shaped route names (for example, `/echo`)
 consistently; route names are opaque strings to easy-uds, so this convention is
 for readability and tooling rather than a wire-level requirement.
 

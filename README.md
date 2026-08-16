@@ -2,7 +2,10 @@
 
 [한국어 README](README.ko.md)
 
-`easy-uds` is a small C++17 request/response and chunk-streaming library for local IPC over Unix Domain Sockets (`AF_UNIX`). It keeps the public API intentionally small while providing bounded concurrency, deadlines, binary-safe framing, deterministic shutdown, and CMake package support.
+`easy-uds` is a small C++17 request/response and chunk-streaming library for
+local IPC over Unix Domain Sockets (`AF_UNIX`). The 1.0 line freezes a compact
+public contract with bounded concurrency, deadlines, binary-safe framing,
+deterministic shutdown, and CMake package support.
 
 > **Protocol note:** Current releases use protocol version 2 with a 20-byte header and request-id multiplexing. It is not wire-compatible with protocol v1 used by v0.5.x and earlier.
 
@@ -38,14 +41,12 @@
 
 ## Platform
 
-Linux is the production-validated backend. 0.9 retains the Windows AF_UNIX
-backend that keeps the Core/Session/Simple wire contract. The final Windows
-runtime, package, and lifecycle validation passed in [Actions run
-31919103353](https://github.com/kimseungsu-zzz/easy-uds/actions/runs/31919103353);
-this development environment still has no local MSVC. Windows resource
-passing and POSIX peer credentials are intentionally unavailable. macOS and
-BSD remain unsupported. The source uses pathname sockets rather than
-Linux-only abstract sockets.
+Linux is production-supported. Windows 10+ provides the validated AF_UNIX
+Core/Session/streaming/Simple/package surface. POSIX peer credentials and
+descriptor passing remain explicitly unavailable on Windows; macOS and BSD
+are unsupported. The source uses pathname sockets rather than Linux-only
+abstract sockets. See [platform support](docs/platform-support.md) and the
+[1.0 compatibility contract](docs/api/compatibility.md) for the exact scope.
 
 ## Quick start
 
@@ -55,7 +56,8 @@ keep the complete reference close to the source for readers who want one page.
 
 Documentation map: [Getting started](docs/getting-started/README.md) ·
 [API reference](docs/api/README.md) · [Guides](docs/guides/README.md) ·
-[Internals and experiments](docs/internals/README.md)
+[Platform support](docs/platform-support.md) ·
+[Internals and history](docs/internals/README.md)
 
 ### Quickest way: Simple API
 
@@ -681,21 +683,13 @@ tests/easy_uds_test/     Unit tests grouped by subsystem
 tests/                  Stress, fuzz, benchmark, and package-consumer tests
 cmake/                  Installed-package CMake config
 docs/                   Protocol documentation
-docs/ROADMAP_0.6.md     0.6.x technical experiment and release boundaries
-docs/ROADMAP_0.7.md     0.7 usability, API, and compatibility plan
-docs/ERGONOMICS_0.7.md  Beginner-first syntax and progressive disclosure audit
-docs/RELEASE_0.7.md     0.7.0 final scope and verification record
-docs/releases/v0.7.1.md 0.7.1 architecture release scope and handoff
-docs/releases/v0.9.0.md     0.9 stabilization and 1.0 freeze preparation
-docs/releases/v0.8.0.md     0.8 historical cross-platform scope
+docs/api/compatibility.md 1.0 source/protocol/platform compatibility contract
 docs/platform-support.md   Current Linux/Windows support and intentional limits
-docs/internals/windows-backend.md Windows backend decisions and validation boundary
-docs/SOURCE_LAYOUT.md    0.7.1 source ownership and dependency boundary
-docs/PERF_0.7.md        0.7 regression measurements against v0.6.4
-docs/PERF_0.8_RC.md     0.8 Linux reference measurements
-docs/history/experiments/0.6.md  Standalone UDS capability probes (history)
-docs/history/README.md    Historical measurements and experiment index
-docs/PERF_0.6.md         0.6 benchmark measurements and interpretation
+docs/guides/               Task guides, diagnostics, and troubleshooting
+docs/internals/            Architecture boundaries and validation evidence
+docs/PROTOCOL.md           Protocol-v2 wire format
+docs/releases/v1.0.0.md    Current stable release notes
+docs/history/README.md     Historical measurements, experiments, and releases
 .github/workflows/      GitHub Actions CI
 ```
 

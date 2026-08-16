@@ -14,7 +14,7 @@ The Windows RC smoke covers fixed RPC, concurrent Session requests, streaming,
 Simple `ResponseError`, repeated bind/run/stop lifecycle, and installed-package
 Core/Simple consumers. Static and shared library variants are built in the
 Windows workflow. The current candidate passed that full matrix in
-[Actions run 31916904359](https://github.com/kimseungsu-zzz/easy-uds/actions/runs/31916904359).
+[Actions run 31918708187](https://github.com/kimseungsu-zzz/easy-uds/actions/runs/31918708187).
 
 The Windows implementation deliberately uses AF_UNIX rather than introducing a
 Named Pipe-specific protocol or a runtime transport hierarchy. This preserves

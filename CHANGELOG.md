@@ -7,7 +7,7 @@ All notable changes to this project are documented here.
 This candidate keeps the Linux engine and protocol-v2 behavior while adding a
 concrete Windows AF_UNIX backend selected at build time. The candidate's
 Windows gate passed on GitHub Actions run
-[`31916904359`](https://github.com/kimseungsu-zzz/easy-uds/actions/runs/31916904359);
+[`31918708187`](https://github.com/kimseungsu-zzz/easy-uds/actions/runs/31918708187);
 tagging and the final release remain intentionally deferred.
 
 ### Added

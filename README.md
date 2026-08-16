@@ -41,7 +41,7 @@
 Linux is the production-validated backend. A Windows AF_UNIX backend is now
 included in the 0.8 RC work and keeps the Core/Session/Simple wire contract.
 The current candidate's Windows runtime, package, and lifecycle validation
-passed in [Actions run 31916904359](https://github.com/kimseungsu-zzz/easy-uds/actions/runs/31916904359);
+passed in [Actions run 31918708187](https://github.com/kimseungsu-zzz/easy-uds/actions/runs/31918708187);
 this development environment still has no local MSVC. Windows resource
 passing and POSIX peer credentials are intentionally unavailable. macOS and
 BSD remain unsupported. The source uses pathname sockets rather than

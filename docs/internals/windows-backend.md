@@ -49,7 +49,7 @@ The current development environment has no MSVC. Linux
 build/tests/ASan/UBSan/TSan/fuzz/stress remain the local regression gate.
 Windows source compilation and runtime behavior for this candidate passed in
 the dedicated [GitHub Actions run
-31916904359](https://github.com/kimseungsu-zzz/easy-uds/actions/runs/31916904359),
+31918708187](https://github.com/kimseungsu-zzz/easy-uds/actions/runs/31918708187),
 including static/shared package consumers; every later candidate must repeat
 that hosted validation.
 

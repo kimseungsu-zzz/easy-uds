@@ -32,6 +32,17 @@ The optional io_uring A/B was unavailable in this WSL environment. No
 optimization decision is based on that skipped probe. ARM64 and native Linux
 reruns remain workflow-controlled measurements. The Windows workflow also runs
 `easy_uds_windows_benchmark` for a small c1/c8 latency-throughput baseline;
-those values are runner-specific and are kept in the Actions log rather than
-being presented as a cross-platform performance claim. This development
-environment has no local Windows compiler.
+those values are runner-specific and are not a cross-platform performance
+claim. The final candidate's hosted Windows values were:
+
+| Build | One-shot c1 (throughput / p50 / p99) | Shared Session c8 (throughput / p50 / p99) |
+|---|---:|---:|
+| Static | 69.1 req/s / 15,880.2 µs / 25,837.4 µs | 74,696.5 req/s / 87.1 µs / 272.4 µs |
+| Shared | 114.0 req/s / 10,066.8 µs / 24,168.9 µs | 60,999.8 req/s / 114.7 µs / 220.0 µs |
+
+These are 100 one-shot and 400 shared-session requests on the hosted Windows
+runner, intended as a smoke baseline rather than a Linux comparison. The
+The same candidate passed the hosted native x86_64 20-pass unit/stress soak
+and the ARM64 5-pass release/benchmark smoke in [Actions run
+31918708187](https://github.com/kimseungsu-zzz/easy-uds/actions/runs/31918708187).
+The development environment has no local Windows compiler.

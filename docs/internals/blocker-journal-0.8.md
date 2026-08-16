@@ -16,7 +16,7 @@
   lists, and concrete Winsock AF_UNIX capability files.
 - **Resolution for this candidate:** The full static/shared Windows Core,
   Session, streaming, Simple, lifecycle, and installed-package matrix passed
-  in [Actions run 31916904359](https://github.com/kimseungsu-zzz/easy-uds/actions/runs/31916904359).
+  in [Actions run 31918708187](https://github.com/kimseungsu-zzz/easy-uds/actions/runs/31918708187).
   Local MSVC remains unavailable, so every later candidate must repeat the
   hosted gate.
 

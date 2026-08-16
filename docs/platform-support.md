@@ -13,8 +13,8 @@ readiness, wakeup, and pathname lifecycle primitives.
 The Windows RC smoke covers fixed RPC, concurrent Session requests, streaming,
 Simple `ResponseError`, repeated bind/run/stop lifecycle, and installed-package
 Core/Simple consumers. Static and shared library variants are built in the
-Windows workflow. These become validation results only after that job has run
-on the current commit.
+Windows workflow. The current candidate passed that full matrix in
+[Actions run 31916904359](https://github.com/kimseungsu-zzz/easy-uds/actions/runs/31916904359).
 
 The Windows implementation deliberately uses AF_UNIX rather than introducing a
 Named Pipe-specific protocol or a runtime transport hierarchy. This preserves
@@ -31,5 +31,6 @@ headers do not include those headers on Windows.
 The repository environment used for this development does not contain MSVC,
 so no local Windows runtime result is claimed. The `windows-core` GitHub
 Actions job builds the static/shared-capable library, runs the Windows smoke
-test, installs the package, and compiles the installed consumer. A release
-candidate decision must include that job's result.
+test, installs the package, and compiles the installed consumer; its passing
+result is recorded above. A future candidate must repeat that gate on its own
+commit.

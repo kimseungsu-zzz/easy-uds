@@ -13,11 +13,12 @@
   workflow, unsupported-capability documentation, and Linux performance work.
 - **Attempted mitigation:** Added a dedicated `windows-core` GitHub Actions
   job, a Windows-only public-header smoke target, explicit Windows source
-  lists, and concrete Winsock AF_UNIX capability files. No Windows result is
-  represented as passing.
-- **Required resolution:** Run the Windows Actions job (or a Windows/MSVC
-  host) and fix compile/runtime failures before calling the release candidate
-  ready.
+  lists, and concrete Winsock AF_UNIX capability files.
+- **Resolution for this candidate:** The full static/shared Windows Core,
+  Session, streaming, Simple, lifecycle, and installed-package matrix passed
+  in [Actions run 31916904359](https://github.com/kimseungsu-zzz/easy-uds/actions/runs/31916904359).
+  Local MSVC remains unavailable, so every later candidate must repeat the
+  hosted gate.
 
 ## B-WIN-002 — Windows resource/identity capabilities intentionally excluded
 

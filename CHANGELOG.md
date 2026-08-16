@@ -5,8 +5,10 @@ All notable changes to this project are documented here.
 ## easy-uds 0.8.0-rc.1 — Cross-platform Core (candidate)
 
 This candidate keeps the Linux engine and protocol-v2 behavior while adding a
-concrete Windows AF_UNIX backend selected at build time. It is not a final
-release until the Windows CI gate has run on the candidate commit.
+concrete Windows AF_UNIX backend selected at build time. The candidate's
+Windows gate passed on GitHub Actions run
+[`31916904359`](https://github.com/kimseungsu-zzz/easy-uds/actions/runs/31916904359);
+tagging and the final release remain intentionally deferred.
 
 ### Added
 
@@ -36,8 +38,9 @@ release until the Windows CI gate has run on the candidate commit.
 
 - Linux GCC Debug/Release, CTest, architecture guard, and existing regression
   suites remain required and are run locally/CI.
-- Windows Core/Session/Simple/streaming/lifecycle/package validation is owned
-  by the dedicated Windows Actions job; no local MSVC result is claimed.
+- Windows Core/Session/Simple/streaming/lifecycle/package validation passed in
+  the dedicated Windows Actions job; this environment still has no local MSVC
+  result.
 - See [`docs/releases/v0.8.0-rc.1.md`](docs/releases/v0.8.0-rc.1.md) and
   [`docs/platform-support.md`](docs/platform-support.md) for the exact RC
   boundary.

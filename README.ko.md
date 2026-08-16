@@ -38,12 +38,13 @@
 
 Linux가 현재 production 검증된 backend입니다. 0.8 RC 작업에는 Windows
 AF_UNIX backend도 포함되어 Core/Session/Simple의 공통 protocol 계약을
-유지하지만, Windows runtime·package·lifecycle 검증은 전용 CI가 실행된
-뒤에만 통과로 주장합니다. Windows에서는 POSIX peer credentials와 FD
-passing을 제공하지 않으며, macOS와 BSD는 아직 지원하지 않습니다.
-Linux 전용 abstract socket이 아니라 pathname socket을 사용합니다. 자세한
-지원 범위는 [`docs/platform-support.md`](docs/platform-support.md)를
-참조하세요.
+유지합니다. 현재 후보의 Windows runtime·package·lifecycle 검증은
+[Actions run 31916904359](https://github.com/kimseungsu-zzz/easy-uds/actions/runs/31916904359)에서
+통과했으며, 이 개발 환경에는 여전히 로컬 MSVC가 없습니다. Windows에서는
+POSIX peer credentials와 FD passing을 제공하지 않으며, macOS와 BSD는
+아직 지원하지 않습니다. Linux 전용 abstract socket이 아니라 pathname
+socket을 사용합니다. 자세한 지원 범위는
+[`docs/platform-support.md`](docs/platform-support.md)를 참조하세요.
 
 ## 빠른 시작
 

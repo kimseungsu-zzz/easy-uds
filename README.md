@@ -20,7 +20,7 @@
 - `Server::enqueue_maintenance()` for safe server-side state cleanup from external threads
 - Natural flow control through Unix-socket backpressure
 - Versioned, binary-safe protocol framing (protocol v2 with request-id multiplexing)
-- readiness-driven reactor server: idle connections never occupy a worker, and stalled fixed-response I/O never blocks the reactor or worker pool (epoll on Linux; the Windows AF_UNIX backend remains CI-gated)
+- readiness-driven reactor server: idle connections never occupy a worker, and stalled fixed-response I/O never blocks the reactor or worker pool (epoll on Linux; the Windows AF_UNIX backend is validated by the dedicated Actions gate)
 - Configurable connection limit, inactivity timeout, absolute request deadline (`408` on expiry), connect timeout, backlog, and message size
 - Optimistic non-blocking socket I/O that calls `poll()` only on backpressure
 - Gathered header+payload writes through `sendmsg()` to reduce per-chunk system calls
@@ -39,12 +39,13 @@
 ## Platform
 
 Linux is the production-validated backend. A Windows AF_UNIX backend is now
-included in the 0.8 RC work and keeps the Core/Session/Simple wire contract,
-but Windows runtime, package, and lifecycle validation is CI-gated and is not
-claimed as passed until the Windows job runs. Windows resource passing and
-POSIX peer credentials are intentionally unavailable. macOS and BSD remain
-unsupported. The source uses pathname sockets rather than Linux-only abstract
-sockets.
+included in the 0.8 RC work and keeps the Core/Session/Simple wire contract.
+The current candidate's Windows runtime, package, and lifecycle validation
+passed in [Actions run 31916904359](https://github.com/kimseungsu-zzz/easy-uds/actions/runs/31916904359);
+this development environment still has no local MSVC. Windows resource
+passing and POSIX peer credentials are intentionally unavailable. macOS and
+BSD remain unsupported. The source uses pathname sockets rather than
+Linux-only abstract sockets.
 
 ## Quick start
 

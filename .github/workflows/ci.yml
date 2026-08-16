@@ -39,7 +39,7 @@ jobs:
 
       - name: Upload ARM64 benchmark log
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: easy-uds-arm64-final-benchmarks
           path: arm64-final-benchmarks.log
@@ -77,7 +77,7 @@ jobs:
 
       - name: Upload x86_64 benchmark log
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: easy-uds-x86_64-final-benchmarks
           path: x86_64-final-benchmarks.log

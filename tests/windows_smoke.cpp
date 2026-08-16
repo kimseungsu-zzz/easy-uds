@@ -60,7 +60,7 @@ int main() {
                     ENETUNREACH,
                 "WSAENETUNREACH mapping failed");
         require(easy_uds::detail::platform_windows::errno_from_wsa(WSAESHUTDOWN) ==
-                    ESHUTDOWN,
+                    EPIPE,
                 "WSAESHUTDOWN mapping failed");
         require(easy_uds::detail::platform_windows::errno_from_wsa(WSAEMSGSIZE) == EMSGSIZE,
                 "WSAEMSGSIZE mapping failed");

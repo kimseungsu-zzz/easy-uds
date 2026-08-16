@@ -91,7 +91,9 @@ int errno_from_wsa(int error) noexcept {
         mapped = ENOTCONN;
         break;
     case WSAESHUTDOWN:
-        mapped = ESHUTDOWN;
+        // MSVC does not expose POSIX ESHUTDOWN; EPIPE is the closest
+        // portable closed-peer indication used by the transport.
+        mapped = EPIPE;
         break;
     case WSAENOTSOCK:
         mapped = EBADF;
@@ -133,7 +135,7 @@ int errno_from_wsa(int error) noexcept {
         mapped = ENETUNREACH;
         break;
     case WSAEHOSTDOWN:
-        mapped = EHOSTDOWN;
+        mapped = EHOSTUNREACH;
         break;
     case WSAEHOSTUNREACH:
         mapped = EHOSTUNREACH;

@@ -13,8 +13,8 @@ readiness, wakeup, and pathname lifecycle primitives.
 The Windows release smoke covers fixed RPC, concurrent Session requests, streaming,
 Simple `ResponseError`, repeated bind/run/stop lifecycle, and installed-package
 Core/Simple consumers. Static and shared library variants are built in the
-Windows workflow. The 0.9 stabilization validation passed that full matrix in
-[Actions run 31921572981](https://github.com/kimseungsu-zzz/easy-uds/actions/runs/31921572981).
+Windows workflow. The final 1.0 validation passed that full matrix in
+[Actions run 31924168957](https://github.com/kimseungsu-zzz/easy-uds/actions/runs/31924168957).
 
 The Windows implementation deliberately uses AF_UNIX rather than introducing a
 Named Pipe-specific protocol or a runtime transport hierarchy. This preserves

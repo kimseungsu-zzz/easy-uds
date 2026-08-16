@@ -29,6 +29,14 @@ protocol rather than adding a new transport or major feature.
   stable source/API, ownership, error, lifecycle, package, and protocol
   contracts. New features belong to 1.1+.
 
+### Verification
+
+- Push CI [31924021123](https://github.com/kimseungsu-zzz/easy-uds/actions/runs/31924021123)
+  and full validation [31924168957](https://github.com/kimseungsu-zzz/easy-uds/actions/runs/31924168957)
+  passed Linux/Windows builds, package and Simple consumers, public headers,
+  architecture guards, sanitizers, TSan, fuzz, ARM64, native benchmarks,
+  soak, and the release gate.
+
 ## easy-uds 0.9.0 — Stabilization
 
 This is a stabilization and 1.0 freeze-preparation release, not a new

@@ -1,5 +1,6 @@
 #include "client_engine.hpp"
 
+#include "../platform/peer_identity.hpp"
 #include "../transport/io.hpp"
 #include "../transport/transport.hpp"
 
@@ -7,12 +8,6 @@
 #include <cstdint>
 #include <limits>
 #include <stdexcept>
-#if defined(_WIN32)
-#include <winsock2.h>
-#include <afunix.h>
-#include "../platform/windows/socket_common.hpp"
-#endif
-
 namespace easy_uds::detail::client_engine {
 namespace {
 
@@ -109,26 +104,11 @@ Response request_handle(const std::string& socket_path,
     detail::connect_nonblocking(fd.get(), address, options.connect_timeout,
                                 deadline);
 
-#if defined(SIO_AF_UNIX_GETPEERPID)
-    ULONG server_pid = 0;
-    DWORD returned = 0;
-    const SOCKET socket = platform_windows::to_socket(fd.get());
-    const int peer_pid_result = ::WSAIoctl(
-        socket, SIO_AF_UNIX_GETPEERPID, nullptr, 0, &server_pid,
-        static_cast<DWORD>(sizeof(server_pid)), &returned, nullptr, nullptr);
-    if (peer_pid_result != 0) {
-        platform_windows::last_wsa_error();
+    std::uint32_t server_pid = 0;
+    if (!peer_identity::query_peer_process_id(fd.get(), server_pid)) {
         throw Error(ErrorCode::unavailable,
                     "could not identify the Windows AF_UNIX server process");
     }
-    if (server_pid == 0) {
-        throw Error(ErrorCode::unavailable,
-                    "Windows AF_UNIX returned an invalid server process id");
-    }
-#else
-    throw Error(ErrorCode::unavailable,
-                "Windows AF_UNIX peer PID support is unavailable in this SDK");
-#endif
 
     const auto raw_handle = static_cast<std::uint64_t>(
         reinterpret_cast<std::uintptr_t>(handle));

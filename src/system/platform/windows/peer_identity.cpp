@@ -63,6 +63,25 @@ void capture_sid(HANDLE process, Identity& identity) {
 
 } // namespace
 
+bool query_peer_process_id(platform_types::NativeSocket fd,
+                           std::uint32_t& pid) noexcept {
+#if defined(SIO_AF_UNIX_GETPEERPID)
+    ULONG native_pid = 0;
+    DWORD bytes_returned = 0;
+    if (::WSAIoctl(static_cast<SOCKET>(fd), SIO_AF_UNIX_GETPEERPID, nullptr, 0,
+                   &native_pid, static_cast<DWORD>(sizeof(native_pid)),
+                   &bytes_returned, nullptr, nullptr) != 0 || native_pid == 0) {
+        return false;
+    }
+    pid = static_cast<std::uint32_t>(native_pid);
+    return true;
+#else
+    (void)fd;
+    (void)pid;
+    return false;
+#endif
+}
+
 Identity capture(platform_types::NativeSocket fd) noexcept {
     Identity identity;
 #if defined(SIO_AF_UNIX_GETPEERPID)

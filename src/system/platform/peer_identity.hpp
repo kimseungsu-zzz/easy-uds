@@ -25,4 +25,9 @@ struct Identity {
 
 Identity capture(platform_types::NativeSocket fd) noexcept;
 
+// Query the connected peer PID where the platform provides that capability.
+// Returns false when the query is unavailable or fails.
+bool query_peer_process_id(platform_types::NativeSocket fd,
+                          std::uint32_t& pid) noexcept;
+
 } // namespace easy_uds::detail::peer_identity

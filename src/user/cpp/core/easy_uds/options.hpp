@@ -4,8 +4,13 @@
 
 #include <chrono>
 #include <cstddef>
+#include <cstdint>
+#include <functional>
 
 namespace easy_uds {
+
+struct Request;
+class RequestContext;
 
 inline constexpr std::size_t default_max_message_size = 1024U * 1024U;
 inline constexpr std::size_t default_stream_chunk_size = 64U * 1024U;
@@ -105,6 +110,13 @@ struct ServerOptions {
     // clients must not learn internal error details.
     bool include_handler_error_messages = true;
 
+    // Optional application authentication/authorization gate. It runs before
+    // the route handler for each fixed request. Returning false sends 403.
+    // Use trusted local peer capabilities where available; request-body
+    // credentials must be validated by the application.
+    std::function<bool(const Request&, const RequestContext&)>
+        authorize_request;
+
     // Optional cumulative event counters. Disabled preserves the default hot
     // path; Server::stats() operational gauges remain available either way.
     StatsMode stats = StatsMode::disabled;
@@ -133,6 +145,18 @@ struct ClientOptions {
     // In-flight depth remains observable when disabled. One-shot calls keep
     // no persistent accounting state.
     StatsMode stats = StatsMode::disabled;
+
+    // Wire protocol version. Version 2 is the compatibility default; version
+    // 3 enables cooperative request cancellation on persistent sessions.
+    std::uint8_t protocol_version = 2;
+};
+
+// Per-call retry controls for Client::request_idempotent(). Each attempt is a
+// fresh connection and uses ClientOptions::request_timeout independently.
+struct RetryOptions {
+    std::size_t max_attempts = 3;
+    std::chrono::milliseconds initial_backoff{5};
+    std::chrono::milliseconds max_backoff{100};
 };
 
 } // namespace easy_uds

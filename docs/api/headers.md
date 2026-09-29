@@ -26,6 +26,7 @@ feature headers they expose or use:
 | `request.hpp` | Platform-neutral move-only `Request` values |
 | `peer_credentials.hpp` | Linux/POSIX `PeerCredentials` value |
 | `posix.hpp` | Linux/POSIX `RequestCapabilities` view and accessor |
+| `windows.hpp` | Windows HANDLE ownership and callback-scoped capability views |
 | `request_context.hpp` | Handler timing and cooperative-stop observations |
 | `stats.hpp` | Server/Session operational snapshots and optional counters |
 | `response.hpp` | `Status`, status constants, and `Response` |
@@ -34,6 +35,7 @@ feature headers they expose or use:
 | `error.hpp` | `Error`, `ErrorCode`, and error category access |
 | `fd.hpp` | `BorrowedFd`, `OwnedFd`, and ownership helpers |
 | `version.hpp` | Library and wire-protocol version constants |
+| `easy_uds.h` | Versioned C ABI for fixed RPC, contextual handlers, Sessions, and cancellation |
 
 Every header is self-contained under C++17 and is installed by the CMake
 package. A direct include does not require `easy_uds.hpp` to appear first.
@@ -51,28 +53,29 @@ Internal files are grouped by runtime responsibility:
 
 ```text
 src/system/core/              shared engine state and error implementation
-src/system/protocol/          protocol-v2 codec boundary
+src/system/protocol/          versioned protocol codec boundary (v2 and v3)
 src/system/runtime/           concrete engine operations and Server lifecycle
 src/system/reactor/           readiness-neutral parser, dispatch, flow/output, workers
 src/system/transport/         shared descriptor, exact I/O, client framing
 src/system/platform/           concrete platform contracts
 src/system/platform/linux/    concrete Linux endpoint/socket implementations
+src/system/platform/posix/    shared POSIX socket operations and kqueue readiness
 src/system/platform/windows/  concrete Windows AF_UNIX/Winsock implementations
 src/user/cpp/core/            installed Core C++ headers and public method glue
 src/user/cpp/simple/          installed Simple C++ header
-src/user/c/ and src/user/py/  reserved non-C++ language boundaries
+src/user/c/ and src/user/py/  C ABI and optional Python ctypes binding
 ```
 
 `src/system/` is private implementation and applications must not include it
 or rely on its names. `src/user/cpp/` is the source ownership of the public C++
 API; its headers are installed as `include/easy_uds/` and are covered by the
-public compatibility policy. `src/user/c/` is reserved for a future C ABI and
-`src/user/py/` for a future Python API.
+public compatibility policy. `src/user/c/` owns the versioned fixed-RPC C ABI
+and `src/user/py/` its optional standard-library-only Python wrapper.
 
 See [`docs/SOURCE_LAYOUT.md`](../SOURCE_LAYOUT.md) for the relocation rules and
 [`internals/user-system-dependencies.md`](../internals/user-system-dependencies.md)
-for the current dependency inventory and the next Linux dependency-inventory
-phase.
+for the historical dependency inventory. Current platform source sets and
+validation status are listed in [platform support](../platform-support.md).
 
 The grouping deliberately avoids one class per tiny file. Client and Session
 are separate because they have different lifetime and concurrency models;

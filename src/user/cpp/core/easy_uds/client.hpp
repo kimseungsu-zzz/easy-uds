@@ -2,6 +2,8 @@
 
 #if !defined(_WIN32)
 #include "easy_uds/fd.hpp"
+#else
+#include "easy_uds/windows.hpp"
 #endif
 #include "easy_uds/options.hpp"
 #include "easy_uds/response.hpp"
@@ -23,6 +25,14 @@ class Client {
     [[nodiscard]] Response request(std::string_view route,
                                    std::string_view body = {}) const;
 
+    // Reconnects and retries only transport failures. Use this only when the
+    // route is idempotent: a timeout can happen after the server ran it but
+    // before the response reached this client. max_attempts includes the first
+    // attempt. Application status responses are returned without retrying.
+    [[nodiscard]] Response request_idempotent(
+        std::string_view route, std::string_view body = {},
+        RetryOptions retry = {}) const;
+
 #if !defined(_WIN32)
     // One-shot POSIX request that also passes a borrowed descriptor (a
     // duplicate is sent via SCM_RIGHTS; the caller keeps ownership). The
@@ -30,6 +40,15 @@ class Client {
     // during a contextual handler callback. The response is read normally.
     [[nodiscard]] Response request_fd(std::string_view route, BorrowedFd fd,
                                       std::string_view body = {}) const;
+#endif
+
+#if defined(_WIN32)
+    // One-shot Windows request that duplicates a caller-owned HANDLE into the
+    // receiving server process. The caller keeps ownership; the source handle
+    // must remain open until the response arrives.
+    [[nodiscard]] Response request_handle(
+        std::string_view route, windows::BorrowedHandle handle,
+        std::string_view body = {}) const;
 #endif
 
     // One-shot streamed exchange over a dedicated connection.

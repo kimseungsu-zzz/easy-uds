@@ -60,8 +60,8 @@ explicitly rather than relying on retry or replay.
 ## `Request` and `Response`
 
 `Request` contains the route, body, and protocol request id, and remains an
-explicitly move-only value. On Linux, peer credentials and a received
-descriptor are separate handler-scoped POSIX capabilities obtained from
+explicitly move-only value. POSIX peer credentials and a received descriptor
+are separate handler-scoped capabilities obtained from
 `RequestContext`; the descriptor is exposed as a non-owning `BorrowedFd` view,
 and `duplicate()` is required to retain an independent owner after the
 callback returns. `Response` contains a wire-transparent non-negative `Status` and a string body. The

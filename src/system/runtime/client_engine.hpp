@@ -16,6 +16,10 @@ Response request(const std::string& socket_path, const ClientOptions& options,
 #if !defined(_WIN32)
 Response request_fd(const std::string& socket_path, const ClientOptions& options,
                     std::string_view route, BorrowedFd fd, std::string_view body);
+#else
+Response request_handle(const std::string& socket_path,
+                        const ClientOptions& options, std::string_view route,
+                        HANDLE handle, std::string_view body);
 #endif
 
 Status request_stream(

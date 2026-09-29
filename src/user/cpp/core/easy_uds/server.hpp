@@ -82,7 +82,7 @@ class RouteOptions {
     bool serialized_ = false;
 };
 
-// A request/response server over a Unix Domain Socket. Internally an epoll
+// A request/response server over a Unix Domain Socket. A platform readiness
 // reactor accepts connections, parses frames, and drains bounded output queues;
 // a fixed worker pool executes handlers. Long-lived connections and peers that
 // stop reading never occupy a worker while idle or blocked on output.

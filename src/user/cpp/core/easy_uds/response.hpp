@@ -13,6 +13,7 @@ using Status = std::int32_t;
 inline constexpr Status status_ok = 200;
 inline constexpr Status status_created = 201;
 inline constexpr Status status_bad_request = 400;
+inline constexpr Status status_forbidden = 403;
 inline constexpr Status status_request_timeout = 408;
 inline constexpr Status status_not_found = 404;
 inline constexpr Status status_conflict = 409;

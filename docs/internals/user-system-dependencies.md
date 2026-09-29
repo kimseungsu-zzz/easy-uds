@@ -1,4 +1,4 @@
-# User/System dependency audit and concrete seam
+# User/System dependency audit and concrete seam (historical)
 
 This is the 0.7.1 Phase 2 inventory after the behavior-neutral relocation in
 `36154fd`. It is an audit, not a refactor: protocol v2, runtime behavior, and
@@ -17,8 +17,8 @@ path conversion is performed.
 
 ```text
 src/user/cpp  ───────►  src/system  ───────►  src/system/platform/linux
-src/user/c    ───────►  src/system  (future C ABI)
-src/user/py   ───────►  src/user/c or a stable C++ boundary (future binding)
+src/user/c    ───────►  src/system  (C ABI v1)
+src/user/py   ───────►  src/user/c (ctypes binding)
 ```
 
 The desired end state is that `src/system` does not depend on a language

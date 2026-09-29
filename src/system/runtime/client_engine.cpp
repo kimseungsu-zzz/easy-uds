@@ -5,7 +5,13 @@
 
 #include <array>
 #include <cstdint>
+#include <limits>
 #include <stdexcept>
+#if defined(_WIN32)
+#include <winsock2.h>
+#include <afunix.h>
+#include "../platform/windows/socket_common.hpp"
+#endif
 
 namespace easy_uds::detail::client_engine {
 namespace {
@@ -18,10 +24,12 @@ using protocol::WireType;
 void write_request_frame_with_fd(NativeSocket fd, std::uint32_t request_id,
                                  NativeSocket passed_fd,
                                  std::string_view route, std::string_view body,
-                                 std::chrono::milliseconds io_timeout, Deadline deadline) {
+                                 std::chrono::milliseconds io_timeout, Deadline deadline,
+                                 std::uint8_t wire_version) {
     const HeaderBytes header = protocol::encode_header(
         WireType::request, request_id, static_cast<std::uint32_t>(route.size()),
-        static_cast<std::uint32_t>(body.size()), protocol::carries_fd_flag);
+        static_cast<std::uint32_t>(body.size()), protocol::carries_fd_flag,
+        wire_version);
     std::array<iovec, 3> parts{{
         {const_cast<unsigned char*>(header.data()), header.size()},
         {const_cast<char*>(route.data()), route.size()},
@@ -67,10 +75,86 @@ Response request(const std::string& socket_path, const ClientOptions& options,
     FileDescriptor fd = detail::make_socket();
     const auto address = detail::make_address(socket_path);
     detail::connect_nonblocking(fd.get(), address, options.connect_timeout, deadline);
-    detail::client::write_request_frame(fd.get(), 0, route, body, options.io_timeout, deadline);
+    detail::client::write_request_frame(fd.get(), 0, route, body,
+                                        options.io_timeout, deadline,
+                                        options.protocol_version);
     BufferedReader reader(fd.get());
     return read_response(reader, options.max_message_size, options.io_timeout, deadline);
 }
+
+#if defined(_WIN32)
+Response request_handle(const std::string& socket_path,
+                        const ClientOptions& options, std::string_view route,
+                        HANDLE handle, std::string_view body) {
+    if (handle == nullptr || handle == INVALID_HANDLE_VALUE) {
+        throw std::invalid_argument("request_handle requires a valid HANDLE");
+    }
+    const auto native_handle = reinterpret_cast<std::uintptr_t>(handle);
+    if (native_handle >=
+        std::numeric_limits<std::uintptr_t>::max() - 15U) {
+        throw std::invalid_argument(
+            "request_handle does not accept Windows pseudo handles");
+    }
+    constexpr std::size_t handle_prefix_size = sizeof(std::uint64_t);
+    if (body.size() > std::numeric_limits<std::size_t>::max() -
+                          handle_prefix_size) {
+        throw std::length_error("request exceeds max_message_size");
+    }
+    protocol::validate_request_lengths(
+        route.size(), body.size() + handle_prefix_size,
+        options.max_message_size);
+    const Deadline deadline = detail::deadline_from_now(options.request_timeout);
+    FileDescriptor fd = detail::make_socket();
+    const auto address = detail::make_address(socket_path);
+    detail::connect_nonblocking(fd.get(), address, options.connect_timeout,
+                                deadline);
+
+#if defined(SIO_AF_UNIX_GETPEERPID)
+    ULONG server_pid = 0;
+    DWORD returned = 0;
+    const SOCKET socket = platform_windows::to_socket(fd.get());
+    const int peer_pid_result = ::WSAIoctl(
+        socket, SIO_AF_UNIX_GETPEERPID, nullptr, 0, &server_pid,
+        static_cast<DWORD>(sizeof(server_pid)), &returned, nullptr, nullptr);
+    if (peer_pid_result != 0) {
+        platform_windows::last_wsa_error();
+        throw Error(ErrorCode::unavailable,
+                    "could not identify the Windows AF_UNIX server process");
+    }
+    if (server_pid == 0) {
+        throw Error(ErrorCode::unavailable,
+                    "Windows AF_UNIX returned an invalid server process id");
+    }
+#else
+    throw Error(ErrorCode::unavailable,
+                "Windows AF_UNIX peer PID support is unavailable in this SDK");
+#endif
+
+    const auto raw_handle = static_cast<std::uint64_t>(
+        reinterpret_cast<std::uintptr_t>(handle));
+    std::array<unsigned char, sizeof(raw_handle)> metadata{};
+    for (std::size_t index = 0; index < metadata.size(); ++index) {
+        metadata[index] = static_cast<unsigned char>(
+            raw_handle >> ((metadata.size() - index - 1) * 8));
+    }
+    const std::size_t wire_body_size = body.size() + metadata.size();
+    const HeaderBytes header = protocol::encode_header(
+        WireType::request, 0, static_cast<std::uint32_t>(route.size()),
+        static_cast<std::uint32_t>(wire_body_size),
+        protocol::carries_windows_handle_flag, options.protocol_version);
+    std::array<iovec, 4> parts{{
+        {const_cast<unsigned char*>(header.data()), header.size()},
+        {const_cast<char*>(route.data()), route.size()},
+        {metadata.data(), metadata.size()},
+        {const_cast<char*>(body.data()), body.size()},
+    }};
+    write_iovecs_exact(fd.get(), parts.data(), parts.size(), options.io_timeout,
+                       deadline);
+    BufferedReader reader(fd.get());
+    return read_response(reader, options.max_message_size, options.io_timeout,
+                         deadline);
+}
+#endif
 
 #if !defined(_WIN32)
 Response request_fd(const std::string& socket_path, const ClientOptions& options,
@@ -84,7 +168,8 @@ Response request_fd(const std::string& socket_path, const ClientOptions& options
     const auto address = detail::make_address(socket_path);
     detail::connect_nonblocking(socket_fd.get(), address, options.connect_timeout, deadline);
     write_request_frame_with_fd(socket_fd.get(), 0, fd.get(), route, body,
-                                options.io_timeout, deadline);
+                                options.io_timeout, deadline,
+                                options.protocol_version);
     BufferedReader reader(socket_fd.get());
     return read_response(reader, options.max_message_size, options.io_timeout, deadline);
 }

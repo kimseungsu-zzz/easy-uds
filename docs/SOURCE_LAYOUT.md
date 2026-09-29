@@ -1,40 +1,48 @@
 # Source layout
 
-The 0.7.1 foundation establishes a behavior-neutral ownership map for the
-0.8 work. It does not add an abstraction layer, change protocol v2, or move a
-runtime decision onto a virtual interface.
+This page describes the current 1.1 development layout, including the added
+POSIX backend and C/Python API layers. Platform source sets remain selected at
+build time.
 
 ```text
 src/
 ├── system/
 │   ├── core/                 shared engine state and error implementation
-│   ├── protocol/             protocol-v2 codec boundary
+│   ├── protocol/             versioned protocol-v2/v3 codec boundary
 │   ├── runtime/              concrete engine functions and server lifecycle
 │   ├── reactor/              readiness-neutral dispatch, parsing, workers, and streams
 │   ├── transport/            exact I/O and client framing helpers
 │   ├── platform/linux/       Linux endpoint, readiness, identity, and FD capabilities
+│   ├── platform/posix/       BSD socket operations and kqueue readiness
 │   └── platform/windows/     Windows AF_UNIX/Winsock capability source set
 └── user/
     ├── cpp/
     │   ├── core/             installed Core C++ headers and public method glue
     │   └── simple/           installed Simple C++ header
-    ├── c/                    reserved C ABI boundary
-    └── py/                   reserved Python binding boundary
+    ├── c/                    versioned fixed-RPC C ABI
+    └── py/                   optional Python ctypes package
 ```
+
+## Current ownership
 
 The installed include path remains `include/easy_uds/` for consumers. During
 the build it is sourced from `src/user/cpp/core/easy_uds/` and
 `src/user/cpp/simple/easy_uds/`, so public C++ ownership is visible without
 changing the package surface.
 
-The actual dependency inventory is maintained in
+The historical dependency inventory is maintained in
 [`internals/user-system-dependencies.md`](internals/user-system-dependencies.md).
-It records the current intentional `system → public C++ contract` edges and
-the concrete seams used before any Linux syscall extraction. Client and Session
-glue now calls concrete runtime engine functions, and route options are
-translated once during registration into immutable internal entries.
+It records the 0.7.1 transition; current backend assembly is shown in this
+page and in `CMakeLists.txt`.
 
-Phase 4 begins the inventory-driven extraction with the endpoint contract and
+## Historical extraction notes (0.7–0.8)
+
+The following phase log records the implementation sequence at the time. Its
+future-work statements are historical; use the current tree above,
+`CMakeLists.txt`, and [platform support](platform-support.md) for current
+backend status.
+
+Phase 4 began the inventory-driven extraction with the endpoint contract and
 Linux `endpoint.cpp`: pathname
 `AF_UNIX`/`sockaddr_un` validation and socket lifecycle calls are now concrete
 Linux capability functions. Phase 4B adds the current reactor readiness

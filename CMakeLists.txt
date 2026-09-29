@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.20)
 
-project(easy_uds VERSION 1.0.0 LANGUAGES CXX)
+project(easy_uds VERSION 1.1.0 LANGUAGES C CXX)
 
 include(CMakePackageConfigHelpers)
 include(GNUInstallDirs)
@@ -38,6 +38,7 @@ find_package(Threads REQUIRED)
 
 set(EASY_UDS_COMMON_SOURCES
     src/system/core/error.cpp
+    src/user/c/easy_uds_c.cpp
     src/system/runtime/server.cpp
     src/system/runtime/server_registration.cpp
     src/system/runtime/server_registration.hpp
@@ -100,6 +101,7 @@ elseif(CMAKE_SYSTEM_NAME STREQUAL "Windows")
     set(EASY_UDS_PLATFORM_SOURCES
         src/system/platform/windows/socket_common.cpp
         src/system/platform/windows/endpoint.cpp
+        src/system/platform/windows/handle_transfer.cpp
         src/system/platform/windows/readiness.cpp
         src/system/platform/windows/peer_identity.cpp
         src/system/platform/windows/descriptor_passing.cpp
@@ -120,10 +122,36 @@ elseif(CMAKE_SYSTEM_NAME STREQUAL "Windows")
         src/system/platform/socket_wait.hpp
         src/system/platform/server_path.hpp
         src/system/platform/windows/socket_common.hpp
+        src/system/platform/windows/handle_owner.hpp
+        src/system/platform/windows/handle_transfer.hpp
+    )
+elseif(CMAKE_SYSTEM_NAME MATCHES "^(FreeBSD|OpenBSD|NetBSD|DragonFly)$")
+    message(STATUS "easy-uds platform backend: POSIX AF_UNIX with kqueue")
+    set(EASY_UDS_PLATFORM_SOURCES
+        src/system/platform/posix/endpoint.cpp
+        src/system/platform/posix/readiness.cpp
+        src/system/platform/posix/peer_identity.cpp
+        src/system/platform/posix/descriptor_passing.cpp
+        src/system/platform/posix/socket_lifecycle.cpp
+        src/system/platform/posix/socket_io.cpp
+        src/system/platform/posix/socket_wait.cpp
+        src/system/platform/posix/server_path.cpp
+    )
+    set(EASY_UDS_PLATFORM_HEADERS
+        src/system/platform/native_socket.hpp
+        src/system/platform/descriptor_owner.hpp
+        src/system/platform/endpoint.hpp
+        src/system/platform/readiness.hpp
+        src/system/platform/peer_identity.hpp
+        src/system/platform/descriptor_passing.hpp
+        src/system/platform/socket_lifecycle.hpp
+        src/system/platform/socket_io.hpp
+        src/system/platform/socket_wait.hpp
+        src/system/platform/server_path.hpp
     )
 else()
     message(FATAL_ERROR
-        "easy-uds currently supports only the Linux and Windows platform backends")
+        "easy-uds currently supports Linux, Windows, and BSD backends")
 endif()
 
 add_library(easy_uds
@@ -153,6 +181,7 @@ target_include_directories(easy_uds
     PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src/user/cpp/core>
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src/user/cpp/simple>
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src/user/c/include>
         $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
 )
 target_link_libraries(easy_uds PUBLIC Threads::Threads)
@@ -165,7 +194,7 @@ if(WIN32)
     # exported. The public C++ surface is intentionally concrete, so let CMake
     # generate the export table for the shared Windows package.
     set_target_properties(easy_uds PROPERTIES WINDOWS_EXPORT_ALL_SYMBOLS ON)
-    target_link_libraries(easy_uds PUBLIC ws2_32)
+    target_link_libraries(easy_uds PUBLIC ws2_32 advapi32)
 endif()
 target_compile_definitions(easy_uds PRIVATE
     EASY_UDS_SESSION_SPIN_US=${EASY_UDS_SESSION_SPIN_US}
@@ -249,7 +278,7 @@ if(EASY_UDS_BUILD_TESTS)
             add_executable(easy_uds_windows_benchmark tests/windows_benchmark.cpp)
             target_link_libraries(easy_uds_windows_benchmark PRIVATE easy_uds::easy_uds)
             target_compile_features(easy_uds_windows_benchmark PRIVATE cxx_std_17)
-        else()
+        elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         add_executable(easy_uds_test
             tests/easy_uds_test/main.cpp
             tests/easy_uds_test/common.cpp
@@ -414,6 +443,9 @@ if(EASY_UDS_BUILD_TESTS)
                 TIMEOUT 60
                 LABELS "rc;compile-error;api")
         endif()
+        else()
+            message(STATUS
+                "The current integration test suite is not enabled on ${CMAKE_SYSTEM_NAME}")
         endif()
     endif()
 endif()
@@ -460,6 +492,10 @@ if(EASY_UDS_BUILD_BENCHMARKS)
 endif()
 
 if(EASY_UDS_BUILD_EXPERIMENTS)
+    if(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        message(FATAL_ERROR
+            "EASY_UDS_BUILD_EXPERIMENTS currently requires Linux")
+    endif()
     set(EASY_UDS_EXPERIMENT_TARGETS
         easy_uds_fd_passing_probe
         easy_uds_io_uring_probe
@@ -671,6 +707,8 @@ install(DIRECTORY src/user/cpp/core/easy_uds/
     DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/easy_uds)
 install(DIRECTORY src/user/cpp/simple/easy_uds/
     DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/easy_uds)
+install(FILES src/user/c/include/easy_uds.h
+    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
 
 configure_package_config_file(
     cmake/easy_udsConfig.cmake.in

@@ -51,10 +51,9 @@ application's access policy permits it. On Linux, read peer metadata through
 credential metadata, not an authorization decision. Keep `include_handler_error_messages`
 disabled when response bodies must not expose internal details.
 
-## What is intentionally out of scope
+## What was out of scope for 1.0
 
-The library does not promise a stable exporter schema, log format, histogram
-implementation, or distributed trace context in 1.0. Low-level tracing remains
-a build-time diagnostic option. New observability features belong after 1.0 and
-must first preserve
+The 1.0 release did not promise a stable exporter schema, log format, histogram
+implementation, or distributed trace context. Low-level tracing remains a
+build-time diagnostic option. Future observability features must first preserve
 the no-overhead default and have a measured use case.

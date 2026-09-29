@@ -7,6 +7,7 @@
 
 #include <functional>
 #include <memory>
+#include <atomic>
 #include <string>
 #include <string_view>
 
@@ -15,6 +16,19 @@ namespace easy_uds {
 namespace detail {
 struct SessionState;
 }
+
+// A shareable cooperative cancellation signal for one Session request.
+class CancellationSource {
+  public:
+    CancellationSource() : state_(std::make_shared<std::atomic<bool>>(false)) {}
+    void cancel() const noexcept { state_->store(true, std::memory_order_release); }
+    [[nodiscard]] bool cancelled() const noexcept {
+        return state_->load(std::memory_order_acquire);
+    }
+  private:
+    friend class Session;
+    std::shared_ptr<std::atomic<bool>> state_;
+};
 
 // A snapshot of the persistent fixed-request connection's observed state.
 // `active` means that no failure has been observed yet; it is not a liveness
@@ -49,6 +63,8 @@ class Session {
     [[nodiscard]] SessionStats stats() const;
 
     [[nodiscard]] Response request(std::string_view route, std::string_view body = {});
+    [[nodiscard]] Response request(std::string_view route, std::string_view body,
+                                   const CancellationSource& cancellation);
 
     [[nodiscard]] Status request_stream(
         std::string_view route, const StreamReader& request_body,
@@ -57,6 +73,9 @@ class Session {
   private:
     friend class Client;
     Session(std::string socket_path, ClientOptions options);
+    [[nodiscard]] Response request_impl(std::string_view route,
+                                        std::string_view body,
+                                        const CancellationSource* cancellation);
     std::unique_ptr<detail::SessionState> state_;
 };
 

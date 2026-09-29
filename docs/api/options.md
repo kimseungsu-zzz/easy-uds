@@ -21,6 +21,12 @@ operation idempotent or explicitly non-retryable before reconnecting. A queued
 serialized request that reaches its server deadline is answered with `408` and
 its handler is not called.
 
+`ClientOptions::protocol_version` defaults to `2`. Set it to `3` to use
+`CancellationSource` with `Session::request`; the server's request context then
+reports client cancellation through `stop_requested()`. Cancellation is
+cooperative and the client waits for the request's normal response before
+releasing its correlation id.
+
 ## Fixed-request admission
 
 The per-connection limits protect the peer that is sending work:
@@ -32,8 +38,8 @@ The per-connection limits protect the peer that is sending work:
 | `max_total_inflight_bytes` | Declared route+body bytes across all connections | Opt-in strict mode reserves after header validation and before parser allocation. Partial, queued, and executing requests share the same logical budget. `0` preserves the fast path and disables this aggregate cap. |
 
 These are logical admission bytes, not a promise about kernel socket buffers or
-application-owned bodies. A peer may still hold bytes in the kernel; stopping
-`EPOLLIN` is what makes that pressure visible to the sender.
+application-owned bodies. A peer may still hold bytes in the kernel; pausing
+read interest is what makes that pressure visible to the sender.
 
 ## Response output and slow peers
 
@@ -41,8 +47,8 @@ application-owned bodies. A peer may still hold bytes in the kernel; stopping
 single connection. When a peer stops reading and exceeds this cap, the server
 closes that peer rather than keeping a worker blocked in `write()`. The opt-in
 `max_total_output_bytes` budget provides the corresponding aggregate bound.
-Output is drained by the reactor's `EPOLLOUT` path; handler execution does not
-wait for a slow peer's socket buffer to become writable.
+Output is drained when the reactor reports that the socket is writable; handler
+execution does not wait for a slow peer's socket buffer to become writable.
 
 ## Streams and memory
 
@@ -51,6 +57,16 @@ payloads use `stream_chunk_size` for the reusable transfer buffer and
 `max_stream_size` for the cumulative body; a stream limit of `0` means
 unbounded-by-size, not unbounded-by-stall. `io_timeout` remains the protection
 against a peer that makes no progress.
+
+## Authorization
+
+`ServerOptions::authorize_request` can reject fixed requests before route
+dispatch. It receives the request and callback-scoped `RequestContext`; use
+kernel-provided POSIX peer credentials where available. Windows AF_UNIX
+provides the peer process ID and a best-effort process SID through
+`peer_process_id()` and `peer_sid()`; handle missing SID values. Rejection returns status `403` and does not invoke
+the route handler. The callback itself must be thread-safe because requests
+may reach it concurrently.
 
 ## Diagnostics and safe tuning
 

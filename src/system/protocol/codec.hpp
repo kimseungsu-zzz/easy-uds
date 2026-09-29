@@ -2,7 +2,7 @@
 
 #include "easy_uds/error.hpp"
 
-// Protocol version 2 wire codec boundary.
+// Versioned protocol 2/3 wire codec boundary (version 2 remains the default).
 //
 // Framing: every message begins with a fixed 20-byte, big-endian header:
 //
@@ -10,7 +10,7 @@
 //   0       4     magic "EUDS"
 //   4       1     version = 2
 //   5       1     message type
-//   6       2     flags (bit 0 = one descriptor on a fixed one-shot request)
+//   6       2     flags (bit 0 = POSIX descriptor; bit 1 = Windows HANDLE)
 //   8       4     request id
 //   12      4     argument 1
 //   16      4     argument 2
@@ -30,6 +30,7 @@ namespace easy_uds::detail::protocol {
 
 inline constexpr std::array<unsigned char, 4> magic{'E', 'U', 'D', 'S'};
 inline constexpr std::uint8_t version = 2;
+inline constexpr std::uint8_t cancellable_version = 3;
 inline constexpr std::size_t header_size = 20;
 inline constexpr std::size_t header_field_offset = 8;  // request id
 inline constexpr std::size_t arg1_offset = 12;
@@ -47,12 +48,14 @@ enum class WireType : std::uint8_t {
     stream_response = 6,
     stream_response_chunk = 7,
     stream_response_end = 8,
+    cancel_request = 9,
 };
 
-// Reserved-flags bits (header bytes 6-7, big-endian). Bit 0 marks a frame that
-// carries one descriptor as platform ancillary data, delivered with the
-// frame's bytes. Only this bit is understood; any other bit is rejected.
+// Reserved-flags bits (header bytes 6-7, big-endian). Bit 0 marks one POSIX
+// ancillary descriptor; bit 1 marks eight bytes of Windows peer-HANDLE
+// metadata prefixed to a one-shot fixed request body.
 inline constexpr std::uint16_t carries_fd_flag = 0x0001U;
+inline constexpr std::uint16_t carries_windows_handle_flag = 0x0002U;
 
 struct DecodedHeader {
     WireType type = WireType::request;
@@ -60,6 +63,7 @@ struct DecodedHeader {
     std::uint32_t arg1 = 0;
     std::uint32_t arg2 = 0;
     std::uint16_t flags = 0;
+    std::uint8_t version = 2;
 };
 
 inline void put_u32(HeaderBytes& header, std::size_t offset,
@@ -78,10 +82,11 @@ inline std::uint32_t get_u32(const HeaderBytes& header, std::size_t offset) noex
 }
 
 inline HeaderBytes encode_header(WireType type, std::uint32_t request_id, std::uint32_t arg1,
-                                 std::uint32_t arg2, std::uint16_t flags = 0) noexcept {
+                                 std::uint32_t arg2, std::uint16_t flags = 0,
+                                 std::uint8_t wire_version = version) noexcept {
     HeaderBytes header{};
     std::copy(magic.begin(), magic.end(), header.begin());
-    header[4] = version;
+    header[4] = wire_version;
     header[5] = static_cast<std::uint8_t>(type);
     header[6] = static_cast<unsigned char>((flags >> 8) & 0xFFU);
     header[7] = static_cast<unsigned char>(flags & 0xFFU);
@@ -95,27 +100,39 @@ inline DecodedHeader decode_header(const HeaderBytes& header) {
     if (!std::equal(magic.begin(), magic.end(), header.begin())) {
         throw Error(ErrorCode::protocol, "invalid protocol magic");
     }
-    if (header[4] != version) {
+    if (header[4] != version && header[4] != cancellable_version) {
         throw Error(ErrorCode::protocol, "unsupported protocol version");
     }
     const std::uint16_t flags =
         (static_cast<std::uint16_t>(header[6]) << 8) | static_cast<std::uint16_t>(header[7]);
-    if ((flags & ~carries_fd_flag) != 0) {
+    if ((flags & ~(carries_fd_flag | carries_windows_handle_flag)) != 0) {
         throw Error(ErrorCode::protocol, "unsupported protocol flags");
     }
     const auto raw_type = header[5];
     if (raw_type < static_cast<std::uint8_t>(WireType::request) ||
-        raw_type > static_cast<std::uint8_t>(WireType::stream_response_end)) {
+        raw_type > static_cast<std::uint8_t>(WireType::cancel_request)) {
         throw Error(ErrorCode::protocol, "unknown protocol message type");
     }
     const std::uint32_t request_id = get_u32(header, header_field_offset);
     if ((flags & carries_fd_flag) != 0 &&
-        (raw_type != static_cast<std::uint8_t>(WireType::request) || request_id != 0)) {
+        (raw_type != static_cast<std::uint8_t>(WireType::request) || request_id != 0 ||
+         (flags & carries_windows_handle_flag) != 0)) {
         throw Error(ErrorCode::protocol,
                     "descriptor flag is only valid on one-shot fixed requests");
     }
+    if ((flags & carries_windows_handle_flag) != 0 &&
+        (raw_type != static_cast<std::uint8_t>(WireType::request) || request_id != 0)) {
+        throw Error(ErrorCode::protocol,
+                    "Windows handle flag is only valid on one-shot fixed requests");
+    }
+    const auto type = static_cast<WireType>(raw_type);
+    if (type == WireType::cancel_request &&
+        (header[4] != cancellable_version || request_id == 0 || flags != 0 ||
+         get_u32(header, arg1_offset) != 0 || get_u32(header, arg2_offset) != 0)) {
+        throw Error(ErrorCode::protocol, "invalid cancellation frame");
+    }
     return {static_cast<WireType>(raw_type), request_id, get_u32(header, arg1_offset),
-            get_u32(header, arg2_offset), flags};
+            get_u32(header, arg2_offset), flags, header[4]};
 }
 
 inline DecodedHeader decode_header(const HeaderBytes& header, WireType expected_type) {

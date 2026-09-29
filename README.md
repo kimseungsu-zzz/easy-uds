@@ -3,34 +3,37 @@
 [한국어 README](README.ko.md)
 
 `easy-uds` is a small C++17 request/response and chunk-streaming library for
-local IPC over Unix Domain Sockets (`AF_UNIX`). The 1.0 line freezes a compact
-public contract with bounded concurrency, deadlines, binary-safe framing,
-deterministic shutdown, and CMake package support.
+local IPC over Unix Domain Sockets (`AF_UNIX`). The 1.1 development line adds
+optional C/Python interfaces and expands POSIX platform support while keeping
+the existing binary protocol and Core API available.
 
-> **Protocol note:** Current releases use protocol version 2 with a 20-byte header and request-id multiplexing. It is not wire-compatible with protocol v1 used by v0.5.x and earlier.
+> **Protocol note:** Version 2 remains the default (20-byte header and request-id multiplexing); opt-in version 3 adds cooperative cancellation for persistent sessions. Neither version is wire-compatible with protocol v1 used by v0.5.x and earlier.
 
 ## Features
 
 - C++17 with no third-party runtime dependencies
+- Versioned C ABI and optional standard-library-only Python ctypes package
 - Named request handlers with arbitrary binary request/response bodies
-- Optional one-descriptor request passing with `SCM_RIGHTS` (`Client::request_fd()` → POSIX request capabilities)
+- Optional POSIX `SCM_RIGHTS` descriptor passing and Windows one-HANDLE fixed requests (`Client::request_fd()` / `Client::request_handle()`)
 - Multiplexed persistent sessions: concurrent `request()` calls on one connection, correlated by request id and answered in any order
-- Peer credentials (`pid`/`uid`/`gid`) via Linux `SO_PEERCRED`
+- POSIX peer credentials and Windows kernel peer PID with best-effort process SID
+- Optional request authorization callback before fixed-route dispatch
+- Explicit reconnect/retry for caller-declared idempotent one-shot routes
 - Exact and longest-prefix route registration (`on()` / `on_prefix()`)
 - Copy-on-write immutable handler snapshots: request dispatch takes no global handler-table mutex and does not copy `std::function`
 - FIFO serialized handlers plus opt-in named domains, `LatestWins`, and `RejectIfBusy` policies without occupying the normal worker pool while waiting
 - Incremental, constant-memory upload/download streams with configurable chunk sizes and total limits
 - `Server::enqueue_maintenance()` for safe server-side state cleanup from external threads
 - Natural flow control through Unix-socket backpressure
-- Versioned, binary-safe protocol framing (protocol v2 with request-id multiplexing)
-- readiness-driven reactor server: idle connections never occupy a worker, and stalled fixed-response I/O never blocks the reactor or worker pool (epoll on Linux; the Windows AF_UNIX backend is validated by the dedicated Actions gate)
+- Versioned, binary-safe protocol framing (protocol v2 by default, with opt-in v3 Session cancellation)
+- readiness-driven reactor server: idle connections never occupy a worker, and stalled fixed-response I/O never blocks the reactor or worker pool (epoll on Linux, kqueue on BSD, smoke-validated Windows backend)
 - Configurable connection limit, inactivity timeout, absolute request deadline (`408` on expiry), connect timeout, backlog, and message size
-- Optimistic non-blocking socket I/O that calls `poll()` only on backpressure
-- Gathered header+payload writes through `sendmsg()` to reduce per-chunk system calls
+- Optimistic non-blocking socket I/O that waits for readiness only when backpressure occurs
+- Gathered header+payload writes through the platform's vectored I/O API
 - Owner-only socket permissions (`0600`) by default, configurable when group access is needed
 - Per-socket instance lock to serialize startup/stale cleanup between easy-uds servers
 - Grace period before removing a connection-refused socket pathname as stale
-- Thread-safe `stop()` using a single Linux `eventfd` wakeup counter
+- Thread-safe `stop()` using a platform-native reactor wakeup
 - Handler exceptions converted to `500` with the exception message in the body (opt-out via `include_handler_error_messages`)
 - Thread-safe server/Session snapshots with opt-in cumulative server counters
 - Small semantic `ErrorCode` classes with the original socket `errno` preserved by `Error::system_code()`
@@ -42,11 +45,11 @@ deterministic shutdown, and CMake package support.
 ## Platform
 
 Linux is production-supported. Windows 10+ provides the validated AF_UNIX
-Core/Session/streaming/Simple/package surface. POSIX peer credentials and
-descriptor passing remain explicitly unavailable on Windows; macOS and BSD
-are unsupported. The source uses pathname sockets rather than Linux-only
-abstract sockets. See [platform support](docs/platform-support.md) and the
-[1.0 compatibility contract](docs/api/compatibility.md) for the exact scope.
+Core/Session/streaming/Simple/package surface. FreeBSD, OpenBSD, NetBSD, and
+DragonFly BSD use AF_UNIX with kqueue readiness; native validation is pending.
+POSIX peer credentials and descriptor passing remain
+explicitly unavailable on Windows. The source uses pathname sockets rather than Linux-only
+abstract sockets. See [platform support](docs/platform-support.md) for the exact scope.
 
 ## Quick start
 
@@ -284,9 +287,9 @@ easy_uds::Server server("/tmp/easy-uds.sock", options);
 
 When the connection limit is reached, newly accepted connections are closed instead of creating more workers or growing an unbounded queue.
 
-Fixed RPC input is bounded per connection and can also be bounded across the whole server. When `max_total_inflight_bytes` is nonzero, a validated frame reserves its declared route+body bytes before parser buffers are allocated; partial, queued, and executing requests share one strict logical-byte budget. The reactor pauses only that peer's `EPOLLIN` when admission fails and resumes waiting peers below the low-water marks. The opt-in strict mode routes Session continuation reads back through the reactor so they cannot bypass admission; the default `0` keeps the 0.6.4 fast path unchanged. Bytes left in the kernel remain under Unix-socket backpressure. Fixed responses use `max_output_bytes_per_connection` to isolate slow peers and have the analogous `max_total_output_bytes` aggregate budget.
+Fixed RPC input is bounded per connection and can also be bounded across the whole server. When `max_total_inflight_bytes` is nonzero, a validated frame reserves its declared route+body bytes before parser buffers are allocated; partial, queued, and executing requests share one strict logical-byte budget. The reactor pauses reads for only that peer when admission fails and resumes waiting peers below the low-water marks. The opt-in strict mode routes Session continuation reads back through the reactor so they cannot bypass admission; the default `0` keeps the 0.6.4 fast path unchanged. Bytes left in the kernel remain under Unix-socket backpressure. Fixed responses use `max_output_bytes_per_connection` to isolate slow peers and have the analogous `max_total_output_bytes` aggregate budget.
 
-Fixed responses use a nonblocking worker fast path. A response that does not fit immediately is handed to a per-connection `EPOLLOUT` queue, so a client that stops reading cannot occupy a worker. The queued remainder is capped at the larger of 4 MiB or one maximum-size response; a peer that exceeds the cap is closed without affecting other connections. Streaming exchanges retain their exclusive worker lease and are governed by `max_concurrent_streams`.
+Fixed responses use a nonblocking worker fast path. A response that does not fit immediately is handed to a per-connection writable queue, so a client that stops reading cannot occupy a worker. The queued remainder is capped at the larger of 4 MiB or one maximum-size response; a peer that exceeds the cap is closed without affecting other connections. Streaming exchanges retain their exclusive worker lease and are governed by `max_concurrent_streams`.
 
 Each stream occupies one worker until its response body is complete. The automatic stream limit is `worker_threads - 1`, or `1` for a single-worker server. This prevents long-lived streams from starving regular RPC traffic. An excess stream is closed before its body is read, so the client receives an `Error` classified as `closed`; retry it with a fresh/rewound `StreamReader`. Set `ServerOptions::max_concurrent_streams = worker_threads` to allow every worker to run a stream, or use separate server instances when short RPCs and many long-lived streams have different capacity requirements.
 
@@ -324,16 +327,16 @@ Applications should place sockets in a directory whose permissions match their t
 
 ## Concurrency and shutdown
 
-`Server::run()` starts the readiness-driven reactor and fixed worker pool, then blocks until shutdown. Linux uses epoll; the Windows backend uses its concrete readiness implementation. The serialized executor starts empty and grows lazily as independent domains need concurrency. `run()` is intended to be called once per `Server` object. `Server::stop()` is idempotent and may be called concurrently from other threads.
+`Server::run()` starts the readiness-driven reactor and fixed worker pool, then blocks until shutdown. Linux uses epoll, BSD systems use kqueue, and Windows uses its platform readiness backend. The serialized executor starts empty and grows lazily as independent domains need concurrency. `run()` is intended to be called once per `Server` object. `Server::stop()` is idempotent and may be called concurrently from other threads.
 
 During shutdown:
 
-1. `running` is cleared and a non-blocking `eventfd` counter interrupts `epoll_wait()`;
+1. `running` is cleared and the platform wakeup interrupts the reactor's readiness wait;
 2. the owned socket pathname is removed only if its device/inode still match;
 3. every accepted client socket is `shutdown()` so blocked I/O exits;
 4. the regular and serialized executors are signaled to stop, discarding work that has not started;
 5. the reactor and executor threads exit and are joined;
-6. connection, listener, wakeup, epoll, and instance-lock descriptors are closed.
+6. connection, listener, wakeup, readiness, and instance-lock resources are closed.
 
 The listener is not closed by another thread while the reactor may still be polling it, eliminating descriptor-number reuse races in the accept loop.
 
@@ -469,7 +472,7 @@ EASY_UDS_SOAK_BENCHMARKS=1 ./scripts/long_soak.sh build-bench 20
 The `workflow_dispatch` CI path runs the same matrix on native Ubuntu x86_64
 and hosted ARM64, then uploads both complete logs.
 
-For the current source checkout, run the one-command Linux release gate. It builds
+For Linux, run the one-command release gate for the current source checkout. It builds
 static and shared variants, executes the labelled adversarial suite, checks
 invalid-usage diagnostics, and validates both installed-package consumers:
 
@@ -674,8 +677,8 @@ src/system/platform/linux/  Selected Linux capability implementation
 src/system/platform/windows/ Selected Windows AF_UNIX capability implementation (Windows Actions validated)
 src/user/cpp/core/      Installed Core C++ headers
 src/user/cpp/simple/   Installed Simple C++ header
-src/user/c/             Reserved C ABI boundary
-src/user/py/            Reserved Python binding boundary
+src/user/c/             Versioned fixed-RPC C ABI
+src/user/py/            Optional Python ctypes package
 include/easy_uds/       Installed compatibility path (generated from src/user)
 examples/               Minimal server/client plus robot HAL composition example
 experiments/0.6/        Preserved standalone probes from the 0.6 experiment phase
@@ -683,12 +686,12 @@ tests/easy_uds_test/     Unit tests grouped by subsystem
 tests/                  Stress, fuzz, benchmark, and package-consumer tests
 cmake/                  Installed-package CMake config
 docs/                   Protocol documentation
-docs/api/compatibility.md 1.0 source/protocol/platform compatibility contract
-docs/platform-support.md   Current Linux/Windows support and intentional limits
+docs/api/compatibility.md Current 1.1 source/protocol/platform compatibility contract
+docs/platform-support.md   Current Linux/BSD/Windows support and limits
 docs/guides/               Task guides, diagnostics, and troubleshooting
 docs/internals/            Architecture boundaries and validation evidence
-docs/PROTOCOL.md           Protocol-v2 wire format
-docs/releases/v1.0.0.md    Current stable release notes
+docs/PROTOCOL.md           Protocol v2/v3 wire format
+docs/releases/v1.0.0.md    Historical 1.0.0 release notes
 docs/history/README.md     Historical measurements, experiments, and releases
 .github/workflows/      GitHub Actions CI
 ```

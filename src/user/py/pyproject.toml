@@ -1,0 +1,12 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "easy-uds"
+version = "1.1.0"
+description = "Python ctypes binding for the easy-uds local IPC library"
+requires-python = ">=3.10"
+
+[tool.setuptools]
+packages = ["easy_uds"]

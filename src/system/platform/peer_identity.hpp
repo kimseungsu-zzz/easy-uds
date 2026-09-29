@@ -7,6 +7,8 @@
 
 #include <cstdint>
 #include <limits>
+#include <string>
+#include <memory>
 
 #include "native_socket.hpp"
 
@@ -16,6 +18,8 @@ struct Identity {
     std::int64_t pid = -1;
     std::uint64_t uid = std::numeric_limits<std::uint64_t>::max();
     std::uint64_t gid = std::numeric_limits<std::uint64_t>::max();
+    std::string sid;
+    std::shared_ptr<void> process_handle;
     bool present = false;
 };
 

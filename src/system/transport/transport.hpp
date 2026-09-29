@@ -27,11 +27,12 @@ inline void validate_request_lengths(std::string_view route, std::string_view bo
 
 inline void write_request_frame(NativeSocket fd, std::uint32_t request_id, std::string_view route,
                                 std::string_view body,
-                                std::chrono::milliseconds io_timeout, Deadline deadline) {
+                                std::chrono::milliseconds io_timeout, Deadline deadline,
+                                std::uint8_t wire_version = protocol::version) {
     const protocol::HeaderBytes header = protocol::encode_header(
         protocol::WireType::request, request_id,
         static_cast<std::uint32_t>(route.size()),
-        static_cast<std::uint32_t>(body.size()));
+        static_cast<std::uint32_t>(body.size()), 0, wire_version);
     std::array<iovec, 3> parts{{
         {const_cast<unsigned char*>(header.data()), header.size()},
         {const_cast<char*>(route.data()), route.size()},

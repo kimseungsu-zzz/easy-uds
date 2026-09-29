@@ -1,5 +1,6 @@
 #include <easy_uds/easy_uds.hpp>
 #include <easy_uds/simple.hpp>
+#include <easy_uds/windows.hpp>
 #include "platform/windows/socket_common.hpp"
 
 #include <algorithm>
@@ -182,6 +183,75 @@ int main() {
             std::rethrow_exception(server_error);
         }
         remove_endpoint(core_path);
+
+        // Exercise authorization using the kernel-observed peer PID and the
+        // one-shot HANDLE transfer path end to end.
+        const auto capability_path = base / "easy-uds-windows-capability.sock";
+        remove_endpoint(capability_path);
+        easy_uds::ServerOptions capability_options;
+        capability_options.authorize_request = [](const easy_uds::Request& request,
+                                                  const easy_uds::RequestContext& context) {
+            return request.route == "/signal" &&
+                   context.peer_process_id() ==
+                       static_cast<std::int64_t>(::GetCurrentProcessId());
+        };
+        easy_uds::Server capability_server(capability_path.string(),
+                                           capability_options);
+        capability_server.on(
+            "/signal", easy_uds::RouteOptions{
+                           [](const easy_uds::Request& request,
+                              const easy_uds::RequestContext& context) {
+                               const auto caps =
+                                   easy_uds::windows::request_capabilities(context);
+                               const auto event = caps.received_handle();
+                               if (!event.valid() || !::SetEvent(event.get())) {
+                                   return easy_uds::Response{400, "Invalid event"};
+                               }
+                               return easy_uds::Response::ok(request.body);
+                           }});
+        std::exception_ptr capability_error;
+        std::thread capability_thread([&] {
+            try {
+                capability_server.run();
+            } catch (...) {
+                capability_error = std::current_exception();
+            }
+        });
+        if (!wait_until_running(capability_server)) {
+            capability_server.stop();
+            capability_thread.join();
+            if (capability_error) {
+                std::rethrow_exception(capability_error);
+            }
+            throw std::runtime_error("Windows capability server did not become ready");
+        }
+        easy_uds::windows::OwnedHandle event =
+            easy_uds::windows::OwnedHandle::adopt(
+                ::CreateEventW(nullptr, TRUE, FALSE, nullptr));
+        require(event.valid(), "could not create Windows event for HANDLE smoke");
+        easy_uds::Response capability_response;
+        std::exception_ptr capability_client_error;
+        try {
+            capability_response = easy_uds::Client(capability_path.string())
+                                      .request_handle("/signal", event.borrow(),
+                                                      "handle-ok");
+        } catch (...) {
+            capability_client_error = std::current_exception();
+        }
+        capability_server.stop();
+        capability_thread.join();
+        if (capability_error) {
+            std::rethrow_exception(capability_error);
+        }
+        if (capability_client_error) {
+            std::rethrow_exception(capability_client_error);
+        }
+        require(capability_response.status == 200 &&
+                    capability_response.body == "handle-ok",
+                "Windows HANDLE request failed");
+        require(::WaitForSingleObject(event.get(), 0) == WAIT_OBJECT_0,
+                "server did not signal the transferred Windows HANDLE");
+        remove_endpoint(capability_path);
 
         const auto simple_path = base / "easy-uds-windows-simple.sock";
         remove_endpoint(simple_path);

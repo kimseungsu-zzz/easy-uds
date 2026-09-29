@@ -1,6 +1,6 @@
 # easy-uds wire protocol
 
-This document describes **protocol version 2**, introduced in easy-uds 0.6.0. It is not wire-compatible with protocol version 1 (easy-uds 0.5.x and earlier); a v2 server rejects v1 connections.
+This document describes protocol versions 2 and 3. Version 2 remains the default and is wire-compatible with easy-uds 0.6.0+. Version 3 adds cooperative cancellation frames for persistent fixed-request sessions. Neither version is compatible with protocol version 1 (easy-uds 0.5.x and earlier).
 
 ## Transport
 
@@ -17,15 +17,15 @@ Every message begins with exactly 20 bytes:
 | Offset | Size | Field | Value |
 | ---: | ---: | --- | --- |
 | 0 | 4 | Magic | ASCII `EUDS` |
-| 4 | 1 | Version | `2` |
+| 4 | 1 | Version | `2` or `3` (the version stays fixed for a connection) |
 | 5 | 1 | Message type | See message types below |
-| 6 | 2 | Flags | bit 0 = one `SCM_RIGHTS` descriptor on a fixed request; all other bits `0` |
+| 6 | 2 | Flags | bit 0 = one POSIX `SCM_RIGHTS` descriptor; bit 1 = Windows HANDLE metadata; other bits `0` |
 | 8 | 4 | Request id | Unsigned 32-bit |
 | 12 | 4 | Argument 1 | Type-specific, unsigned 32-bit |
 | 16 | 4 | Argument 2 | Type-specific, unsigned 32-bit |
 
-Only bit 0 is currently defined, and it is valid only on a fixed request with
-request id `0` (the one-shot path). All other flag bits must be zero. A peer may close the connection when the magic,
+Resource flags are valid only on a fixed request with request id `0` (the
+one-shot path), and cannot be combined. A peer may close the connection when the magic,
 version, type, or flags are invalid. A v1 header (version byte `1`) is rejected.
 
 | Type | Value |
@@ -38,6 +38,26 @@ version, type, or flags are invalid. A v1 header (version byte `1`) is rejected.
 | Stream response start | `6` |
 | Stream response chunk | `7` |
 | Stream response end | `8` |
+| Cancel fixed request (v3 only) | `9` |
+
+### Windows HANDLE request metadata
+
+On Windows, flag bit 1 marks a fixed request carrying one process HANDLE. The
+first eight bytes of the request body contain its unsigned 64-bit value in
+big-endian order; the application body follows. The server uses the
+kernel-observed peer PID to duplicate that handle from the sender process into
+its own process with the same access rights. The route must use a contextual
+handler to access the callback-scoped handle capability. The client must keep
+the source handle open until it receives the response. This metadata is
+Windows-only and is not `SCM_RIGHTS`; POSIX peers reject the flag.
+
+Version 3 cancellation uses type `9`, the active nonzero request id, zero
+flags, and zero arguments. The server sets the matching request's cooperative
+stop signal. A late or unknown cancellation is ignored. The server still sends
+the normal response when the handler returns, so the client keeps the request
+in flight until it consumes that response. Cancellation cannot interrupt a
+handler or operating-system call that does not check
+`RequestContext::stop_requested()`.
 
 ## Request id and multiplexing
 

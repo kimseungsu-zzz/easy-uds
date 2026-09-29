@@ -117,6 +117,9 @@ struct Connection {
     std::atomic<bool> worker_owned{false};   // a fixed-request worker is leasing the fd
     std::atomic<bool> closing{false};
     std::atomic<bool> session_capable{false};
+    std::atomic<std::uint8_t> wire_version{0};
+    std::mutex cancellation_mutex;
+    std::unordered_map<std::uint32_t, std::weak_ptr<std::atomic<bool>>> cancellations;
     std::atomic<std::size_t> active_regular{0};
     std::atomic<std::size_t> pending_serialized{0};
     std::atomic<std::size_t> inflight_requests{0};
@@ -148,6 +151,7 @@ struct ReactorConnection {
     std::size_t payload_received = 0;
     std::size_t payload_total = 0;
     std::uint32_t request_id = 0;
+    std::uint16_t request_flags = 0;
     std::uint32_t arg1 = 0;
     std::uint32_t arg2 = 0;
     // Declared route+body bytes reserved against the strict aggregate request
@@ -372,6 +376,9 @@ struct RequestContextFactory {
         const RequestCapabilityStorage& capabilities) noexcept {
         return easy_uds::RequestContext(request, arrival_time, deadline,
                                         connection_closing, server_running,
+                                        capabilities.cancelled,
+                                        capabilities.peer.pid,
+                                        capabilities.peer.sid,
                                         &capabilities);
     }
 };

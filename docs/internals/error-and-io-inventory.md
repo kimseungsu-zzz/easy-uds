@@ -81,8 +81,7 @@ fails. `reactor/parser.cpp` is the first layer that converts those results into
 the existing runtime exception/error behavior.
 
 `src/system/platform/descriptor_passing.hpp` currently exposes POSIX
-`ssize_t`, `iovec`, and integer descriptors. This remains a temporary
-Linux/POSIX seam, not a final cross-platform contract. The 0.8 portability decision is recorded in
-[`ROADMAP_0.8.md`](../ROADMAP_0.8.md): retain its shape, move it under Linux,
-or replace it with a system-owned buffer description only after the Windows
-transport model is known.
+`ssize_t`, `iovec`, and integer descriptors. This remains a Linux/POSIX seam,
+not a cross-platform contract. The Windows implementation uses its own
+`WSABUF` handling and does not expose these types through common public
+headers.

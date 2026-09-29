@@ -20,6 +20,10 @@ compile_commands.json
 *.obj
 *.pdb
 
+# Python bytecode
+__pycache__/
+*.py[cod]
+
 # IDE / editor metadata
 .vscode/
 .idea/

@@ -70,7 +70,8 @@ bool enqueue_worker_job(const std::shared_ptr<ServerState>& state, std::shared_p
     job.deadline = deadline;
     job.handler = std::move(handler);
     job.is_stream = is_stream;
-    job.request_bytes = job.request.route.size() + job.request.body.size();
+    job.request_bytes = job.request.route.size() + job.request.body.size() +
+                        job.capabilities.wire_resource_bytes;
     job.release_stream_request_bytes = is_stream && request_bytes_reserved;
     job.buffered = std::move(buffered);
     if (is_stream) {
@@ -166,6 +167,23 @@ bool dispatch_request(const std::shared_ptr<ServerState>& state,
     request.body = std::move(reactor_connection->body_buffer);
     request.request_id = reactor_connection->request_id;
     reactor_connection->capabilities.peer = reactor_connection->conn->peer;
+    if (request.request_id != 0 &&
+        reactor_connection->conn->wire_version.load(std::memory_order_acquire) >=
+            protocol::cancellable_version) {
+        auto cancelled = std::make_shared<std::atomic<bool>>(false);
+        reactor_connection->capabilities.cancelled = cancelled;
+        std::lock_guard<std::mutex> lock(
+            reactor_connection->conn->cancellation_mutex);
+        auto& cancellations = reactor_connection->conn->cancellations;
+        for (auto it = cancellations.begin(); it != cancellations.end();) {
+            if (it->second.expired()) {
+                it = cancellations.erase(it);
+            } else {
+                ++it;
+            }
+        }
+        cancellations[request.request_id] = cancelled;
+    }
 
     std::shared_ptr<const HandlerEntry> handler;
     if (!find_request_handler(state, request.route, handler)) {
@@ -182,7 +200,8 @@ bool dispatch_request(const std::shared_ptr<ServerState>& state,
         job.arrival_time = reactor_connection->arrival_time;
         job.deadline = reactor_connection->deadline;
         job.handler = std::move(handler);
-        job.request_bytes = job.request.route.size() + job.request.body.size();
+        job.request_bytes = job.request.route.size() + job.request.body.size() +
+                            job.capabilities.wire_resource_bytes;
         const bool request_bytes_reserved =
             state->options.max_total_inflight_bytes != 0;
         reactor_connection->reserved_request_bytes = 0;

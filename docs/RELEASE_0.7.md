@@ -58,8 +58,7 @@ benchmark/soak jobs; their logs are artifacts rather than portable
 performance promises. This makes hour-scale, six-hour, or overnight runs a
 parameter choice without changing the test binary.
 
-The exact performance comparison and current stabilization status are kept in
-[PERF_0.7.md](PERF_0.7.md) and [ROADMAP_0.7.md](ROADMAP_0.7.md).
+The exact performance comparison is kept in [PERF_0.7.md](PERF_0.7.md).
 
 ## Known tradeoffs accepted for 0.7
 

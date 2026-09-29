@@ -2,6 +2,18 @@
 
 All notable changes to this project are documented here.
 
+## easy-uds 1.1.0 (In development)
+
+- Added an opt-in one-shot retry API for routes declared idempotent by the caller.
+- Added ABI v1 C entry points for fixed RPC, contextual handlers, Sessions,
+  and cancellation.
+- Added an optional Python `ctypes` package over the C ABI, including Sessions.
+- Added a fixed-request authorization callback, Windows peer PID/SID identity,
+  one-HANDLE transfer, and POSIX/BSD backend sources.
+- Added opt-in protocol v3 cooperative cancellation for persistent Sessions.
+- Removed closed 0.6 through 0.9 planning roadmaps while retaining release and
+  benchmark records.
+
 ## easy-uds 1.0.0 — Stable
 
 This is the stable public-contract release. It freezes the current engine and
@@ -63,8 +75,8 @@ feature or protocol release.
   and full validation [31921572981](https://github.com/kimseungsu-zzz/easy-uds/actions/runs/31921572981)
   passed, including Linux GCC/Clang, Windows Core/package/Simple, ARM64,
   native Linux, sanitizers, TSan, fuzz, stress, and release-gate checks.
-- See [`docs/releases/v0.9.0.md`](docs/releases/v0.9.0.md) and
-  [`docs/ROADMAP_0.9.md`](docs/ROADMAP_0.9.md) for the closure record.
+- See [`docs/releases/v0.9.0.md`](docs/releases/v0.9.0.md) for the closure
+  record.
 
 ## easy-uds 0.8.0 — Everywhere
 

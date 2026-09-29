@@ -2,11 +2,15 @@
 
 #include "common.hpp"
 #include "stream_io.hpp"
+#if defined(_WIN32)
+#include "../platform/windows/handle_transfer.hpp"
+#endif
 
 #include <algorithm>
 #include <cerrno>
 #include <chrono>
 #include <exception>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -44,6 +48,36 @@ const std::string& serialized_job_domain(const SerializedJob& job) {
     return route_scheduling(job.handler).domain;
 }
 
+std::optional<easy_uds::Response> authorize_request(
+    const easy_uds::Request& request,
+    const RequestCapabilityStorage& capabilities,
+    const std::shared_ptr<ServerState>& state,
+    const std::shared_ptr<Connection>& connection,
+    Clock::time_point arrival_time, Deadline deadline) {
+    if (!state->options.authorize_request) {
+        return std::nullopt;
+    }
+    try {
+        const auto context = RequestContextFactory::make(
+            request, arrival_time, deadline, connection->closing,
+            state->running, capabilities);
+        if (state->options.authorize_request(request, context)) {
+            return std::nullopt;
+        }
+        return easy_uds::Response{easy_uds::status_forbidden, "Forbidden"};
+    } catch (const std::exception& error) {
+        const std::string_view message = state->options.include_handler_error_messages
+                                             ? std::string_view{error.what()}
+                                             : std::string_view{"Internal Server Error"};
+        return easy_uds::Response{
+            500, bounded_error_body(message, state->options.max_message_size)};
+    } catch (...) {
+        return easy_uds::Response{
+            500, bounded_error_body("Internal Server Error",
+                                    state->options.max_message_size)};
+    }
+}
+
 easy_uds::Response invoke_request_handler(
     const std::shared_ptr<const HandlerEntry>& handler,
     const easy_uds::Request& request,
@@ -52,6 +86,26 @@ easy_uds::Response invoke_request_handler(
     const std::shared_ptr<Connection>& connection,
     Clock::time_point arrival_time, Deadline deadline) {
     try {
+        if (auto authorization = authorize_request(
+                request, capabilities, state, connection, arrival_time,
+                deadline)) {
+            return std::move(*authorization);
+        }
+#if defined(_WIN32)
+        if (capabilities.peer_handle_value != 0) {
+            if (!handler->contextual()) {
+                return {400, "Windows HANDLE requests require a contextual handler"};
+            }
+            const HANDLE duplicate = platform_windows::duplicate_peer_handle(
+                static_cast<HANDLE>(capabilities.peer.process_handle.get()),
+                capabilities.peer_handle_value);
+            if (duplicate == nullptr) {
+                return {400, "Could not duplicate the peer HANDLE"};
+            }
+            capabilities.received_handle =
+                platform_windows::HandleOwner::adopt(duplicate);
+        }
+#endif
         if (handler->contextual()) {
             const auto* adapter =
                 handler->handler.target<ContextHandlerAdapter>();
@@ -83,9 +137,16 @@ bool serve_fixed_request(const std::shared_ptr<ServerState>& state,
     std::shared_ptr<const HandlerEntry> handler;
     if (!find_request_handler(state, request.route, handler)) {
         try {
+            auto authorization = authorize_request(
+                request, capabilities, state, connection, arrival_time,
+                deadline);
             write_fixed_response(
                 state, connection, request.request_id,
-                {404, bounded_error_body("Not Found", state->options.max_message_size)},
+                authorization ? std::move(*authorization)
+                              : easy_uds::Response{
+                                    404, bounded_error_body(
+                                             "Not Found",
+                                             state->options.max_message_size)},
                 state->options.io_timeout, deadline);
         } catch (...) {
             connection->closing.store(true, std::memory_order_release);
@@ -100,7 +161,8 @@ bool serve_fixed_request(const std::shared_ptr<ServerState>& state,
         job.arrival_time = arrival_time;
         job.deadline = deadline;
         job.handler = std::move(handler);
-        job.request_bytes = job.request.route.size() + job.request.body.size();
+        job.request_bytes = job.request.route.size() + job.request.body.size() +
+                            job.capabilities.wire_resource_bytes;
         const std::uint32_t request_id = job.request.request_id;
         SerializedAdmission admission;
         try {
@@ -223,8 +285,35 @@ void continue_connection(const std::shared_ptr<ServerState>& state,
             source.read(header.data(), header.size(), state->options.io_timeout,
                         request_deadline);
             const auto decoded = protocol::decode_header(header);
+            auto observed_version = connection->wire_version.load(
+                std::memory_order_acquire);
+            if (observed_version == 0) {
+                connection->wire_version.compare_exchange_strong(
+                    observed_version, decoded.version, std::memory_order_acq_rel);
+                observed_version = connection->wire_version.load(
+                    std::memory_order_acquire);
+            }
+            if (observed_version != decoded.version) {
+                throw std::runtime_error("protocol version changed on connection");
+            }
+            if (decoded.type == WireType::cancel_request) {
+                std::lock_guard<std::mutex> lock(connection->cancellation_mutex);
+                const auto it = connection->cancellations.find(decoded.request_id);
+                if (it != connection->cancellations.end()) {
+                    if (auto flag = it->second.lock()) {
+                        flag->store(true, std::memory_order_release);
+                    } else {
+                        connection->cancellations.erase(it);
+                    }
+                }
+                continue;
+            }
             if (decoded.flags & protocol::carries_fd_flag) {
                 throw std::runtime_error("fd flag is not supported on persistent-session requests");
+            }
+            if (decoded.flags & protocol::carries_windows_handle_flag) {
+                throw std::runtime_error(
+                    "Windows handle transfer is only supported on one-shot requests");
             }
             if (decoded.type == WireType::stream_request) {
                 std::string replay(reinterpret_cast<const char*>(header.data()),
@@ -255,8 +344,24 @@ void continue_connection(const std::shared_ptr<ServerState>& state,
             request.request_id = decoded.request_id;
             RequestCapabilityStorage capabilities;
             capabilities.peer = connection->peer;
-            const std::size_t request_bytes =
-                request.route.size() + request.body.size();
+            if (request.request_id != 0 &&
+                decoded.version >= protocol::cancellable_version) {
+                auto cancelled = std::make_shared<std::atomic<bool>>(false);
+                capabilities.cancelled = cancelled;
+                std::lock_guard<std::mutex> lock(
+                    connection->cancellation_mutex);
+                auto& cancellations = connection->cancellations;
+                for (auto it = cancellations.begin(); it != cancellations.end();) {
+                    if (it->second.expired()) {
+                        it = cancellations.erase(it);
+                    } else {
+                        ++it;
+                    }
+                }
+                cancellations[request.request_id] = cancelled;
+            }
+            const std::size_t request_bytes = request.route.size() +
+                request.body.size() + capabilities.wire_resource_bytes;
 
             record_fixed_request(state);
             connection->active_regular.fetch_add(1, std::memory_order_relaxed);

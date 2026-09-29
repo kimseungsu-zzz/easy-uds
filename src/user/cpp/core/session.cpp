@@ -4,6 +4,7 @@
 #include "../../../system/transport/transport.hpp"
 
 #include <stdexcept>
+#include <algorithm>
 #include <utility>
 
 namespace easy_uds {
@@ -71,6 +72,24 @@ SessionStats Session::stats() const {
 }
 
 Response Session::request(std::string_view route, std::string_view body) {
+    return request_impl(route, body, nullptr);
+}
+
+Response Session::request(std::string_view route, std::string_view body,
+                          const CancellationSource& cancellation) {
+    if (!state_) {
+        throw std::logic_error("session has been moved from");
+    }
+    if (state_->options.protocol_version <
+        detail::protocol::cancellable_version) {
+        throw std::invalid_argument(
+            "cancellable requests require protocol_version 3");
+    }
+    return request_impl(route, body, &cancellation);
+}
+
+Response Session::request_impl(std::string_view route, std::string_view body,
+                               const CancellationSource* cancellation) {
     if (!state_) {
         throw std::logic_error("session has been moved from");
     }
@@ -117,7 +136,8 @@ Response Session::request(std::string_view route, std::string_view body) {
         auto lock = detail::acquire_session_lock(
             state_->send_mutex, detail::SessionLockKind::send);
         detail::client::write_request_frame(state_->fd.get(), request_id, route, body,
-                                            state_->options.io_timeout, deadline);
+                                            state_->options.io_timeout, deadline,
+                                            state_->options.protocol_version);
     } catch (...) {
         state_->broken.store(true, std::memory_order_release);
         {
@@ -144,10 +164,20 @@ Response Session::request(std::string_view route, std::string_view body) {
     }
 
     bool timed_out = false;
+    bool cancelled = false;
     {
         auto slot_lock = detail::acquire_session_lock(
             slot.mutex, detail::SessionLockKind::waiter_slot);
-        if (!slot.done.load(std::memory_order_acquire)) {
+        while (!slot.done.load(std::memory_order_acquire)) {
+            if (cancellation && cancellation->cancelled()) {
+                cancelled = true;
+                break;
+            }
+            const auto now = detail::Clock::now();
+            if (now >= deadline) {
+                timed_out = true;
+                break;
+            }
 #ifdef EASY_UDS_TRACE_SPIN_MISS
             detail::session_spin_miss_count.fetch_add(1, std::memory_order_relaxed);
 #endif
@@ -155,9 +185,33 @@ Response Session::request(std::string_view route, std::string_view body) {
             detail::session_trace_counters.condition_waits.fetch_add(
                 1, std::memory_order_relaxed);
 #endif
-            timed_out = !slot.cv.wait_until(slot_lock, deadline, [&slot] {
+            slot.cv.wait_until(slot_lock, std::min(deadline, now +
+                std::chrono::milliseconds{10}), [&slot, &cancellation] {
+                return slot.done.load(std::memory_order_acquire) ||
+                           (cancellation && cancellation->cancelled());
+                });
+        }
+    }
+    if (cancelled && state_->options.protocol_version >=
+                         detail::protocol::cancellable_version) {
+        const auto header = detail::protocol::encode_header(
+            detail::protocol::WireType::cancel_request, request_id, 0, 0, 0,
+            state_->options.protocol_version);
+        try {
+            auto send_lock = detail::acquire_session_lock(
+                state_->send_mutex, detail::SessionLockKind::send);
+            detail::write_exact(state_->fd.get(), header.data(), header.size(),
+                                state_->options.io_timeout, detail::Deadline::max());
+        } catch (...) {
+            state_->broken.store(true, std::memory_order_release);
+            detail::socket_lifecycle::shutdown(state_->fd.get());
+        }
+        auto response_lock = detail::acquire_session_lock(
+            slot.mutex, detail::SessionLockKind::waiter_slot);
+        if (!slot.cv.wait_until(response_lock, deadline, [&slot] {
                 return slot.done.load(std::memory_order_acquire);
-            });
+            })) {
+            timed_out = true;
         }
     }
     {
@@ -179,6 +233,9 @@ Response Session::request(std::string_view route, std::string_view body) {
         state_->broken.store(true, std::memory_order_release);
         detail::socket_lifecycle::shutdown(state_->fd.get());
         detail::throw_system_error("request timed out", ETIMEDOUT);
+    }
+    if (cancelled) {
+        throw Error(ErrorCode::cancelled, "request cancelled");
     }
     const std::exception_ptr error = slot.error;
     Response response = std::move(slot.response);

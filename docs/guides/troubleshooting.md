@@ -27,11 +27,14 @@ replace an older pending request and `RejectIfBusy` may answer immediately;
 neither interrupts a handler that has already started. Use `RequestContext` for
 cooperative stop observation.
 
-## POSIX capabilities are unavailable on Windows
+## A platform capability is unavailable
 
-Peer credentials and `SCM_RIGHTS` descriptor passing are deliberately POSIX-only
-in 1.0. Include `<easy_uds/posix.hpp>` only on a POSIX build and use
-`BorrowedFd::duplicate()` when a received descriptor must outlive its handler.
+POSIX peer credentials and `SCM_RIGHTS` descriptor passing require a POSIX
+build. Include `<easy_uds/posix.hpp>` and use `BorrowedFd::duplicate()` when a
+received descriptor must outlive its handler. Windows exposes peer PID/SID and
+one-HANDLE fixed requests through `<easy_uds/windows.hpp>`; HANDLE transfer
+requires the server to obtain `PROCESS_DUP_HANDLE` access to the peer process.
+BSD builds are included but still need native validation.
 
 For package or build failures, verify the installed `easy_uds::easy_uds` target
 and run the matching compiler's public-header consumer before changing runtime

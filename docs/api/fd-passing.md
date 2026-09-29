@@ -1,8 +1,11 @@
 # File descriptor passing
 
-easy-uds can attach one Linux file descriptor to a one-shot fixed request. The
+On POSIX platforms, easy-uds can attach one file descriptor to a one-shot fixed request. The
 server keeps the received descriptor in an internal job owner and exposes only
 a non-owning view to a contextual handler:
+
+Windows applications can transfer one HANDLE with `Client::request_handle()`;
+see [Windows capabilities](windows-capabilities.md).
 
 ```cpp
 #include <easy_uds/posix.hpp>

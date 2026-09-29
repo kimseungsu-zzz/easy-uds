@@ -71,6 +71,26 @@ if [[ -n "${cmake_common_linux_sources}" ]]; then
     exit 1
 fi
 
+posix_implementation_files=$(find "${root_dir}/src/system/platform/posix" \
+    -type f -name '*.cpp' -printf 'src/system/platform/posix/%f\n' | sort)
+cmake_posix_sources=$(check_cmake_platform_source_set EASY_UDS_PLATFORM_SOURCES |
+    grep '^src/system/platform/posix/' | sort || true)
+if [[ -n "${posix_implementation_files}" &&
+      "${posix_implementation_files}" != "${cmake_posix_sources}" ]]; then
+    echo "architecture guard: POSIX implementation/source-set mismatch" >&2
+    diff -u \
+        <(printf '%s\n' "${posix_implementation_files}") \
+        <(printf '%s\n' "${cmake_posix_sources}") >&2 || true
+    exit 1
+fi
+cmake_common_posix_sources=$(check_cmake_platform_source_set EASY_UDS_COMMON_SOURCES |
+    grep '^src/system/platform/posix/' || true)
+if [[ -n "${cmake_common_posix_sources}" ]]; then
+    echo "architecture guard: POSIX backend leaked into common CMake sources" >&2
+    printf '%s\n' "${cmake_common_posix_sources}" >&2
+    exit 1
+fi
+
 check_no_match \
     "system/platform/linux must not include user layers" \
     '^[[:space:]]*#[[:space:]]*include[[:space:]]*[<"]([^>"]*/)?(user/|easy_uds/simple\.hpp)' \
@@ -85,6 +105,11 @@ check_no_match \
     "system/platform/windows must not include user layers" \
     '^[[:space:]]*#[[:space:]]*include[[:space:]]*[<"]([^>"]*/)?(user/|easy_uds/simple\.hpp)' \
     "${root_dir}/src/system/platform/windows"
+
+check_no_match \
+    "system/platform/posix must not include user layers" \
+    '^[[:space:]]*#[[:space:]]*include[[:space:]]*[<"]([^>"]*/)?(user/|easy_uds/simple\.hpp)' \
+    "${root_dir}/src/system/platform/posix"
 
 check_no_match \
     "Linux capabilities must not include user-facing public headers" \

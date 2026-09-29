@@ -47,7 +47,7 @@ contains:
 
 | Counter | Exact meaning |
 |---|---|
-| `accepted_connections` | Connections successfully inserted into epoll and the server connection table. |
+| `accepted_connections` | Connections successfully registered with the platform readiness backend and inserted into the server connection table. |
 | `rejected_connections` | Accepted sockets immediately closed because `max_connections` was full. |
 | `fixed_requests_dispatched` | Complete fixed frames handed to normal or serialized dispatch, including 404 routes. |
 | `stream_requests_started` | Complete stream openings that acquired a stream slot. |

@@ -159,8 +159,8 @@ builds, and static/shared installed-package consumers.
 
 Development station: i7-1260P, WSL2 (kernel 6.18.33-microsoft-standard), g++ 15.2,
 CMake 4.2.3, `Release`, ninja. These are a shared-host validation and A/B
-reference, not the canonical baseline; `ROADMAP_0.6.md` Phase 0 calls for a
-re-run on a native Linux host before absolute numbers are used.
+reference, not the canonical baseline; re-run on a native Linux host before
+using these absolute numbers as a baseline.
 
 | Benchmark | Run | Throughput | p50 | p95 | p99 |
 |---|---:|---:|---:|---:|---:|

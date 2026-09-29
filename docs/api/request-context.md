@@ -35,23 +35,26 @@ adding another family of `on_*` methods.
 
 | Member | Meaning |
 |---|---|
-| `request_id()` | The protocol-v2 correlation id. It is `0` for a one-shot request and normally nonzero for a Session request. |
+| `request_id()` | The protocol correlation id. It is `0` for a one-shot request and normally nonzero for a Session request. |
+| `peer_process_id()` | Kernel-observed peer process ID where available; `-1` means unavailable. |
+| `peer_sid()` | Windows peer process SID when it can be queried, otherwise an empty view. |
 | `arrival_time()` | `steady_clock` time when the server observed the first byte of the request frame. It is not a client send timestamp. |
 | `deadline()` | Absolute server request deadline, or an empty optional when `ServerOptions::request_timeout` is disabled. |
 | `deadline_expired()` | Whether that absolute deadline has passed at the instant of the call. |
 | `connection_closing()` | Whether the server has observed the connection becoming unusable or has started closing it. `false` is not a peer-liveness guarantee. |
 | `server_stopping()` | Whether `Server::stop()` has started server shutdown. |
-| `stop_requested()` | Convenience OR of connection closing, server stopping, and deadline expiry. |
+| `stop_requested()` | Convenience OR of connection closing, server stopping, deadline expiry, and v3 client cancellation. |
 
 The deadline is the same end-to-end server deadline used for queue admission,
 handler execution, and response I/O. A handler is not forcibly interrupted
 when it expires. The application decides where it is safe to poll
 `stop_requested()` and return.
 
-There is no protocol-level per-request cancellation frame in 1.0. A client
-disconnect, Session failure, server shutdown, or elapsed deadline can make the
-cooperative signal true. Blocking application operations must provide their
-own interruption mechanism if they need immediate wake-up.
+Protocol v3 Sessions can send a per-request cancellation frame. A client
+disconnect, Session failure, server shutdown, explicit cancellation, or elapsed
+deadline can make the cooperative signal true. Blocking application
+operations must provide their own interruption mechanism if they need
+immediate wake-up.
 
 ## Lifetime and thread safety
 
@@ -68,6 +71,11 @@ and response rules as simple handlers. The context adds no allocation per
 request. A simple handler pays only one predictable route-entry branch; the
 fixed-request body remains unchanged; the platform-neutral `Request` layout is
 documented in the 0.8 capability migration record.
+
+The C ABI provides a callback-scoped `is_stop_requested(opaque_context)`
+function to poll the live state. Its `stop_requested` integer is only the
+snapshot taken when the callback begins. Python's `RequestContext.stop_requested`
+property calls the live query each time it is read.
 
 ## POSIX capabilities
 

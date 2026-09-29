@@ -167,7 +167,12 @@ void write_fixed_response(const std::shared_ptr<ServerState>& state,
     OutgoingFrame frame;
     frame.header = protocol::encode_header(WireType::response, request_id,
                                            static_cast<std::uint32_t>(response.status),
-                                           static_cast<std::uint32_t>(response.body.size()));
+                                           static_cast<std::uint32_t>(response.body.size()),
+                                           0, connection->wire_version.load(
+                                                  std::memory_order_acquire) == 0
+                                                  ? protocol::version
+                                                  : connection->wire_version.load(
+                                                        std::memory_order_relaxed));
     frame.body = std::move(response.body);
     frame.deadline = deadline;
     const std::size_t frame_size = frame.header.size() + frame.body.size();

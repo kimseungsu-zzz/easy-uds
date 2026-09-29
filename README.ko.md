@@ -3,18 +3,18 @@
 [English README](README.md)
 
 `easy-uds`는 Unix Domain Socket(`AF_UNIX`)을 이용해 같은 시스템 안의
-프로세스끼리 통신하기 위한 작은 C++17 IPC 라이브러리입니다. 1.0 라인은
-간결한 공개 계약을 동결하면서 요청/응답 RPC, 대용량 스트리밍, 제한된
-동시성, 타임아웃, 안전한 종료, 바이너리 프레이밍, CMake 패키지 설치를
-제공합니다.
+프로세스끼리 통신하기 위한 작은 C++17 IPC 라이브러리입니다. 1.1 개발 라인은
+기존 프로토콜과 Core API를 유지하면서 선택형 C/Python 인터페이스와
+BSD 지원을 추가합니다.
 
 특히 한 프로세스에서만 소유할 수 있는 로봇 드라이버나 하드웨어 드라이버를 여러 프로세스가 함께 사용해야 할 때 유용합니다. `on_serialized()`를 사용하면 여러 클라이언트 프로세스가 동시에 명령을 보내더라도 실제 하드웨어 명령은 한 번에 하나씩 FIFO 순서로 실행됩니다.
 
-> **프로토콜 참고:** 현재 릴리즈는 20바이트 헤더와 request-id 멀티플렉싱을 사용하는 protocol version 2입니다. v0.5.x 이하의 protocol v1과 wire 호환되지 않습니다.
+> **프로토콜 참고:** 기본은 20바이트 헤더와 request-id 멀티플렉싱을 사용하는 protocol version 2이며, persistent session에서 취소가 필요한 경우 version 3을 선택할 수 있습니다. 두 버전 모두 v0.5.x 이하의 protocol v1과 wire 호환되지 않습니다.
 
 ## 주요 기능
 
 - C++17, 런타임 서드파티 의존성 없음
+- ABI 버전이 있는 fixed-RPC C API와 선택형 Python ctypes 패키지
 - route 기반 request/response RPC
 - handler table copy-on-write snapshot(요청 dispatch 시 전역 table lock·`std::function` 복사 없음)
 - request/response body에 NUL, 개행 등을 포함한 임의 바이너리 데이터 사용 가능
@@ -24,16 +24,19 @@
 - Unix socket backpressure를 통한 자연스러운 흐름 제어
 - versioned binary protocol
 - `Client::request_fd()`로 `SCM_RIGHTS` descriptor 1개 전달 (contextual handler의 POSIX capability view로 사용)
+- Windows HANDLE passing: Client::request_handle()
 - connection마다 detached thread를 만들지 않는 고정 worker pool
-- 느린 고정 응답의 쓰기가 reactor나 worker pool을 점유하지 않는 `EPOLLOUT` 출력 큐
+- 느린 고정 응답의 쓰기가 reactor나 worker pool을 점유하지 않는 writable readiness 출력 큐
 - 최대 connection 수, I/O inactivity timeout, absolute request deadline, connect timeout 설정
-- non-blocking socket + 필요할 때만 `poll()` 사용
-- `sendmsg()`를 이용한 header+payload gathered write
+- non-blocking socket + 필요할 때만 platform readiness API 사용
+- platform vectored I/O를 이용한 header+payload gathered write
 - 기본 socket 권한 `0600`
 - 동일 socket path의 중복 server 실행과 stale socket 정리를 보호하는 instance lock
 - 다른 thread에서 안전하게 호출할 수 있는 `Server::stop()`
 - 기존 backpressure accounting을 재사용하는 thread-safe 서버/Session stats snapshot
 - handler 예외를 `500 / Internal Server Error`로 변환
+- 고정 요청 route를 실행하기 전 호출하는 선택형 인가 callback
+- 멱등 요청으로 지정한 one-shot RPC의 명시적 reconnect/retry
 - 작은 의미 분류 `ErrorCode`와 원본 `errno`를 함께 보존하는 `easy_uds::Error`
 - static/shared library 및 CMake `find_package()` 지원
 - unit/stress/ASan/UBSan/TSan/fuzz/package-consumer 테스트 구성
@@ -41,12 +44,12 @@
 ## 플랫폼
 
 Linux는 production 지원 backend입니다. Windows 10+에서는 검증된 AF_UNIX
-Core/Session/streaming/Simple/package surface를 제공합니다. POSIX peer
-credentials와 descriptor passing은 Windows에서 명시적으로 지원하지 않으며,
-macOS와 BSD도 지원하지 않습니다. Linux 전용 abstract socket이 아니라
+Core/Session/streaming/Simple/package surface를 제공합니다. BSD 지원에는 FreeBSD, OpenBSD,
+NetBSD, DragonFly BSD가 포함되며 네이티브 검증은 진행 중입니다.
+POSIX peer credentials와
+descriptor passing은 Windows에서 지원하지 않습니다. Linux 전용 abstract socket이 아니라
 pathname socket을 사용합니다. 정확한 범위는
-[`docs/platform-support.md`](docs/platform-support.md)와
-[`docs/api/compatibility.md`](docs/api/compatibility.md)를 참고하십시오.
+[`docs/platform-support.md`](docs/platform-support.md)를 참고하십시오.
 
 ## 빠른 시작
 
@@ -379,9 +382,9 @@ easy_uds::Server server("/tmp/easy-uds.sock", options);
 | `listen_backlog` | `64` | `listen()` backlog |
 | `socket_permissions` | `0600` | Unix socket pathname 권한 |
 
-일반 RPC 입력은 connection마다 `max_inflight_requests_per_connection`과 `max_inflight_request_bytes_per_connection`으로 제한됩니다. `max_total_inflight_bytes`가 0이 아니면 검증된 header의 route+body 선언 크기를 parser buffer 할당 전에 예약하므로 partial, queued, executing request가 하나의 엄격한 논리 byte 예산을 공유합니다. admission에 실패한 peer의 `EPOLLIN`만 내리고 저수위에서 다시 시작합니다. 이 opt-in 모드에서는 Session continuation도 reactor admission을 거치며, 기본값 `0`은 0.6.4 고속 경로를 그대로 유지합니다. kernel에 남은 byte에는 Unix socket backpressure가 걸립니다. fixed response queue는 `max_output_bytes_per_connection`과 `max_total_output_bytes`로 제한합니다.
+일반 RPC 입력은 connection마다 `max_inflight_requests_per_connection`과 `max_inflight_request_bytes_per_connection`으로 제한됩니다. `max_total_inflight_bytes`가 0이 아니면 검증된 header의 route+body 선언 크기를 parser buffer 할당 전에 예약하므로 partial, queued, executing request가 하나의 엄격한 논리 byte 예산을 공유합니다. admission에 실패한 peer의 read interest만 내리고 저수위에서 다시 시작합니다. 이 opt-in 모드에서는 Session continuation도 reactor admission을 거치며, 기본값 `0`은 0.6.4 고속 경로를 그대로 유지합니다. kernel에 남은 byte에는 Unix socket backpressure가 걸립니다. fixed response queue는 `max_output_bytes_per_connection`과 `max_total_output_bytes`로 제한합니다.
 
-고정 응답은 worker가 non-blocking fast path로 한 번 전송한 뒤, 남은 byte만 connection별 `EPOLLOUT` 큐에 넘깁니다. 큐 상한은 4 MiB와 최대 응답 하나의 크기 중 큰 값이며, 이를 넘기는 peer만 닫습니다. 응답을 읽지 않는 client가 일반 worker pool을 점유하지 않습니다. Stream은 기존의 전용 worker lease와 `max_concurrent_streams` 제한을 사용합니다.
+고정 응답은 worker가 non-blocking fast path로 한 번 전송한 뒤, 남은 byte만 connection별 writable readiness 큐에 넘깁니다. 큐 상한은 4 MiB와 최대 응답 하나의 크기 중 큰 값이며, 이를 넘기는 peer만 닫습니다. 응답을 읽지 않는 client가 일반 worker pool을 점유하지 않습니다. Stream은 기존의 전용 worker lease와 `max_concurrent_streams` 제한을 사용합니다.
 
 `request_timeout`은 worker queue, serialized queue, socket I/O 시간을 모두 포함합니다. serialized 명령이 실행 전에 timeout되면 handler를 실행하지 않고 `408`로 응답합니다.
 
@@ -427,7 +430,7 @@ easy_uds::Client client("/tmp/easy-uds.sock", options);
 
 ## 동시성과 종료
 
-`Server::run()`은 readiness 기반 reactor와 고정 worker pool을 시작한 뒤 종료될 때까지 block됩니다. Linux에서는 epoll을 사용하고 Windows backend는 별도 concrete readiness 구현을 사용합니다. serialized executor는 thread 없이 시작하고 독립 domain의 병렬 실행이 실제로 필요할 때 `max_concurrent_serialized_domains`까지 지연 확장됩니다. 하나의 `Server` 객체에서 `run()`은 한 번만 호출할 수 있습니다.
+`Server::run()`은 readiness 기반 reactor와 고정 worker pool을 시작한 뒤 종료될 때까지 block됩니다. Linux는 epoll, BSD는 kqueue, Windows는 플랫폼 readiness backend를 사용합니다. serialized executor는 독립 domain의 병렬 실행이 필요할 때 지연 확장됩니다. `Server::stop()`은 다른 thread에서 안전하게 호출할 수 있고 여러 번 호출해도 안전합니다.
 
 일반 `on()` handler는 여러 worker thread에서 동시에 실행될 수 있습니다. 동일하게 등록된 함수 객체가 여러 worker에서 동시에 호출될 수 있으므로 mutable capture와 공유 state는 애플리케이션이 직접 동기화해야 합니다. Handler table 갱신은 copy-on-write이며 진행 중인 요청을 무효화하지 않고 원자적으로 공개됩니다.
 
@@ -435,12 +438,12 @@ easy_uds::Client client("/tmp/easy-uds.sock", options);
 
 종료 시에는 다음 순서로 정리됩니다.
 
-1. `running` 해제 및 단일 `eventfd` counter로 `epoll_wait()` 중단
+1. `running`을 해제하고 platform wakeup으로 reactor의 readiness 대기를 중단
 2. 소유 중인 socket pathname을 inode 확인 후 제거
 3. accept된 모든 client socket을 `shutdown()`하여 blocked I/O 중단
 4. 일반·serialized executor에 종료를 알리고 아직 실행되지 않은 작업 폐기
 5. reactor, worker pool, serialized executor 종료 및 join
-6. connection/listener/wakeup/epoll descriptor와 instance lock 해제
+6. connection/listener/wakeup/readiness resource와 instance lock 해제
 
 reactor가 listener를 poll하는 동안 `stop()` thread가 listener FD를 직접 close하지 않으므로 descriptor-number reuse race를 피합니다.
 
@@ -721,8 +724,8 @@ src/system/platform/linux/  선택된 Linux capability 구현
 src/system/platform/windows/ 선택된 Windows AF_UNIX capability 구현(Windows Actions 검증)
 src/user/cpp/core/      설치되는 Core C++ header
 src/user/cpp/simple/   설치되는 Simple C++ header
-src/user/c/             C ABI 경계 예약 영역
-src/user/py/            Python binding 경계 예약 영역
+src/user/c/             fixed-RPC C ABI
+src/user/py/            선택형 Python ctypes binding
 include/easy_uds/       src/user에서 생성되는 설치 호환 경로
 examples/               최소 server/client와 robot HAL 조합 예제
 experiments/0.6/        0.6 실험 단계의 독립 probe 보존
@@ -730,12 +733,12 @@ tests/easy_uds_test/     기능별로 나눈 unit 테스트
 tests/                  stress, fuzz, benchmark, package-consumer 테스트
 cmake/                  설치용 CMake config
 docs/                   protocol 문서
-docs/api/compatibility.md 1.0 source/protocol/platform 호환성 계약
+docs/api/compatibility.md Current 1.1 source/protocol/platform 호환성 계약
 docs/platform-support.md   현재 Linux/Windows 지원 범위와 제한
 docs/guides/               task guide, diagnostics, troubleshooting
 docs/internals/            architecture 경계와 검증 evidence
-docs/PROTOCOL.md           protocol v2 wire format
-docs/releases/v1.0.0.md    현재 stable release notes
+docs/PROTOCOL.md           protocol v2/v3 wire format
+docs/releases/v1.0.0.md    Historical 1.0.0 release notes
 docs/history/README.md     과거 측정·실험·릴리즈 기록
 .github/workflows/      GitHub Actions CI
 ```

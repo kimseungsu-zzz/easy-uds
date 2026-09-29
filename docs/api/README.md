@@ -15,12 +15,14 @@ performance cost.
 | Persistent multiplexed client | [`session.hpp`](../../src/user/cpp/core/easy_uds/session.hpp) | [Session state](session.md) |
 | Request and response values | [`request.hpp`](../../src/user/cpp/core/easy_uds/request.hpp) / [`response.hpp`](../../src/user/cpp/core/easy_uds/response.hpp) | [FD passing](fd-passing.md), [Request context](request-context.md) |
 | POSIX request capabilities | [`posix.hpp`](../../src/user/cpp/core/easy_uds/posix.hpp) / [`peer_credentials.hpp`](../../src/user/cpp/core/easy_uds/peer_credentials.hpp) | [FD passing](fd-passing.md), [Request context](request-context.md) |
+| Windows peer identity and HANDLE transfer | [`windows.hpp`](../../src/user/cpp/core/easy_uds/windows.hpp) | [Windows capabilities](windows-capabilities.md) |
+| C ABI and Python binding | [`easy_uds.h`](../../src/user/c/include/easy_uds.h) | [C API](../../src/user/c/README.md), [Python binding](../../src/user/py/README.md) |
 | Streaming | [`stream.hpp`](../../src/user/cpp/core/easy_uds/stream.hpp) | [Core API](core.md) and [streaming example](../examples/streaming.md) |
 | Error classification | [`error.hpp`](../../src/user/cpp/core/easy_uds/error.hpp) | [Error model](errors.md) |
 | Descriptor ownership | [`fd.hpp`](../../src/user/cpp/core/easy_uds/fd.hpp) | [FD passing](fd-passing.md) |
 | Request metadata | [`request_context.hpp`](../../src/user/cpp/core/easy_uds/request_context.hpp) | [Request context](request-context.md) |
 | Operational snapshots | [`stats.hpp`](../../src/user/cpp/core/easy_uds/stats.hpp) | [Runtime statistics](stats.md) |
-| Compatibility policy | — | [1.0 compatibility contract](compatibility.md) |
+| Compatibility policy | — | [1.1 compatibility and platform contract](compatibility.md) |
 | Beginner fixed RPC facade | [`simple.hpp`](../../src/user/cpp/simple/easy_uds/simple.hpp) | [Simple API guide](../simple-api/getting-started.md) |
 | Public include/layout | [`easy_uds.hpp`](../../src/user/cpp/core/easy_uds/easy_uds.hpp) | [Headers and source layout](headers.md) |
 
@@ -50,7 +52,7 @@ For the beginner/advanced boundary and the final syntax comparison, see the
 [0.7 ergonomics audit](../ERGONOMICS_0.7.md).
 
 The final header-by-header freeze checklist is in the historical
-[public API audit](public-api-audit.md); the current 1.0 promises are in the
+[public API audit](public-api-audit.md); the current development promises are in the
 [compatibility contract](compatibility.md).
 
 The Request capability footprint and ownership record is in

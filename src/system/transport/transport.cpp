@@ -16,10 +16,11 @@ namespace {
 void write_stream_request(NativeSocket fd, std::uint32_t request_id, std::string_view route,
                           const StreamReader& body, std::size_t chunk_size,
                           std::size_t max_stream_size,
-                          std::chrono::milliseconds io_timeout, Deadline deadline) {
+                          std::chrono::milliseconds io_timeout, Deadline deadline,
+                          std::uint8_t wire_version) {
     write_frame_with_payload(fd, WireType::stream_request, request_id,
                              static_cast<std::uint32_t>(route.size()), 0, route.data(),
-                             route.size(), io_timeout, deadline);
+                             route.size(), io_timeout, deadline, wire_version);
 
     std::vector<char> buffer(chunk_size);
     std::size_t total_size = 0;
@@ -38,10 +39,10 @@ void write_stream_request(NativeSocket fd, std::uint32_t request_id, std::string
         total_size += size;
         write_frame_with_payload(fd, WireType::stream_request_chunk, request_id,
                                  static_cast<std::uint32_t>(size), 0, buffer.data(), size,
-                                 io_timeout, deadline);
+                                 io_timeout, deadline, wire_version);
     }
     write_header_frame(fd, WireType::stream_request_end, request_id, 0, 0, io_timeout,
-                       deadline);
+                       deadline, wire_version);
 }
 
 } // namespace
@@ -62,7 +63,8 @@ Status run_oneshot_stream(const std::string& socket_path, const ClientOptions& o
     connect_nonblocking(fd.get(), address, options.connect_timeout, deadline);
 
     write_stream_request(fd.get(), 0, route, request_body, options.stream_chunk_size,
-                         options.max_stream_size, options.io_timeout, deadline);
+                         options.max_stream_size, options.io_timeout, deadline,
+                         options.protocol_version);
 
     BufferedReader reader(fd.get());
     HeaderBytes header{};

@@ -6,6 +6,8 @@
 #include <chrono>
 #include <cstdint>
 #include <optional>
+#include <memory>
+#include <string_view>
 
 namespace easy_uds {
 
@@ -35,6 +37,19 @@ class RequestContext {
 
     [[nodiscard]] std::uint32_t request_id() const noexcept {
         return request_->request_id;
+    }
+
+    // Kernel-observed peer process id where the platform can provide one.
+    // Returns -1 when unavailable. Windows AF_UNIX can provide this even
+    // though POSIX uid/gid fields are not meaningful there.
+    [[nodiscard]] std::int64_t peer_process_id() const noexcept {
+        return peer_pid_;
+    }
+
+    // Windows account SID in string form, or an empty view when unavailable.
+    // The view is valid only for this callback, like the context itself.
+    [[nodiscard]] std::string_view peer_sid() const noexcept {
+        return peer_sid_;
     }
 
     // Time at which the server observed the first byte of this request frame.
@@ -67,7 +82,8 @@ class RequestContext {
 
     // Cooperative cancellation signal. Handlers decide when and how to stop.
     [[nodiscard]] bool stop_requested() const noexcept {
-        return connection_closing() || server_stopping() || deadline_expired();
+        return connection_closing() || server_stopping() || deadline_expired() ||
+               (cancelled_ && cancelled_->load(std::memory_order_acquire));
     }
 
   private:
@@ -79,10 +95,14 @@ class RequestContext {
                    TimePoint deadline,
                    const std::atomic<bool>& connection_closing,
                    const std::atomic<bool>& server_running,
+                   const std::shared_ptr<std::atomic<bool>>& cancelled,
+                   std::int64_t peer_pid, std::string_view peer_sid,
                    const detail::RequestCapabilityStorage* capability_bridge) noexcept
         : request_(&request), arrival_time_(arrival_time), deadline_(deadline),
           connection_closing_(&connection_closing),
-          server_running_(&server_running), capability_bridge_(capability_bridge) {}
+          server_running_(&server_running), cancelled_(cancelled),
+          peer_pid_(peer_pid), peer_sid_(peer_sid),
+          capability_bridge_(capability_bridge) {}
 
     [[nodiscard]] const detail::RequestCapabilityStorage*
     capability_bridge() const noexcept {
@@ -94,6 +114,9 @@ class RequestContext {
     TimePoint deadline_;
     const std::atomic<bool>* connection_closing_;
     const std::atomic<bool>* server_running_;
+    std::shared_ptr<std::atomic<bool>> cancelled_;
+    std::int64_t peer_pid_ = -1;
+    std::string_view peer_sid_;
     const detail::RequestCapabilityStorage* capability_bridge_;
 };
 

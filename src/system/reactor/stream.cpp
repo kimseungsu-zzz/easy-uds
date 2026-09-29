@@ -169,7 +169,8 @@ void run_stream_exchange(const std::shared_ptr<ServerState>& state, PendingJob&&
             std::lock_guard<std::mutex> lock(connection->write_mutex);
             write_header_frame(fd, WireType::stream_response, job.request.request_id,
                                static_cast<std::uint32_t>(response.status), 0, state->options.io_timeout,
-                               job.deadline);
+                               job.deadline, connection->wire_version.load(
+                                   std::memory_order_acquire));
             std::vector<char> chunk_buffer(state->options.stream_chunk_size);
             std::size_t total_size = 0;
             while (response.body) {
@@ -184,10 +185,14 @@ void run_stream_exchange(const std::shared_ptr<ServerState>& state, PendingJob&&
                 total_size += size;
                 write_frame_with_payload(fd, WireType::stream_response_chunk, job.request.request_id,
                                          static_cast<std::uint32_t>(size), 0, chunk_buffer.data(), size,
-                                         state->options.io_timeout, job.deadline);
+                                         state->options.io_timeout, job.deadline,
+                                         connection->wire_version.load(
+                                             std::memory_order_acquire));
             }
             write_header_frame(fd, WireType::stream_response_end, job.request.request_id, 0, 0,
-                               state->options.io_timeout, job.deadline);
+                               state->options.io_timeout, job.deadline,
+                               connection->wire_version.load(
+                                   std::memory_order_acquire));
         }
         // The response is fully written; admit the next stream now rather than
         // after the connection rearm, avoiding a spurious excess-stream close

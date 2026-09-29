@@ -117,6 +117,9 @@ inline void validate_client_options(const easy_uds::ClientOptions& options) {
     validate_nonnegative_timeout(options.io_timeout, "io_timeout");
     validate_nonnegative_timeout(options.request_timeout, "request_timeout");
     validate_stream_options(options.stream_chunk_size, options.stream_timeout);
+    if (options.protocol_version != 2 && options.protocol_version != 3) {
+        throw std::invalid_argument("protocol_version must be 2 or 3");
+    }
     if (options.stats != easy_uds::StatsMode::disabled &&
         options.stats != easy_uds::StatsMode::basic) {
         throw std::invalid_argument("stats must be StatsMode::disabled or StatsMode::basic");
@@ -445,8 +448,9 @@ inline void write_iovecs_exact_with_fd(NativeSocket fd, iovec* parts, std::size_
 
 inline void write_frame_with_payload(NativeSocket fd, WireType type, std::uint32_t request_id, std::uint32_t arg1,
                                      std::uint32_t arg2, const void* payload, std::size_t payload_size,
-                                     std::chrono::milliseconds inactivity_timeout, Deadline absolute_deadline) {
-    HeaderBytes header = protocol::encode_header(type, request_id, arg1, arg2);
+                                     std::chrono::milliseconds inactivity_timeout, Deadline absolute_deadline,
+                                     std::uint8_t wire_version = protocol::version) {
+    HeaderBytes header = protocol::encode_header(type, request_id, arg1, arg2, 0, wire_version);
     std::array<iovec, 2> parts{{
         {header.data(), header.size()},
         {const_cast<void*>(payload), payload_size},
@@ -456,8 +460,9 @@ inline void write_frame_with_payload(NativeSocket fd, WireType type, std::uint32
 
 inline void write_header_frame(NativeSocket fd, WireType type, std::uint32_t request_id, std::uint32_t arg1,
                                std::uint32_t arg2, std::chrono::milliseconds inactivity_timeout,
-                               Deadline absolute_deadline) {
-    const HeaderBytes header = protocol::encode_header(type, request_id, arg1, arg2);
+                               Deadline absolute_deadline,
+                               std::uint8_t wire_version = protocol::version) {
+    const HeaderBytes header = protocol::encode_header(type, request_id, arg1, arg2, 0, wire_version);
     write_exact(fd, header.data(), header.size(), inactivity_timeout, absolute_deadline);
 }
 

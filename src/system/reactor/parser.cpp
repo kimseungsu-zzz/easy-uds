@@ -2,11 +2,15 @@
 
 #include "common.hpp"
 #include "../platform/descriptor_passing.hpp"
+#if defined(_WIN32)
+#include "../platform/windows/handle_transfer.hpp"
+#endif
 
 #include <algorithm>
 #include <array>
 #include <cerrno>
 #include <cstring>
+#include <limits>
 #include <stdexcept>
 #include <utility>
 
@@ -169,7 +173,41 @@ void consume(const std::shared_ptr<ServerState>& state,
             release_consumed_pending(rc, strict_budget);
 
             const auto decoded = protocol::decode_header(rc->header);
+            auto observed_version = rc->conn->wire_version.load(std::memory_order_acquire);
+            if (observed_version == 0) {
+                rc->conn->wire_version.compare_exchange_strong(
+                    observed_version, decoded.version, std::memory_order_acq_rel);
+                observed_version = rc->conn->wire_version.load(std::memory_order_acquire);
+            }
+            if (observed_version != decoded.version) {
+                throw std::runtime_error("protocol version changed on connection");
+            }
+            if (decoded.type == WireType::cancel_request) {
+                std::lock_guard<std::mutex> lock(rc->conn->cancellation_mutex);
+                const auto it = rc->conn->cancellations.find(decoded.request_id);
+                if (it != rc->conn->cancellations.end()) {
+                    if (auto flag = it->second.lock()) {
+                        flag->store(true, std::memory_order_release);
+                    } else {
+                        rc->conn->cancellations.erase(it);
+                    }
+                }
+                rc->arrival_time = Clock::time_point{};
+                rc->deadline = Deadline::max();
+                continue;
+            }
             if (decoded.type == WireType::request) {
+#if defined(_WIN32)
+                if ((decoded.flags & protocol::carries_windows_handle_flag) != 0 &&
+                    decoded.arg2 < sizeof(std::uint64_t)) {
+                    throw std::runtime_error("truncated Windows handle metadata");
+                }
+#else
+                if ((decoded.flags & protocol::carries_windows_handle_flag) != 0) {
+                    throw std::runtime_error(
+                        "Windows handle transfer is unavailable on this platform");
+                }
+#endif
                 if (decoded.flags & protocol::carries_fd_flag) {
                     if (rc->received_fds.empty()) {
                         throw std::runtime_error("fd frame without ancillary descriptor");
@@ -181,6 +219,7 @@ void consume(const std::shared_ptr<ServerState>& state,
                 protocol::validate_request_lengths(decoded.arg1, decoded.arg2,
                                                    state->options.max_message_size);
                 rc->request_id = decoded.request_id;
+                rc->request_flags = decoded.flags;
                 rc->arg1 = decoded.arg1;
                 rc->arg2 = decoded.arg2;
                 rc->payload_total = static_cast<std::size_t>(decoded.arg1) + decoded.arg2;
@@ -226,7 +265,33 @@ void consume(const std::shared_ptr<ServerState>& state,
             }
             release_consumed_pending(rc, strict_budget);
             if (rc->payload_received == rc->payload_total) {
+#if defined(_WIN32)
+                if ((rc->request_flags &
+                     protocol::carries_windows_handle_flag) != 0) {
+                    std::uint64_t peer_handle_value = 0;
+                    for (std::size_t index = 0; index < sizeof(peer_handle_value);
+                         ++index) {
+                        peer_handle_value =
+                            (peer_handle_value << 8) |
+                            static_cast<unsigned char>(rc->body_buffer[index]);
+                    }
+                    const auto max_native_handle = static_cast<std::uint64_t>(
+                        std::numeric_limits<std::uintptr_t>::max());
+                    if (peer_handle_value == 0 ||
+                        peer_handle_value > max_native_handle ||
+                        peer_handle_value >= max_native_handle - 15U) {
+                        throw std::runtime_error(
+                            "invalid Windows handle value in request");
+                    }
+                    rc->capabilities.peer_handle_value = peer_handle_value;
+                    rc->capabilities.wire_resource_bytes =
+                        sizeof(peer_handle_value);
+                    rc->body_buffer.erase(0, sizeof(peer_handle_value));
+                }
+#endif
                 const bool read_paused = dispatch_request(state, rc);
+                rc->capabilities = RequestCapabilityStorage{};
+                rc->request_flags = 0;
                 rc->phase = ParsePhase::header;
                 rc->arrival_time = Clock::time_point{};
                 rc->deadline = Deadline::max();

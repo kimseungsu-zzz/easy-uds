@@ -1,7 +1,7 @@
 # Error model
 
 easy-uds uses one operational exception type and a small set of stable meaning
-classes. It does not replace detailed Linux errors or create an exception class
+classes. It does not replace detailed operating-system errors or create an exception class
 for every failure:
 
 ```cpp
@@ -32,10 +32,10 @@ try {
 | `too_large` | A peer response exceeds the configured receive limit |
 | `invalid_request` | An operation uses an invalid easy-uds resource state |
 | `unavailable` | Socket path/service is missing, unreachable, or refusing connections |
-| `cancelled` | Operation was explicitly cancelled; reserved for cancellation APIs |
+| `cancelled` | A v3 `Session::request` observed `CancellationSource::cancel()`; the server signal is cooperative |
 
 The enum is intentionally small. Applications should not infer a specific
-Linux cause from it; use `system_code()` when the distinction matters.
+operating-system cause from it; use `system_code()` when the distinction matters.
 
 ## Three views of one error
 

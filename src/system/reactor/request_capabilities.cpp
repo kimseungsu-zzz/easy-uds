@@ -1,6 +1,13 @@
 #include "request_capabilities.hpp"
 
+#include "easy_uds/request_context.hpp"
+
 namespace easy_uds::detail {
+
+const RequestCapabilityStorage* request_capability_bridge(
+    const easy_uds::RequestContext& context) noexcept {
+    return context.capability_bridge();
+}
 
 std::int64_t request_capability_pid(
     const RequestCapabilityStorage* bridge) noexcept {
@@ -27,5 +34,12 @@ bool request_capability_peer_present(
 int request_capability_fd(const RequestCapabilityStorage* bridge) noexcept {
     return bridge == nullptr ? -1 : bridge->received_fd.native_fd();
 }
+
+#if defined(_WIN32)
+void* request_capability_windows_handle(
+    const RequestCapabilityStorage* bridge) noexcept {
+    return bridge == nullptr ? nullptr : bridge->received_handle.get();
+}
+#endif
 
 } // namespace easy_uds::detail

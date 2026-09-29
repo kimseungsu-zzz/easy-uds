@@ -8,9 +8,16 @@ request id, live cooperative stop signal, available POSIX or Windows peer identi
 and (on Windows) a callback-scoped received HANDLE. `Client.request_handle()`
 passes a caller-owned Win32 HANDLE.
 
-Install the native easy-uds library first, then install this package with
-`python -m pip install src/user/py`. Set `EASY_UDS_LIBRARY` to the shared
-library path when the platform loader cannot locate it. Construct `Client`
-with `protocol_version=3` to use `Session.request(..., cancellation=source)`;
-cancel the source from another thread. Idempotent retry remains an explicit
-one-shot method. Streaming remains C++-only.
+Install the native easy-uds 1.1.0 shared library first; this Python package
+contains the binding, not the native library. Then install the binding from
+PyPI:
+
+```console
+python -m pip install easy-uds
+```
+
+Set `EASY_UDS_LIBRARY` to the shared library path when the platform loader
+cannot locate it. Construct `Client` with `protocol_version=3` to use
+`Session.request(..., cancellation=source)`; cancel the source from another
+thread. Idempotent retry remains an explicit one-shot method. Streaming remains
+C++-only. See the [native library installation and platform support guide](https://github.com/kimseungsu-zzz/easy-uds/blob/v1.1.0/docs/platform-support.md).

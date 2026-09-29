@@ -13,10 +13,10 @@
 #include <unistd.h>
 
 static_assert(easy_uds::version_major == 1);
-static_assert(easy_uds::version_minor == 0);
+static_assert(easy_uds::version_minor == 1);
 static_assert(easy_uds::version_patch == 0);
-static_assert(easy_uds::version == std::string_view{"1.0.0"});
-static_assert(easy_uds::protocol_version == 2U);
+static_assert(easy_uds::version == std::string_view{"1.1.0"});
+static_assert(easy_uds::protocol_version == 3U);
 static_assert(sizeof(easy_uds::BorrowedFd) == sizeof(int));
 static_assert(sizeof(easy_uds::OwnedFd) == sizeof(int));
 static_assert(std::is_aggregate_v<easy_uds::Response>);
@@ -42,9 +42,6 @@ static_assert(std::is_same_v<decltype(std::declval<const easy_uds::Server&>().st
                              easy_uds::ServerStats>);
 static_assert(std::is_same_v<decltype(std::declval<const easy_uds::Session&>().stats()),
                              easy_uds::SessionStats>);
-static_assert(easy_uds::ServerOptions{}.stats == easy_uds::StatsMode::disabled);
-static_assert(
-    easy_uds::ServerOptions{}.max_concurrent_serialized_domains == 0);
 static_assert(easy_uds::ClientOptions{}.stats == easy_uds::StatsMode::disabled);
 
 void register_context_routes(easy_uds::Server& server) {

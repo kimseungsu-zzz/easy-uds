@@ -3,7 +3,7 @@
 [한국어 README](README.ko.md)
 
 `easy-uds` is a small C++17 request/response and chunk-streaming library for
-local IPC over Unix Domain Sockets (`AF_UNIX`). The 1.1 development line adds
+local IPC over Unix Domain Sockets (`AF_UNIX`). Version 1.1 adds
 optional C/Python interfaces and expands POSIX platform support while keeping
 the existing binary protocol and Core API available.
 
@@ -691,6 +691,7 @@ docs/platform-support.md   Current Linux/BSD/Windows support and limits
 docs/guides/               Task guides, diagnostics, and troubleshooting
 docs/internals/            Architecture boundaries and validation evidence
 docs/PROTOCOL.md           Protocol v2/v3 wire format
+docs/releases/v1.1.0.md    Current 1.1.0 release notes
 docs/releases/v1.0.0.md    Historical 1.0.0 release notes
 docs/history/README.md     Historical measurements, experiments, and releases
 .github/workflows/      GitHub Actions CI

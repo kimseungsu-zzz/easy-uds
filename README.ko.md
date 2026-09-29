@@ -3,7 +3,7 @@
 [English README](README.md)
 
 `easy-uds`는 Unix Domain Socket(`AF_UNIX`)을 이용해 같은 시스템 안의
-프로세스끼리 통신하기 위한 작은 C++17 IPC 라이브러리입니다. 1.1 개발 라인은
+프로세스끼리 통신하기 위한 작은 C++17 IPC 라이브러리입니다. 1.1 버전은
 기존 프로토콜과 Core API를 유지하면서 선택형 C/Python 인터페이스와
 BSD 지원을 추가합니다.
 

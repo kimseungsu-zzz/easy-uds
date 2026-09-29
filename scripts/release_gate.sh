@@ -9,7 +9,7 @@ root_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 base_build_dir=${1:-"${root_dir}/build-release-gate"}
 
 if [[ "$(uname -s)" != "Linux" ]]; then
-    echo "release_gate: Linux is required (epoll and AF_UNIX)" >&2
+    echo "release_gate: Linux is required for this Linux-specific release gate" >&2
     exit 2
 fi
 
@@ -87,6 +87,6 @@ run_variant OFF
 run_variant ON
 
 echo
-echo "release_gate: 1.0 final build, unit/integration, release labels, compile-error UX,"
+echo "release_gate: 1.1 build, unit/integration, release labels, compile-error UX,"
 echo "release_gate: static/shared package consumers, Simple API /echo smoke,"
 echo "release_gate: and beginner /echo smoke passed"

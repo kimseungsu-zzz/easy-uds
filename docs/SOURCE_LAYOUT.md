@@ -1,6 +1,6 @@
 # Source layout
 
-This page describes the current 1.1 development layout, including the added
+This page describes the current 1.1 layout, including the added
 POSIX backend and C/Python API layers. Platform source sets remain selected at
 build time.
 

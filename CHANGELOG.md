@@ -2,7 +2,7 @@
 
 All notable changes to this project are documented here.
 
-## easy-uds 1.1.0 (In development)
+## easy-uds 1.1.0 (2026-09-29)
 
 - Added an opt-in one-shot retry API for routes declared idempotent by the caller.
 - Added ABI v1 C entry points for fixed RPC, contextual handlers, Sessions,
@@ -13,6 +13,8 @@ All notable changes to this project are documented here.
 - Added opt-in protocol v3 cooperative cancellation for persistent Sessions.
 - Removed closed 0.6 through 0.9 planning roadmaps while retaining release and
   benchmark records.
+- See [`docs/releases/v1.1.0.md`](docs/releases/v1.1.0.md) for the release
+  scope and validation limits.
 
 ## easy-uds 1.0.0 — Stable
 

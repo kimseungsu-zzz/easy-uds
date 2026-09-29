@@ -1,9 +1,8 @@
 # Compatibility and platform contract
 
-The 1.1 development line preserves the established C++ Core API and protocol
-v2 defaults while adding opt-in capabilities. It is not a released stable
-contract yet; check the changelog and release notes for the version actually
-installed by an application.
+Version 1.1.0 preserves the established C++ Core API and protocol v2 defaults
+while adding opt-in capabilities. This page describes the 1.1.0 contract; check
+the changelog and release notes for the version installed by an application.
 
 ## Source and wire compatibility
 

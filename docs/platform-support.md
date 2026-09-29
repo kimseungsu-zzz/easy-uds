@@ -9,14 +9,14 @@ readiness, wakeup, and pathname lifecycle primitives.
 | --- | --- | --- | --- | --- | --- |
 | Linux | AF_UNIX | supported and regression-tested | supported | supported | peer credentials and one-FD `SCM_RIGHTS` |
 | FreeBSD, OpenBSD, NetBSD, DragonFly BSD | AF_UNIX/kqueue (new; native validation pending) | shared engine; validation pending | shared engine | shared API | uid/gid where available; one-FD `SCM_RIGHTS` |
-| Windows 10+ | Winsock AF_UNIX | implemented; 1.1 development build and smoke verified locally | implemented through the common engine | implemented | kernel peer PID, best-effort process SID, one-HANDLE fixed request transfer |
+| Windows 10+ | Winsock AF_UNIX | implemented; 1.1 build and smoke verified locally | implemented through the common engine | implemented | kernel peer PID, best-effort process SID, one-HANDLE fixed request transfer |
 
 The 1.0 Windows workflow covered fixed RPC, concurrent Session requests,
 streaming, Simple `ResponseError`, repeated bind/run/stop lifecycle, and
 installed-package Core/Simple consumers. Its static and shared library
 validation passed in
 [Actions run 31924819563](https://github.com/kimseungsu-zzz/easy-uds/actions/runs/31924819563).
-For the 1.1 development changes, Visual Studio 2022/MSVC built the Debug
+For the 1.1 changes, Visual Studio 2022/MSVC built the Debug
 configuration locally and the Windows smoke passed, including peer-PID
 authorization and a live Win32 event HANDLE transfer. WSL2/GCC also built the
 Linux configuration with warnings as errors; all 11 CTest cases passed. A

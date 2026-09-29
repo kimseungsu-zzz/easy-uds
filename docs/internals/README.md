@@ -1,6 +1,6 @@
 # Internals and history
 
-The current development contract is documented in the
+The current API contract is documented in the
 [API reference](../api/README.md), [compatibility and platform contract](../api/compatibility.md),
 and [platform support matrix](../platform-support.md). These pages describe
 the current implementation; the documents under History and Release records
@@ -31,6 +31,7 @@ preserve earlier decisions and validation results.
 - [0.8.0 release](../releases/v0.8.0.md)
 - [0.8.0-rc.1 candidate](../releases/v0.8.0-rc.1.md)
 - [0.9.0 stabilization release](../releases/v0.9.0.md)
+- [1.1.0 release](../releases/v1.1.0.md)
 - [1.0.0 stable release](../releases/v1.0.0.md)
 - [Public API freeze audit](../api/public-api-audit.md)
 - [Simple API design audit](../design/simple-api.md)
